@@ -20,7 +20,7 @@
     "noUnusedParameters": true,
     "noFallthroughCasesInSwitch": true,
 
-    /* Alias */
+    // Alias @/* — baseUrl omis : déprécié (TS5101) en TypeScript 6, les chemins relatifs au tsconfig suffisent
     "paths": { "@/*": ["./src/*"] }
   },
   "include": ["src"],
