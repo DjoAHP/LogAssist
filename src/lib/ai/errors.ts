@@ -14,8 +14,10 @@ export class ApiError extends Error {
   }
 }
 
+// Le suffixe (?:\b|_) étend \b : snake_case (insufficient_quota) et codes réseau
+// (EAI_AGAIN) n'ont pas de \b devant un underscore, l'underscore est un caractère de mot.
 const QUOTA_HINTS = /\b(quota|credit|billing|insufficient)(?:\b|_)/i
-const IMAGE_HINTS = /\b(image|vision|multimod)(?:\b|_)/i
+const IMAGE_HINTS = /\b(image|vision|multimodal?)(?:\b|_)/i
 const NETWORK_HINTS =
   /\b(getaddrinfo|enotfound|econnrefused|etimedout|econnreset|eai_again|dns|socket|tls|certificate|fetch failed)(?:\b|_)/i
 

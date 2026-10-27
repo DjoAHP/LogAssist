@@ -25,6 +25,9 @@ describe("normalizeHttpStatus", () => {
   it("400 avec image dans le corps → image_unsupported", () => {
     expect(normalizeHttpStatus(400, "image not supported").kind).toBe("image_unsupported")
   })
+  it("400 avec \"multimodal\" dans le corps → image_unsupported", () => {
+    expect(normalizeHttpStatus(400, "Multimodal inputs not supported").kind).toBe("image_unsupported")
+  })
   it("400 sans motif connu → unknown avec détail", () => {
     const e = normalizeHttpStatus(400, '{"error": {"message": "foo"}}')
     expect(e.kind).toBe("unknown")
