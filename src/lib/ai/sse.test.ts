@@ -76,6 +76,24 @@ describe("parseSseStream", () => {
     ])
   })
 
+  it("CRLF à cheval entre 2 chunks (rétention du \\r) → 2 événements, pas de faux séparateur", async () => {
+    // Séparateur "\r\n\r\n" coupé en plein milieu : chunk1 se termine par un "\r" nu
+    // (retenu : possible 1re moitié d'un "\r\n"), chunk2 complète avec "\n"
+    const enc = new TextEncoder()
+    const stream = new ReadableStream<Uint8Array>({
+      start(c) {
+        c.enqueue(enc.encode("data: {a}\r\n\r"))
+        c.enqueue(enc.encode("\ndata: {b}\n\n"))
+        c.close()
+      },
+    })
+    const out: SseChunk[] = []
+    await parseSseStream(stream.getReader(), (c) => {
+      out.push(c)
+    })
+    expect(out).toEqual([{ event: null, data: "{a}" }, { event: null, data: "{b}" }])
+  })
+
   it("fragment UTF-8 multi-octets coupé au milieu (é) → reconstitué", async () => {
     const enc = new TextEncoder()
     const bytes = enc.encode('data: {"t":"café"}\n\n')
