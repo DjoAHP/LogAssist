@@ -68,6 +68,32 @@ describe("parseSseStream", () => {
     expect(order).toEqual(["a", "b"])
   })
 
+  it("CRLF → 2 chunks (fins de ligne \\r\\n normalisées par partie)", async () => {
+    const chunks = await collect(["data: {a}\r\n\r\ndata: [DONE]\r\n\r\n"])
+    expect(chunks).toEqual([
+      { event: null, data: "{a}" },
+      { event: null, data: "[DONE]" },
+    ])
+  })
+
+  it("fragment UTF-8 multi-octets coupé au milieu (é) → reconstitué", async () => {
+    const enc = new TextEncoder()
+    const bytes = enc.encode('data: {"t":"café"}\n\n')
+    const cut = bytes.findIndex((b) => b === 0xc3) + 1
+    const stream = new ReadableStream<Uint8Array>({
+      start(c) {
+        c.enqueue(bytes.slice(0, cut))
+        c.enqueue(bytes.slice(cut))
+        c.close()
+      },
+    })
+    const out: SseChunk[] = []
+    await parseSseStream(stream.getReader(), (c) => {
+      out.push(c)
+    })
+    expect(out).toEqual([{ event: null, data: '{"t":"café"}' }])
+  })
+
   it("aucun événement data → onChunk jamais appelé", async () => {
     const onChunk = vi.fn()
     await parseSseStream(streamFrom([": commentaire seul\n\nevent: fin\n\n"]), onChunk)

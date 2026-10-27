@@ -243,6 +243,28 @@ describe("createOpenAICompatible — stream", () => {
     expect(err.detail).toBe("boom consommateur")
   })
 
+  it("stream : un throw du consommateur dans onDone → rejection à l'appelant, onError JAMAIS appelé (critère 5 bis)", async () => {
+    const stream = sseStream([
+      `data: {"choices":[{"delta":{"content":"un"}}]}${SSE}`,
+      `data: {"choices":[{"delta":{"content":"deux"}}]}${SSE}`,
+    ])
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(makeRes({ body: stream })))
+
+    const onDelta = vi.fn()
+    const onDone = vi.fn(() => {
+      throw new Error("boom onDone")
+    })
+    const onError = vi.fn()
+    const adapter = createOpenAICompatible(CFG)
+    const req: ChatRequest = { messages: [{ role: "user", content: "hi" }] }
+
+    await expect(
+      adapter.stream(req, "K", "m", { onDelta, onDone, onError }, new AbortController().signal),
+    ).rejects.toThrow("boom onDone")
+    expect(onDelta).toHaveBeenCalledTimes(2)
+    expect(onError).not.toHaveBeenCalled()
+  })
+
   it("stream aborté → onError avec AbortError (pas ApiError)", async () => {
     const controller = new AbortController()
     const abortErr = new DOMException("This operation was aborted", "AbortError")
