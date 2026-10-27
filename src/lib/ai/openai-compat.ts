@@ -1,4 +1,5 @@
 import { ApiError, normalizeHttpStatus, normalizeNetworkError } from "./errors"
+import { parseSseStream } from "./sse"
 import type { ChatRequest, ProviderConfig, StreamCallbacks } from "./types"
 
 export interface IProvider {
@@ -57,6 +58,7 @@ export function createOpenAICompatible(cfg: ProviderConfig): IProvider {
       const start = performance.now()
       let firstTokenMs = 0
       let acc = ""
+      let reader: ReadableStreamDefaultReader<Uint8Array> | null = null
       try {
         const res = await chatRequest(req, apiKey, modelId, true, signal)
         if (!res.ok) {
@@ -64,38 +66,42 @@ export function createOpenAICompatible(cfg: ProviderConfig): IProvider {
           throw normalizeHttpStatus(res.status, body, retryAfterMs(res.headers))
         }
         if (!res.body) throw new ApiError("unknown", "Réponse vide du fournisseur")
-        const reader = res.body.getReader()
-        const decoder = new TextDecoder()
-        let buf = ""
-        for (;;) {
-          const { done, value } = await reader.read()
-          if (done) break
-          buf += decoder.decode(value, { stream: true })
-          const lines = buf.split("\n")
-          buf = lines.pop() ?? ""
-          for (const line of lines) {
-            const clean = line.replace(/^data: /, "").trim()
-            if (!clean || clean === "[DONE]") continue
-            try {
-              const chunk = JSON.parse(clean)
-              const delta: string = chunk?.choices?.[0]?.delta?.content ?? ""
-              if (delta) {
-                if (!firstTokenMs) {
-                  firstTokenMs = performance.now() - start
-                  cb.onFirstToken?.()
-                }
-                acc += delta
-                cb.onDelta?.(delta)
+        reader = res.body.getReader()
+        await parseSseStream(reader, (chunk) => {
+          if (chunk.data === "[DONE]") return
+          // Ligne non-JSON (keep-alive restant, commentaire SSE) : ignorée définitivement.
+          // Note critère 5 bis : si le consommateur throw dans onDelta, l'exception
+          // est absorbée par le catch global ci-dessous → onError (comportement documenté).
+          try {
+            const json = JSON.parse(chunk.data)
+            const delta: string = json?.choices?.[0]?.delta?.content ?? ""
+            if (delta) {
+              if (!firstTokenMs) {
+                firstTokenMs = performance.now() - start
+                cb.onFirstToken?.()
               }
-            } catch {
-              // ligne partielle ignorée — sera complétée par le buffer au prochain read
+              acc += delta
+              cb.onDelta?.(delta)
             }
+          } catch {
+            /* ignoré : ligne non-JSON (keep-alive, commentaire SSE) */
           }
-        }
-        cb.onDone?.({ text: acc, firstTokenMs, totalMs: performance.now() - start })
+        })
       } catch (e: unknown) {
-        cb.onError?.(e instanceof Error ? e : new Error(String(e)))
+        // Critère 1 : erreurs réseau normalisées ; critère 5 : abort passthrough
+        if (e instanceof ApiError) cb.onError?.(e)
+        else if (e instanceof Error && e.name === "AbortError") cb.onError?.(e)
+        else cb.onError?.(normalizeNetworkError(e))
+        return
+      } finally {
+        // Critère 5 : libérer le reader si on a décroché en cours
+        // (cancel sur un stream déjà consommé = no-op sûr)
+        if (reader) reader.cancel().catch(() => {})
       }
+      // Critère 5 bis : onDone hors du try/catch — si le consommateur throw dans
+      // onDone, l'exception remonte au consommateur sans déclencher onError
+      // (pas de onError après un onDone partiel).
+      cb.onDone?.({ text: acc, firstTokenMs, totalMs: performance.now() - start })
     },
 
     async testConnection(apiKey) {

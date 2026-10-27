@@ -40,6 +40,9 @@ function sseStream(chunks: string[]): ReadableStream {
   })
 }
 
+// Format SSE standard : chaque événement est terminé par une ligne vide ("\n\n")
+const SSE = "\n\n"
+
 afterEach(() => {
   vi.unstubAllGlobals()
 })
@@ -153,9 +156,9 @@ describe("createOpenAICompatible — complete", () => {
 describe("createOpenAICompatible — stream", () => {
   it("chunks SSE → onFirstToken 1×, onDelta 2×, onDone text 'Bonjour', pas onError", async () => {
     const stream = sseStream([
-      'data: {"choices":[{"delta":{"content":"Bonj"}}]}\n',
-      'data: {"choices":[{"delta":{"content":"our"}}]}\n',
-      "data: [DONE]\n",
+      `data: {"choices":[{"delta":{"content":"Bonj"}}]}${SSE}`,
+      `data: {"choices":[{"delta":{"content":"our"}}]}${SSE}`,
+      `data: [DONE]${SSE}`,
     ])
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(makeRes({ body: stream })))
 
@@ -192,6 +195,23 @@ describe("createOpenAICompatible — stream", () => {
     const err = onError.mock.calls[0][0]
     expect(err).toBeInstanceOf(ApiError)
     expect(err.kind).toBe("auth")
+  })
+
+  it("stream fetch rejeté (fetch failed) → onError ApiError kind network (critère 1)", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("fetch failed")))
+
+    const onDone = vi.fn()
+    const onError = vi.fn()
+    const adapter = createOpenAICompatible(CFG)
+    const req: ChatRequest = { messages: [{ role: "user", content: "hi" }] }
+
+    await adapter.stream(req, "K", "m", { onDone, onError }, new AbortController().signal)
+
+    expect(onDone).not.toHaveBeenCalled()
+    expect(onError).toHaveBeenCalledTimes(1)
+    const err = onError.mock.calls[0][0]
+    expect(err).toBeInstanceOf(ApiError)
+    expect(err.kind).toBe("network")
   })
 
   it("stream aborté → onError avec AbortError (pas ApiError)", async () => {
