@@ -17,7 +17,7 @@ describe("conversations.create", () => {
     const row = await conversations.create("Apprendre HISE")
     expect(row.title).toBe("Apprendre HISE")
     expect(row.id).toMatch(/^[0-9a-f-]{36}$/)
-    const [sql, bind] = mockDb.execute.mock.calls[0]
+    const [sql, bind] = mockDb.execute.mock.calls.find(([s]) => (s as string).includes("INSERT INTO conversations"))!
     expect(sql).toContain("INSERT INTO conversations")
     expect(bind[0]).toBe(row.id)
   })
