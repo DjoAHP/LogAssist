@@ -69,22 +69,24 @@ export function createOpenAICompatible(cfg: ProviderConfig): IProvider {
         reader = res.body.getReader()
         await parseSseStream(reader, (chunk) => {
           if (chunk.data === "[DONE]") return
-          // Ligne non-JSON (keep-alive restant, commentaire SSE) : ignorée définitivement.
-          // Note critère 5 bis : si le consommateur throw dans onDelta, l'exception
-          // est absorbée par le catch global ci-dessous → onError (comportement documenté).
+          let json: unknown
           try {
-            const json = JSON.parse(chunk.data)
-            const delta: string = json?.choices?.[0]?.delta?.content ?? ""
-            if (delta) {
-              if (!firstTokenMs) {
-                firstTokenMs = performance.now() - start
-                cb.onFirstToken?.()
-              }
-              acc += delta
-              cb.onDelta?.(delta)
-            }
+            // Ligne non-JSON (keep-alive restant, commentaire SSE) : ignorée définitivement.
+            // Try séparé : SEUL le parse JSON est absorbé — un throw du consommateur
+            // dans onDelta/onFirstToken remonte au catch global → onError, stream interrompu.
+            json = JSON.parse(chunk.data)
           } catch {
-            /* ignoré : ligne non-JSON (keep-alive, commentaire SSE) */
+            return
+          }
+          const delta: string =
+            (json as { choices?: { delta?: { content?: string } }[] })?.choices?.[0]?.delta?.content ?? ""
+          if (delta) {
+            if (!firstTokenMs) {
+              firstTokenMs = performance.now() - start
+              cb.onFirstToken?.()
+            }
+            acc += delta
+            cb.onDelta?.(delta)
           }
         })
       } catch (e: unknown) {

@@ -214,6 +214,35 @@ describe("createOpenAICompatible — stream", () => {
     expect(err.kind).toBe("network")
   })
 
+  it("stream : un throw du consommateur dans onDelta → onError (pas d'absorption silencieuse)", async () => {
+    const stream = sseStream([
+      `data: {"choices":[{"delta":{"content":"un"}}]}${SSE}`,
+      `data: {"choices":[{"delta":{"content":"deux"}}]}${SSE}`,
+    ])
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(makeRes({ body: stream })))
+
+    let calls = 0
+    const onFirstToken = vi.fn()
+    const onDelta = vi.fn(() => {
+      calls++
+      if (calls === 2) throw new Error("boom consommateur")
+    })
+    const onDone = vi.fn()
+    const onError = vi.fn()
+    const adapter = createOpenAICompatible(CFG)
+    const req: ChatRequest = { messages: [{ role: "user", content: "hi" }] }
+
+    await adapter.stream(req, "K", "m", { onFirstToken, onDelta, onDone, onError }, new AbortController().signal)
+
+    expect(onDelta).toHaveBeenCalledTimes(2)
+    expect(onDone).not.toHaveBeenCalled()
+    expect(onError).toHaveBeenCalledTimes(1)
+    const err = onError.mock.calls[0][0]
+    expect(err).toBeInstanceOf(ApiError)
+    expect(err.kind).toBe("unknown")
+    expect(err.detail).toBe("boom consommateur")
+  })
+
   it("stream aborté → onError avec AbortError (pas ApiError)", async () => {
     const controller = new AbortController()
     const abortErr = new DOMException("This operation was aborted", "AbortError")
