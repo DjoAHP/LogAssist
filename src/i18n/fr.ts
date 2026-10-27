@@ -1,5 +1,5 @@
 export const fr = {
-  app: { title: "LogAssist" },
+  app: { title: "LogAssist", subtitle: "Assistant IA pour apprendre des logiciels" },
   sidebar: {
     newConversation: "Nouvelle conversation",
     search: "Rechercher…",
