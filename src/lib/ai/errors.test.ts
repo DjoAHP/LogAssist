@@ -33,13 +33,21 @@ describe("normalizeHttpStatus", () => {
 })
 
 describe("normalizeNetworkError", () => {
-  it("ECONNREFUSED → network", () => { expect(normalizeNetworkError(new Error("fetch failed: ECONNREFUSED")).kind).toBe("network") })
+  it("ECONNREFUSED → network", () => {
+    expect((normalizeNetworkError(new Error("fetch failed: ECONNREFUSED")) as ApiError).kind).toBe("network")
+  })
+  it("getaddrinfo ENOTFOUND → network", () => {
+    expect((normalizeNetworkError(new Error("getaddrinfo ENOTFOUND api.ex.test")) as ApiError).kind).toBe("network")
+  })
   it("AbortError propagé tel quel (flux interrompu volontaire ≠ erreur)", () => {
     const abort = new Error("aborted"); abort.name = "AbortError"
     expect(normalizeNetworkError(abort)).toBe(abort)
   })
+  it("message disconnected sans hint réseau → unknown (plus network)", () => {
+    expect((normalizeNetworkError(new Error("session disconnected")) as ApiError).kind).toBe("unknown")
+  })
   it("erreur inconnue → kind unknown", () => {
-    expect(normalizeNetworkError("boom").kind).toBe("unknown")
+    expect((normalizeNetworkError("boom") as ApiError).kind).toBe("unknown")
   })
 })
 
