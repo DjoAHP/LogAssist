@@ -15,6 +15,8 @@ export const fr = {
     copy: "Copier",
     regenerate: "Régénérer",
     noConversation: "Sélectionnez ou créez une conversation",
+    interrupted: "Interrompu",
+    configureProvider: "Configurez un fournisseur dans les réglages (prochaine étape) pour discuter.",
   },
   errors: {
     auth: "Clé API invalide ou expirée",

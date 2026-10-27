@@ -10,6 +10,7 @@ export default {
         foreground: "hsl(var(--foreground))",
         muted: "hsl(var(--muted))",
         "muted-foreground": "hsl(var(--muted-foreground))",
+        destructive: "hsl(var(--destructive))",
       },
     },
   },
