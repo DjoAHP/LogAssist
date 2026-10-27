@@ -166,7 +166,7 @@ git commit -m "chore: scaffolding Tauri 2 + React + Tailwind + i18n fr"
 ### Task 2 : Vitest + test de sanité
 
 **Files:**
-- Create: `vitest.config.ts`, `src/lib/ai/__tests__/errors.test.ts` (créée en Task 3)
+- Create: `vitest.config.ts`, test d'erreurs **co-localisé nouveau en Task 3 : `src/lib/ai/errors.test.ts`**
 - Modify: `package.json` (scripts)
 
 **Interfaces:**
@@ -241,11 +241,12 @@ export class ApiError extends Error {
   retryAfterMs?: number
   constructor(kind, message, detail?, retryAfterMs?)
 }
-export function normalizeHttpStatus(status: number, body: string): ApiError
-export function normalizeNetworkError(err: unknown): ApiError // AbortError propagée telle quelle ; écart Task 3 (TS) assumé : retour ApiError au lieu de Error
+export function normalizeHttpStatus(status: number, body: string, retryAfterMs?: number): ApiError
+export function normalizeNetworkError(err: unknown): ApiError | Error   // ApiError normalisée, ou l'AbortError d'origine (chaînes inaltérée) — le consommateur teste e.name === "AbortError"
+export const API_ERROR_KINDS: ApiErrorKind[]                            // liste exportée des 8 kinds (garde-fou i18n)
 export interface ChatMessage { role: "system" | "user" | "assistant"; content: string; images?: { base64: string; mimeType: string }[] }
 export interface ChatRequest { messages: ChatMessage[]; timeoutMs?: number }
-export interface StreamCallbacks { onFirstToken?: () => void; onDelta?: (text: string) => void; onDone?: (final: { text: string; firstTokenMs: number; totalMs: number }) => void; onError?: (e: ApiError) => void }
+export interface StreamCallbacks { onFirstToken?: () => void; onDelta?: (text: string) => void; onDone?: (final: { text: string; firstTokenMs: number; totalMs: number }) => void; onError?: (e: Error) => void } // ApiError ou AbortError — TODO Task 5 : distinguer timeout (AbortSignal.timeout) et interruption volontaire via signal.reason, sinon Task 9 affichera un timeout comme interruption silencieuse
 export interface ProviderConfig { id: string; name: string; apiFamily: "openai" | "gemini"; baseUrl: string; secretRef: string }
 export interface ModelConfig { id: string; providerId: string; modelId: string; supportsImages: boolean; isDefault: boolean }
 ```
@@ -334,7 +335,7 @@ export interface StreamCallbacks {
   onFirstToken?: () => void
   onDelta?: (text: string) => void
   onDone?: (stats: CompletionStats) => void
-  onError?: (e: Error) => void // ApiError ou AbortError
+  onError?: (e: Error) => void // ApiError ou AbortError — TODO Task 5 : distinguer timeout (AbortSignal.timeout) et interruption volontaire via signal.reason
 }
 
 export interface ProviderConfig {
