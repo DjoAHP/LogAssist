@@ -215,6 +215,8 @@ describe("sanité", () => {
 Run: `npm test`
 Expected: `1 passed`. Supprimer ensuite `src/sanity.test.ts`.
 
+*(Note controller post-revue : le script `test` porte temporairement `--passWithNoTests` pour rester vert entre Task 2 et 3 ; à retirer dès le premier test permanent de Task 3. Le pattern `include` des tests acceptera aussi les `.tsx` et `vitest.config.ts` sera ajouté à `tsconfig.node.json` — suivi fait en Task 3.)*
+
 ```powershell
 git add -A
 git commit -m "chore: configuration Vitest"
@@ -240,7 +242,7 @@ export class ApiError extends Error {
   constructor(kind, message, detail?, retryAfterMs?)
 }
 export function normalizeHttpStatus(status: number, body: string): ApiError
-export function normalizeNetworkError(err: unknown): ApiError
+export function normalizeNetworkError(err: unknown): ApiError // AbortError propagée telle quelle ; écart Task 3 (TS) assumé : retour ApiError au lieu de Error
 export interface ChatMessage { role: "system" | "user" | "assistant"; content: string; images?: { base64: string; mimeType: string }[] }
 export interface ChatRequest { messages: ChatMessage[]; timeoutMs?: number }
 export interface StreamCallbacks { onFirstToken?: () => void; onDelta?: (text: string) => void; onDone?: (final: { text: string; firstTokenMs: number; totalMs: number }) => void; onError?: (e: ApiError) => void }
