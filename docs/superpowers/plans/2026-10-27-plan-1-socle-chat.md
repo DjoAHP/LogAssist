@@ -1014,6 +1014,13 @@ export function parseSseStream(reader: ReadableStreamDefaultReader<Uint8Array>, 
 
 Objectif : extraire le parsing SSE réutilisable (Gemini en Plan 2 le réutilisera), le refactoriser depuis `openai-compat.ts`.
 
+**Critères d'acceptation reportés de la revue Task 5 (OBLIGATOIRES) :**
+1. Erreurs réseau normalisées aussi dans `stream` : `if (e instanceof ApiError || e.name === "AbortError") throw e; throw normalizeNetworkError(e)` (le `fetch failed` en streaming doit donner `ApiError` kind `network`, comme dans `complete`).
+2. Flush final : après la boucle, traiter le `buf` résiduel (dernier événement sans `\n`) + `decoder.decode()` final (fragments UTF-8). Test : « dernier événement SSE sans `\n` final → delta quand même délivré ».
+3. Regex `data:` sans espace obligatoire : `/^data:/` + `trim()` (certaines impléérations émettent `data:[DONE]`). Test du cas.
+4. Commentaire corrigé : ligne non-JSON = keep-alive ignorée définitivement (pas « complétée au prochain read »).
+5. Pas de fuite de reader : `try { loop } finally { reader.cancel().catch(()=>{}) }` si la boucle se termine par exception après `getReader()`. Séparer exceptions de transport (→ `onError`) des exceptions de callbacks (ne pas appeler `onError` après un `onDone` partiel).
+
 - [ ] **Step 1: Écrire le test qui échoue (mock ReadableStream)**
 
 `src/lib/ai/sse.test.ts` :
