@@ -6,7 +6,7 @@
 
 **Architecture:** Frontend React/TS (UI + logique métier + adaptateur API en `src/lib/`), bridge Tauri minimal pour secrets/exports, SQLite via `tauri-plugin-sql`, secrets via crate `keyring`. Prompt système = instructions générales + profil (V1 : un seul « Apprentissage ») + projet (ultérieur).
 
-**Tech Stack:** Tauri 2 · React 18 · TypeScript (strict) · Vite · Tailwind CSS 3.4 · shadcn/ui · lucide-react · Vitest · tauri-plugin-sql v2 · keyring crate v3
+**Tech Stack:** Tauri 2 · React 19 (19.1, fourni par le scaffold — écart vs React 18 initial assumé) · TypeScript 6 (strict) · Vite 8 · Tailwind CSS 3.4 · shadcn/ui (variables + cn(), init explicite en Task 9) · lucide-react · Vitest · tauri-plugin-sql v2 · keyring crate v3. Note : `npm`/`node` doivent TOUJOURS être lancés via `powershell.exe` (node_modules à binaires Windows).
 
 ## Global Constraints
 
@@ -26,7 +26,7 @@
 
 **Files:**
 - Create: projet complet via `npm create tauri-app` (template `react-ts`), puis config Tailwind + shadcn
-- Modify: `src-tauri/tauri.conf.json` (identifiant app, taille fenêtre)
+- Modify: `src-tauri/tauri.conf.json` (identifiant app, taille fenêtre). **En complément (revue Task 1)** : Task 9 doit inclure l'init shadcn réel — variables CSS `--border`/`--background`/`--foreground` dans `index.css`, `src/lib/utils.ts` (cn) via `npx shadcn@latest init` ou manuellement + `components.json` (dép. clsx/tailwind-merge/cva déjà installées mais dormantes) ; et supprimer les résidus scaffold : `src/App.css`, `src/assets/react.svg`, favicon `public/vite.svg` dans `index.html` ; penser à durcir le CSP (`csp: null` par défaut du scaffold → `connect-src` fournisseurs) au moment du branchement réseau (Task 9/10).
 - Create: `src/i18n/fr.ts`
 
 **Interfaces:**
