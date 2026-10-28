@@ -1,18 +1,7 @@
 import { describe, it, expect } from "vitest"
 import { API_ERROR_KINDS } from "@/lib/ai/types"
+import { KIND_TO_KEY } from "@/lib/ai/errors"
 import { t } from "@/i18n/fr"
-
-// Mapping kind -> clé i18n (fr.ts utilise du camelCase)
-const KIND_TO_KEY: Record<string, keyof typeof t.errors> = {
-  auth: "auth",
-  model_not_found: "modelNotfound",
-  network: "network",
-  rate_limit: "rateLimit",
-  quota: "quota",
-  unavailable: "unavailable",
-  image_unsupported: "imageUnsupported",
-  unknown: "unknown",
-}
 
 describe("garde-fou i18n des erreurs", () => {
   it("chaque ApiErrorKind a une entrée traduite", () => {
