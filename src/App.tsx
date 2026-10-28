@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useState } from "react"
 import { t } from "@/i18n/fr"
 import { conversations } from "@/lib/db/conversations"
 import { getActiveModel, type ActiveModel } from "@/lib/db/activeModel"
@@ -20,7 +20,7 @@ function App() {
       .catch(console.error)
   }, [])
 
-  const modelSelection = useMemo(() => activeModel, [activeModel])
+  const modelSelection = activeModel
   const { vm, busy, send, interrupt, load } = useChat(modelSelection)
 
   // Chargement de l'historique à chaque changement de conversation active.
@@ -28,6 +28,14 @@ function App() {
     if (!activeId) return
     void load(activeId).catch(console.error)
   }, [activeId, load])
+
+  // Reload post-stream (done/erreur/interruption) : le useChat ne réordonne pas
+  // les inserts async (onDone/onError s'exécutent en tâche de fond après la
+  // résolution du stream) — on recharge la conversation active depuis la DB
+  // dès que busy repasse à false pour garantir affiché = persisté.
+  useEffect(() => {
+    if (!busy && activeId) void load(activeId).catch(console.error)
+  }, [busy])
 
   const onNew = useCallback(async () => {
     const row = await conversations.create()

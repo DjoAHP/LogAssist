@@ -37,6 +37,8 @@ export function Sidebar({ conversations, activeId, onSelect, onNew, onDelete }: 
             key={c.id}
             role="button"
             tabIndex={0}
+            aria-label={c.title.trim() || t.sidebar.newConversation}
+            aria-current={c.id === activeId ? "true" : undefined}
             onKeyDown={(e) => {
               if (e.key === "Enter" || e.key === " ") onSelect(c.id)
             }}
@@ -48,7 +50,7 @@ export function Sidebar({ conversations, activeId, onSelect, onNew, onDelete }: 
             <span className="truncate">{c.title.trim() || t.sidebar.newConversation}</span>
             <button
               aria-label={t.sidebar.delete}
-              className="opacity-0 group-hover:opacity-60 hover:!opacity-100"
+              className="opacity-0 focus-visible:opacity-100 group-hover:opacity-60 hover:!opacity-100"
               onClick={(e) => {
                 e.stopPropagation()
                 onDelete(c.id)

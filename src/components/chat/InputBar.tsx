@@ -31,6 +31,9 @@ export function InputBar({ disabled = false, busy = false, onSend, onInterrupt }
   }
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    // IME en cours (saisie japonaise/coréenne…) : Enter valide la composition,
+    // pas l'envoi du message.
+    if (e.nativeEvent.isComposing) return
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault()
       submit()

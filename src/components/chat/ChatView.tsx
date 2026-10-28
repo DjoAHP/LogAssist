@@ -27,8 +27,10 @@ export function ChatView({ vm, hasModel, showConversation }: Props) {
   const last = vm[vm.length - 1]
 
   // Auto-scroll à chaque nouveau message ET pendant le streaming du dernier.
+  // "auto" partout : "smooth" pendant le streaming (mises à jour ~10 Hz) crée
+  // des animations concurrentes qui ratent le bas de page.
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" })
+    bottomRef.current?.scrollIntoView({ behavior: "auto", block: "end" })
   }, [vm.length, last?.content])
 
   if (!showConversation) {
@@ -41,7 +43,7 @@ export function ChatView({ vm, hasModel, showConversation }: Props) {
 
   return (
     <div className="flex flex-1 flex-col overflow-hidden">
-      <div className="flex-1 space-y-4 overflow-y-auto p-4">
+      <div role="log" aria-live="polite" className="flex-1 space-y-4 overflow-y-auto p-4">
         {vm.length === 0 && !hasModel && (
           <p className="text-sm text-muted-foreground">{t.chat.configureProvider}</p>
         )}

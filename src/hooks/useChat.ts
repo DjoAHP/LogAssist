@@ -33,9 +33,14 @@ export function useChat(modelSelection: { provider: ProviderConfig; modelId: str
   // des hooks. Un seul stream actif à la fois (gate busy) → un ref partagé sûr.
   const accRef = useRef("")
   const abortRef = useRef<AbortController | null>(null)
+  const loadSeqRef = useRef(0)
 
   const load = useCallback(async (conversationId: string) => {
+    // Token de séquence : une réponse de load obsolète (switch rapide entre
+    // conversations, rechargements concurrents) ne doit jamais écraser la vm.
+    const seq = ++loadSeqRef.current
     const rows = await messagesDb.listByConversation(conversationId)
+    if (seq !== loadSeqRef.current) return
     setVm(rows.map((r): ChatMessageVM => mapRow(r)))
   }, [])
 
@@ -93,27 +98,30 @@ export function useChat(modelSelection: { provider: ProviderConfig; modelId: str
             },
             // Insertions async en base : onDone résout déjà le stream, l'await
             // se poursuit en tâche de fond — attrapé localement pour éviter
-            // tout unhandled rejection.
+            // tout unhandled rejection. Cap défensif : on lit accRef une seule
+            // fois (une interruption simultanée ne peut plus muter le cap).
             onDone: ({ text, totalMs }) => {
+              const acc = accRef.current
               void (async () => {
                 const id = await messagesDb.insert({
-                  conversation_id: conversationId, role: "assistant", content: text,
+                  conversation_id: conversationId, role: "assistant", content: text || acc,
                   attachments: "[]", model_label: label, latency_ms: Math.round(totalMs), error: null,
                 })
-                upsertLast({ id, content: text, latencyMs: Math.round(totalMs) })
+                upsertLast({ id, content: text || acc, latencyMs: Math.round(totalMs) })
               })().catch(console.error)
             },
             onError: (e) => {
+              const acc = accRef.current
               void (async () => {
                 if (isAbort(e)) {
                   // Interruption volontaire : contenu accumulé conservé et
                   // persisté, marqué « interrompu », pas de bulle d'erreur.
                   const id = await messagesDb.insert({
-                    conversation_id: conversationId, role: "assistant", content: accRef.current,
+                    conversation_id: conversationId, role: "assistant", content: acc,
                     attachments: "[]", model_label: label, latency_ms: null,
                     error: JSON.stringify({ interrupted: true }),
                   })
-                  upsertLast({ id, content: accRef.current, interrupted: true })
+                  upsertLast({ id, content: acc, interrupted: true })
                   return
                 }
                 const api = e as ApiError
@@ -124,11 +132,11 @@ export function useChat(modelSelection: { provider: ProviderConfig; modelId: str
                 }
                 upsertLast({ apiError: payload, interrupted: false })
                 const id = await messagesDb.insert({
-                  conversation_id: conversationId, role: "assistant", content: accRef.current,
+                  conversation_id: conversationId, role: "assistant", content: acc,
                   attachments: "[]", model_label: label, latency_ms: null,
                   error: JSON.stringify(payload),
                 })
-                upsertLast({ id, content: accRef.current })
+                upsertLast({ id, content: acc })
               })().catch(console.error)
             },
           },
