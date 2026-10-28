@@ -43,13 +43,19 @@ describe("providers", () => {
     expect(deleteCall![1]).toEqual(["p1"])
   })
 
-  it("setDefaultModel désactive les autres defaults du provider avant de setter", async () => {
+  it("setDefaultModel désactive tous les autres defaults (invariant global) avant de setter", async () => {
     mockExecute.mockResolvedValue(undefined)
     mockSelect.mockResolvedValueOnce([{ provider_id: "p1" }])
     await providers.setDefaultModel("m1")
     const calls = mockExecute.mock.calls.map((c) => String(c[0]))
-    expect(calls[0]).toContain("UPDATE models SET is_default = 0 WHERE provider_id")
+    expect(calls[0]).toContain("UPDATE models SET is_default = 0 WHERE id != ?")
     expect(calls[1]).toContain("UPDATE models SET is_default = 1 WHERE id = ?")
+  })
+
+  it("setDefaultModel sur id inexistant ne modifie rien", async () => {
+    mockSelect.mockResolvedValueOnce([])
+    await providers.setDefaultModel("ghost")
+    expect(mockExecute).not.toHaveBeenCalled()
   })
 
   it("addModel insère avec supports_images heuristique", async () => {

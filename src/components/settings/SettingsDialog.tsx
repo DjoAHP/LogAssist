@@ -67,7 +67,7 @@ export function SettingsDialog({ onClose, onChanged }: Props) {
         ...s,
         [p.id]: res.ok
           ? { state: "ok" }
-          : { state: "fail", message: t.errors[KIND_TO_KEY[res.error!.kind] ?? "unknown"] },
+          : { state: "fail", message: t.errors[KIND_TO_KEY[res.error!.kind]] },
       }))
     } catch (e) {
       setTestStatus((s) => ({ ...s, [p.id]: { state: "fail", message: e instanceof Error ? e.message : String(e) } }))
@@ -83,6 +83,7 @@ export function SettingsDialog({ onClose, onChanged }: Props) {
   }
 
   const removeProvider = async (p: ProviderRow) => {
+    if (!window.confirm(t.settings.deleteConfirm)) return
     await providers.remove(p.id) // secret + cascade models via FK
     await afterChange()
   }
@@ -222,6 +223,7 @@ export function SettingsDialog({ onClose, onChanged }: Props) {
                               void addModel(p).catch(console.error)
                             }
                           }}
+                          aria-label={t.settings.addModel}
                           placeholder={t.settings.addModelPlaceholder}
                           className="w-48 rounded-md border border-border bg-transparent px-2 py-1 text-xs outline-none"
                         />

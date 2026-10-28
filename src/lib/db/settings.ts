@@ -1,3 +1,5 @@
+// Requis par V1.1 (réglages thème, sync etc.) — conservé testé pour éviter le
+// rework. Non utilisé en M1 : le modèle actif passe par is_default (activeModel).
 import { execute, select } from "./database"
 
 // Table settings existante (migrations.ts : key TEXT PK, value TEXT NOT NULL).

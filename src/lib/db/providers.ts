@@ -93,13 +93,13 @@ export const providers = {
   },
 
   async setDefaultModel(id: string): Promise<void> {
-    // Un seul default par provider : on éteint les autres d'abord, puis on
-    // allume la cible (l'ordre évite un instant sans default si le target
-    // était déjà le seul).
+    // Garde d'existence : un id fantôme ne doit rien muter.
     const rows = await select<{ provider_id: string }>("SELECT provider_id FROM models WHERE id = ?", [id])
-    const providerId = rows[0]?.provider_id
-    if (!providerId) return
-    await execute("UPDATE models SET is_default = 0 WHERE provider_id = ? AND id != ?", [providerId, id])
+    if (rows.length === 0) return
+    // is_default est GLOBAL (un seul modèle actif pour tout le chat) :
+    // on éteint tous les autres defaults, tous providers confondus, puis
+    // on allume la cible (l'ordre évite un instant sans default).
+    await execute("UPDATE models SET is_default = 0 WHERE id != ?", [id])
     await execute("UPDATE models SET is_default = 1 WHERE id = ?", [id])
   },
 }

@@ -6,8 +6,9 @@ export interface ActiveModel {
   modelId: string
 }
 
-// Lecture minimale du modèle actif (avant l'écran Fournisseurs de Task 10,
-// qui gérera la sélection via la table settings). Convention de secretRef
+// Lecture minimale du modèle actif. INVARIANT : is_default est GLOBAL (un seul
+// modèle actif pour tout le chat, cf providers.setDefaultModel) → le JOIN +
+// LIMIT 1 est déterministe : exactement 0 ou 1 ligne. Convention de secretRef
 // identique à secretRefFor() de Task 10 : logassist/provider/<id>.
 export async function getActiveModel(): Promise<ActiveModel | null> {
   const rows = await select<{

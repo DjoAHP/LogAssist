@@ -21,7 +21,6 @@ export const fr = {
   },
   settings: {
     title: "Réglages",
-    providers: "Fournisseurs",
     addProvider: "Ajouter un fournisseur",
     editProvider: "Modifier le fournisseur",
     name: "Nom",
@@ -34,6 +33,7 @@ export const fr = {
     cancel: "Annuler",
     edit: "Modifier",
     delete: "Supprimer",
+    deleteConfirm: "Supprimer ce fournisseur, ses modèles et sa clé du Credential Manager ?",
     test: "Tester la connexion",
     testing: "Test en cours…",
     ok: "Connexion réussie",
