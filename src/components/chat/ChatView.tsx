@@ -1,28 +1,22 @@
 import { useEffect, useRef } from "react"
 import { AlertTriangle } from "lucide-react"
 import { t } from "@/i18n/fr"
+import { KIND_TO_KEY } from "@/lib/ai/errors"
 import type { ChatMessageVM } from "@/hooks/useChat"
 
-// Mapping kind -> clé i18n (fr.ts utilise du camelCase ; le garde-fou
-// errors.i18n.test.ts garantit la complétude avec API_ERROR_KINDS).
-const KIND_TO_KEY: Record<string, keyof typeof t.errors> = {
-  auth: "auth",
-  model_not_found: "modelNotfound",
-  network: "network",
-  rate_limit: "rateLimit",
-  quota: "quota",
-  unavailable: "unavailable",
-  image_unsupported: "imageUnsupported",
-  unknown: "unknown",
+interface ModelSelectorProps {
+  options: { rowId: string; label: string; isDefault: boolean }[]
+  onSelect: (rowId: string) => void
 }
 
 interface Props {
   vm: ChatMessageVM[]
   hasModel: boolean
   showConversation: boolean
+  modelSelector?: ModelSelectorProps | null
 }
 
-export function ChatView({ vm, hasModel, showConversation }: Props) {
+export function ChatView({ vm, hasModel, showConversation, modelSelector }: Props) {
   const bottomRef = useRef<HTMLDivElement>(null)
   const last = vm[vm.length - 1]
 
@@ -52,6 +46,33 @@ export function ChatView({ vm, hasModel, showConversation }: Props) {
         ))}
         <div ref={bottomRef} />
       </div>
+      {modelSelector && modelSelector.options.length > 0 && <ModelSelectorFooter {...modelSelector} />}
+    </div>
+  )
+}
+
+// Sélecteur M1 en pied de vue : option value = ModelRow.id (nécessaire à
+// providers.setDefaultModel), label « Provider › modèle ». Liste vide → masqué.
+function ModelSelectorFooter({ options, onSelect }: ModelSelectorProps) {
+  const current = options.find((o) => o.isDefault) ?? options[0]
+  return (
+    <div className="flex items-center gap-2 border-t border-border px-4 py-2">
+      <label htmlFor="model-select" className="text-xs text-muted-foreground">
+        {t.chat.selectModel}
+      </label>
+      <select
+        id="model-select"
+        value={current?.rowId ?? ""}
+        onChange={(e) => onSelect(e.target.value)}
+        className="rounded-md border border-border bg-background px-2 py-1 text-xs outline-none"
+      >
+        {options.map((o) => (
+          <option key={o.rowId} value={o.rowId}>
+            {o.label}
+            {o.isDefault ? " ★" : ""}
+          </option>
+        ))}
+      </select>
     </div>
   )
 }

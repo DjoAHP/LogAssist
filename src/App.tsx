@@ -1,24 +1,74 @@
 import { useCallback, useEffect, useState } from "react"
+import { Settings as SettingsIcon } from "lucide-react"
 import { t } from "@/i18n/fr"
 import { conversations } from "@/lib/db/conversations"
 import { getActiveModel, type ActiveModel } from "@/lib/db/activeModel"
+import { providers, type ProviderRow, type ModelRow } from "@/lib/db/providers"
 import { useConversations } from "@/hooks/useConversations"
 import { useChat } from "@/hooks/useChat"
 import { Sidebar } from "@/components/sidebar/Sidebar"
 import { ChatView } from "@/components/chat/ChatView"
 import { InputBar } from "@/components/chat/InputBar"
+import { SettingsDialog } from "@/components/settings/SettingsDialog"
 
 function App() {
   const { list, refresh } = useConversations()
   const [activeId, setActiveId] = useState<string | null>(null)
   const [activeModel, setActiveModel] = useState<ActiveModel | null>(null)
+  const [modelOptions, setModelOptions] = useState<{ rowId: string; label: string; isDefault: boolean }[]>([])
+  const [settingsOpen, setSettingsOpen] = useState(false)
 
-  // Lecture du modèle actif (minimal avant Task 10 : modèle par défaut en base).
-  useEffect(() => {
+  // Lecture refetchable du modèle actif (erreurs → null : l'UI affiche
+  // l'état « non configuré » plutôt qu'un écran vide).
+  const refetchActiveModel = useCallback(() => {
     void getActiveModel()
       .then(setActiveModel)
-      .catch(console.error)
+      .catch((e) => {
+        console.error(e)
+        setActiveModel(null)
+      })
   }, [])
+
+  // Lecture des options du sélecteur : providers › modèles aplatis.
+  const refetchModelOptions = useCallback(() => {
+    void (async () => {
+      const providerRows: ProviderRow[] = await providers.list()
+      const modelLists: ModelRow[][] = await Promise.all(providerRows.map((p) => providers.listModels(p.id)))
+      setModelOptions(
+        providerRows.flatMap((p, i) =>
+          modelLists[i].map((m) => ({
+            rowId: m.id,
+            label: `${p.name} › ${m.model_id}`,
+            isDefault: m.is_default === 1,
+          })),
+        ),
+      )
+    })().catch(console.error)
+  }, [])
+
+  useEffect(() => {
+    refetchActiveModel()
+    refetchModelOptions()
+  }, [refetchActiveModel, refetchModelOptions])
+
+  // Rafraîchit providers + activeModel après tout changement du dialog.
+  const onSettingsChanged = useCallback(() => {
+    refetchActiveModel()
+    refetchModelOptions()
+  }, [refetchActiveModel, refetchModelOptions])
+
+  const onModelSelect = useCallback(
+    (rowId: string) => {
+      void providers
+        .setDefaultModel(rowId)
+        .then(() => {
+          refetchActiveModel()
+          refetchModelOptions()
+        })
+        .catch(console.error)
+    },
+    [refetchActiveModel, refetchModelOptions],
+  )
 
   const modelSelection = activeModel
   const { vm, busy, send, interrupt, load } = useChat(modelSelection)
@@ -70,14 +120,27 @@ function App() {
         onDelete={(id) => void onDelete(id).catch(console.error)}
       />
       <section className="flex flex-1 flex-col overflow-hidden">
-        <header className="border-b border-border px-4 py-3">
-          <h1 className="text-base font-semibold">{t.app.title}</h1>
-          <p className="text-xs text-muted-foreground">{t.app.subtitle}</p>
+        <header className="flex items-center justify-between border-b border-border px-4 py-3">
+          <div>
+            <h1 className="text-base font-semibold">{t.app.title}</h1>
+            <p className="text-xs text-muted-foreground">{t.app.subtitle}</p>
+          </div>
+          <button
+            aria-label={t.settings.title}
+            onClick={() => setSettingsOpen(true)}
+            className="rounded-md p-1.5 hover:bg-foreground/5"
+          >
+            <SettingsIcon className="size-4" />
+          </button>
         </header>
         <ChatView
           vm={vm}
           hasModel={modelSelection !== null}
           showConversation={activeId !== null}
+          modelSelector={{
+            options: modelOptions,
+            onSelect: onModelSelect,
+          }}
         />
         <InputBar
           disabled={activeId === null || modelSelection === null}
@@ -86,6 +149,9 @@ function App() {
           onInterrupt={interrupt}
         />
       </section>
+      {settingsOpen && (
+        <SettingsDialog onClose={() => setSettingsOpen(false)} onChanged={onSettingsChanged} />
+      )}
     </main>
   )
 }
