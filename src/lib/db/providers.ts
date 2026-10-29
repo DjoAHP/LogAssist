@@ -25,7 +25,9 @@ export function secretRefFor(providerId: string): string {
 
 // Compromis boundary cf errors.ts : (?:\b|_) étend \b aux snake_case
 // (o1_preview, gemini_flash…). Heuristique M1 : pas d'appel API de vérification.
-const IMAGE_MODEL_HINT = /(?:\b|_)(?:gpt-4|gpt-5|vision|claude|gemini|o1|o3)(?:\b|_)/i
+// Note: \b ne matche pas entre chiffre et lettre (ex: gpt-4o) → on utilise lookaround plus souple.
+// On inclut: gpt-4o, gpt-4, gpt-5, vision, vl (vision-language), nemotron, claude, gemini, o1, o3
+const IMAGE_MODEL_HINT = /(?:^|[\/\-_])(?:gpt-4o|gpt-4|gpt-5|vision|vl|nemotron|claude|gemini|o1|o3)(?:$|[\/\-_])/i
 
 function now(): string {
   return new Date().toISOString().slice(0, 19).replace("T", " ")
@@ -101,5 +103,36 @@ export const providers = {
     // on allume la cible (l'ordre évite un instant sans default).
     await execute("UPDATE models SET is_default = 0 WHERE id != ?", [id])
     await execute("UPDATE models SET is_default = 1 WHERE id = ?", [id])
+  },
+
+  // Seed OpenRouter par défaut si aucun fournisseur n'existe.
+  async seedDefaultProvider(): Promise<void> {
+    const existing = await providers.list()
+    if (existing.length > 0) return
+
+    const openrouter = await providers.create(
+      "OpenRouter",
+      "openai",
+      "https://openrouter.ai/api/v1",
+    )
+
+    // Quelques modèles populaires OpenRouter (l'utilisateur peut en ajouter d'autres)
+    const defaultModels = [
+      "openai/gpt-4o-mini",
+      "openai/gpt-4o",
+      "anthropic/claude-3.5-sonnet",
+      "google/gemini-2.0-flash-exp",
+      "meta-llama/llama-3.1-70b-instruct",
+    ]
+
+    for (const modelId of defaultModels) {
+      await providers.addModel(openrouter.id, modelId)
+    }
+
+    // Définit le premier modèle comme défaut
+    const models = await providers.listModels(openrouter.id)
+    if (models.length > 0) {
+      await providers.setDefaultModel(models[0].id)
+    }
   },
 }

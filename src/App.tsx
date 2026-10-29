@@ -5,18 +5,22 @@ import { conversations } from "@/lib/db/conversations"
 import { getActiveModel, type ActiveModel } from "@/lib/db/activeModel"
 import { providers, type ProviderRow, type ModelRow } from "@/lib/db/providers"
 import { useConversations } from "@/hooks/useConversations"
-import { useChat } from "@/hooks/useChat"
+import { useChat, type Attachment } from "@/hooks/useChat"
 import { Sidebar } from "@/components/sidebar/Sidebar"
 import { ChatView } from "@/components/chat/ChatView"
 import { InputBar } from "@/components/chat/InputBar"
 import { SettingsDialog } from "@/components/settings/SettingsDialog"
 
+const DEFAULT_SIDEBAR_WIDTH = 280
+
 function App() {
   const { list, refresh } = useConversations()
   const [activeId, setActiveId] = useState<string | null>(null)
   const [activeModel, setActiveModel] = useState<ActiveModel | null>(null)
-  const [modelOptions, setModelOptions] = useState<{ rowId: string; label: string; isDefault: boolean }[]>([])
+  const [modelOptions, setModelOptions] = useState<{ rowId: string; label: string; isDefault: boolean; supportsImages: boolean }[]>([])
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [sidebarWidth, setSidebarWidth] = useState(DEFAULT_SIDEBAR_WIDTH)
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
 
   // Lecture refetchable du modèle actif (erreurs → null : l'UI affiche
   // l'état « non configuré » plutôt qu'un écran vide).
@@ -40,6 +44,7 @@ function App() {
             rowId: m.id,
             label: `${p.name} › ${m.model_id}`,
             isDefault: m.is_default === 1,
+            supportsImages: m.supports_images === 1,
           })),
         ),
       )
@@ -47,8 +52,11 @@ function App() {
   }, [])
 
   useEffect(() => {
-    refetchActiveModel()
-    refetchModelOptions()
+    void (async () => {
+      await providers.seedDefaultProvider()
+      refetchActiveModel()
+      refetchModelOptions()
+    })()
   }, [refetchActiveModel, refetchModelOptions])
 
   // Rafraîchit providers + activeModel après tout changement du dialog.
@@ -71,6 +79,12 @@ function App() {
   )
 
   const modelSelection = activeModel
+    ? {
+        provider: activeModel.provider,
+        modelId: activeModel.modelId,
+        supportsImages: modelOptions.find((o) => o.isDefault)?.supportsImages ?? false,
+      }
+    : null
   const { vm, busy, send, interrupt, load } = useChat(modelSelection)
 
   // Chargement de l'historique à chaque changement de conversation active.
@@ -102,13 +116,27 @@ function App() {
     [refresh, activeId],
   )
 
+  const onRename = useCallback(
+    async (id: string, newTitle: string) => {
+      await conversations.rename(id, newTitle)
+      await refresh()
+    },
+    [refresh],
+  )
+
   const onSend = useCallback(
-    (text: string) => {
-      if (!activeId) return
-      void send(activeId, text).catch(console.error)
+    (text: string, attachments: Attachment[]): Promise<boolean> => {
+      if (!activeId) return Promise.resolve(false)
+      // send ne rejette jamais : false = échec de persistance (InputBar
+      // restaurera le contenu), true en fin de stream.
+      return send(activeId, text, attachments)
     },
     [activeId, send],
   )
+
+  const toggleSidebar = useCallback(() => {
+    setSidebarCollapsed((prev) => !prev)
+  }, [])
 
   return (
     <main className="flex h-screen overflow-hidden">
@@ -118,6 +146,11 @@ function App() {
         onSelect={setActiveId}
         onNew={() => void onNew().catch(console.error)}
         onDelete={(id) => void onDelete(id).catch(console.error)}
+        onRename={onRename}
+        width={sidebarWidth}
+        onWidthChange={setSidebarWidth}
+        collapsed={sidebarCollapsed}
+        onToggleCollapse={toggleSidebar}
       />
       <section className="flex flex-1 flex-col overflow-hidden">
         <header className="flex items-center justify-between border-b border-border px-4 py-3">

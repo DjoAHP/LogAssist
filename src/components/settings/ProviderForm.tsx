@@ -23,13 +23,14 @@ export function ProviderForm({ initial, onSaved, onCancel }: Props) {
 
   const submit = async () => {
     if (!name.trim()) { setError(t.settings.nameRequired); return }
-    if (!baseUrl.trim().startsWith("https://")) { setError(t.settings.invalidUrl); return }
+    const cleanedBaseUrl = baseUrl.trim().replace(/\/(models|chat\/completions|v1\/models)$/, "")
+    if (!cleanedBaseUrl.startsWith("https://")) { setError(t.settings.invalidUrl); return }
     setSaving(true)
     setError(null)
     try {
       const row = editing
-        ? await updateExisting(initial, name.trim(), family, baseUrl.trim(), replaceKey ? secret : undefined)
-        : await providers.create(name.trim(), family, baseUrl.trim(), secret || undefined)
+        ? await updateExisting(initial, name.trim(), family, cleanedBaseUrl, replaceKey ? secret : undefined)
+        : await providers.create(name.trim(), family, cleanedBaseUrl, secret || undefined)
       onSaved(row)
     } catch (e) {
       setError(`${t.settings.saveFailed} : ${e instanceof Error ? e.message : String(e)}`)
@@ -71,7 +72,7 @@ export function ProviderForm({ initial, onSaved, onCancel }: Props) {
         <input
           value={baseUrl}
           onChange={(e) => setBaseUrl(e.target.value)}
-          placeholder="https://openrouter.ai/api/v1"
+          placeholder="https://openrouter.ai/api/v1 (sans /models ni /chat/completions)"
           className="w-full rounded-md border border-border bg-transparent px-2 py-1.5 text-sm outline-none"
         />
       </label>

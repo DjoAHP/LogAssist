@@ -8,6 +8,11 @@ const host = process.env.TAURI_DEV_HOST;
 export default defineConfig(() => ({
   plugins: [react()],
 
+  // Vitest : pool threads (forks timeout sous WSL avec jsdom).
+  test: {
+    pool: "threads",
+  },
+
   resolve: {
     alias: {
       "@": path.resolve(import.meta.dirname, "./src"),

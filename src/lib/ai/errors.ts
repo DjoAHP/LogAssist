@@ -33,8 +33,10 @@ export class ApiError extends Error {
 // (EAI_AGAIN) n'ont pas de \b devant un underscore, l'underscore est un caractère de mot.
 const QUOTA_HINTS = /\b(quota|credit|billing|insufficient)(?:\b|_)/i
 const IMAGE_HINTS = /\b(image|vision|multimodal?)(?:\b|_)/i
+// "failed to fetch" : rejet du fetch navigateur — CORS bloqué ou réseau coupé.
+// Le reste : erreurs Node/Rust ("fetch failed").
 const NETWORK_HINTS =
-  /\b(getaddrinfo|enotfound|econnrefused|etimedout|econnreset|eai_again|dns|socket|tls|certificate|fetch failed)(?:\b|_)/i
+  /\b(getaddrinfo|enotfound|econnrefused|etimedout|econnreset|eai_again|dns|socket|tls|certificate|fetch failed|failed to fetch|cors)(?:\b|_)/i
 
 export function normalizeHttpStatus(status: number, body: string, retryAfterMs?: number): ApiError {
   const detail = body.slice(0, 500) || undefined

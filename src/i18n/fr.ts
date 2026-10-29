@@ -7,6 +7,9 @@ export const fr = {
     rename: "Renommer",
     archive: "Archiver",
     delete: "Supprimer",
+    deleteConfirm: "Confirmer la suppression ?",
+    collapse: "Réduire la barre latérale",
+    expand: "Étendre la barre latérale",
   },
   chat: {
     placeholder: "Écrivez votre message… (Entrée pour envoyer, Maj+Entrée pour une nouvelle ligne)",
@@ -18,6 +21,8 @@ export const fr = {
     interrupted: "Interrompu",
     configureProvider: "Configurez un fournisseur dans les réglages pour discuter.",
     selectModel: "Modèle",
+    addImage: "Ajouter une image",
+    thinking: "Le modèle réfléchit…",
   },
   settings: {
     title: "Réglages",

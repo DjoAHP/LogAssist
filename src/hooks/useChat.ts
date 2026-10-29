@@ -1,12 +1,21 @@
 import { useCallback, useRef, useState } from "react"
 import { createProvider, buildPreview } from "@/lib/ai/factory"
+import { logger } from "@/lib/logger"
 import type { ApiError } from "@/lib/ai/errors"
-import type { ApiErrorKind, ProviderConfig } from "@/lib/ai/types"
+import type { ApiErrorKind, ProviderConfig, ChatMessage } from "@/lib/ai/types"
 import { buildSystemPrompt } from "@/lib/prompts/compose"
 import { DEFAULT_GENERAL_INSTRUCTIONS, PROFILE_APPRENTISSAGE } from "@/lib/prompts/defaults"
 import { messages as messagesDb, type MessageRow } from "@/lib/db/messages"
+import { images as imagesDb } from "@/lib/db/images"
 import { conversations } from "@/lib/db/conversations"
 import { secrets } from "@/lib/secrets/service"
+
+export interface Attachment {
+  id: string
+  base64: string
+  mimeType: string
+  name: string
+}
 
 // Payload d'erreur persisté en JSON dans messages.error (rond-trip : la class
 // ApiError ne survit pas à JSON.stringify, on sérialise un objet plat).
@@ -20,13 +29,14 @@ export interface ChatMessageVM {
   id?: string
   role: "user" | "assistant"
   content: string
+  attachments?: Attachment[]
   modelLabel?: string
   latencyMs?: number
   apiError?: ApiErrorPayload
   interrupted?: boolean
 }
 
-export function useChat(modelSelection: { provider: ProviderConfig; modelId: string } | null) {
+export function useChat(modelSelection: { provider: ProviderConfig; modelId: string; supportsImages: boolean } | null) {
   const [vm, setVm] = useState<ChatMessageVM[]>([])
   const [busy, setBusy] = useState(false)
   // Hoistés au niveau du hook : useRef dans une callback violerait les règles
@@ -45,36 +55,88 @@ export function useChat(modelSelection: { provider: ProviderConfig; modelId: str
   }, [])
 
   const send = useCallback(
-    async (conversationId: string, text: string) => {
+    async (conversationId: string, text: string, attachments: Attachment[] = []): Promise<boolean> => {
       const content = text.trim()
-      if (!content || busy || !modelSelection) return
+      if (!content && attachments.length === 0) return false
+      if (busy || !modelSelection) return false
       setBusy(true)
       const controller = new AbortController()
       abortRef.current = controller
       accRef.current = ""
+      // Contrat anti-perte avec InputBar : false = échec AVANT persistence du
+      // message utilisateur (l'input sera restauré) ; true = message
+      // utilisateur persisté (les pannes ultérieures du stream sont traitées
+      // dans la bulle par onError).
+      let userPersisted = false
+      // id client de la bulle optimiste (retirée si l'insert échoue)
+      let localUserId: string | undefined = undefined
 
       try {
-        // 1. Message user : affiché immédiatement, puis persisté.
-        setVm((s) => [...s, { role: "user", content }])
+        // 1. Stocker les images en base et préparer les pièces jointes pour l'API
+        const apiImages: ChatMessage["images"] = []
+        const storedAttachments: Attachment[] = []
+
+        if (attachments.length > 0 && modelSelection.supportsImages) {
+          for (const att of attachments) {
+            // Stocker en base (table images)
+            await imagesDb.create(att.id, att.name)
+            // Préparer pour l'API
+            apiImages.push({ base64: att.base64, mimeType: att.mimeType })
+            storedAttachments.push(att)
+          }
+        }
+
+        // 2. Message user : affiché immédiatement, puis persisté.
+        localUserId = crypto.randomUUID()
+        setVm((s) => [...s, { id: localUserId, role: "user", content, attachments: storedAttachments }])
         await messagesDb.insert({
-          conversation_id: conversationId, role: "user", content,
-          attachments: "[]", model_label: null, latency_ms: null, error: null,
+          conversation_id: conversationId,
+          role: "user",
+          content,
+          attachments: JSON.stringify(storedAttachments.map((a) => ({ id: a.id, name: a.name, mimeType: a.mimeType }))),
+          model_label: null,
+          latency_ms: null,
+          error: null,
         })
         await conversations.touch(conversationId)
+        userPersisted = true
 
-        // 2. Historique APRÈS l'insert user : le message fait partie du contexte API.
+        // 3. Historique APRÈS l'insert user : le message fait partie du contexte API.
         const system = buildSystemPrompt({
           general: DEFAULT_GENERAL_INSTRUCTIONS,
           profile: PROFILE_APPRENTISSAGE,
         })
         const history = await messagesDb.listByConversation(conversationId)
-        const apiMessages = [
+        const apiMessages: ChatMessage[] = [
           ...(system ? [{ role: "system" as const, content: system }] : []),
-          ...history.map((h) => ({ role: h.role, content: h.content })),
+          ...history.map((h) => {
+            let images: ChatMessage["images"] = undefined
+            if (h.attachments) {
+              try {
+                const atts = JSON.parse(h.attachments) as { id: string; name: string; mimeType: string }[]
+                if (atts.length > 0) {
+                  // Note: on ne peut pas récupérer le base64 depuis la DB ici (pas stocké)
+                  // Pour l'historique, on n'envoie pas les images pour économiser les tokens
+                  // (optionnel : on pourrait stocker le base64 en base si nécessaire)
+                }
+              } catch {
+                // ignore
+              }
+            }
+            return { role: h.role, content: h.content, images }
+          }),
         ]
 
-        // 3. Placeholder assistant : bulle de streaming visible dès le départ.
-        const { provider, modelId } = modelSelection
+        // 4. Ajouter les images du message courant au dernier message user de l'historique
+        if (apiImages.length > 0 && apiMessages.length > 0) {
+          const lastUserMsg = apiMessages[apiMessages.length - 1]
+          if (lastUserMsg.role === "user") {
+            lastUserMsg.images = apiImages
+          }
+        }
+
+        // 5. Placeholder assistant : bulle de streaming visible dès le départ.
+        const { provider, modelId, supportsImages } = modelSelection
         const apiProvider = createProvider(provider)
         const apiKey = (await secrets.get(provider.secretRef)) ?? ""
         const label = buildPreview(provider.name, modelId)
@@ -85,6 +147,15 @@ export function useChat(modelSelection: { provider: ProviderConfig; modelId: str
           setVm((s) => s.map((m) => (m.id === assistantId ? { ...m, ...patch } : m)))
 
         const isAbort = (e: unknown) => e instanceof Error && e.name === "AbortError"
+
+        // DEBUG: log ce qui part vers l'API (no-op en production)
+        logger.debug("[useChat] Envoi à l'API:", {
+          modelId,
+          supportsImages,
+          apiImagesLength: apiImages.length,
+          lastUserMsgImages: apiMessages[apiMessages.length - 1]?.images?.length ?? 0,
+          messagesCount: apiMessages.length,
+        })
 
         await apiProvider.stream(
           { messages: apiMessages },
@@ -142,6 +213,15 @@ export function useChat(modelSelection: { provider: ProviderConfig; modelId: str
           },
           controller.signal,
         )
+        return true
+      } catch (e) {
+        // Contrat anti-perte : !userPersisted → false (contenu restauré par
+        // InputBar) et retrait de la bulle optimiste (sinon doublon au renvoi).
+        // Sinon : message utilisateur déjà persisté, le problème du stream
+        // est déjà matérialisé dans la bulle par onError.
+        logger.error(e)
+        if (!userPersisted) setVm((s) => s.filter((m) => m.id !== localUserId))
+        return userPersisted
       } finally {
         // stream() résout quand le flux est fini (ou après onError) : toujours
         // réactivé, y compris en cas d'exception du consommateur.
@@ -159,6 +239,7 @@ export function useChat(modelSelection: { provider: ProviderConfig; modelId: str
 function mapRow(r: MessageRow): ChatMessageVM {
   let apiError: ApiErrorPayload | undefined
   let interrupted: boolean | undefined
+  let attachments: Attachment[] | undefined
   if (r.error) {
     try {
       const parsed = JSON.parse(r.error) as ApiErrorPayload & { interrupted?: boolean }
@@ -168,8 +249,18 @@ function mapRow(r: MessageRow): ChatMessageVM {
       // error non-JSON (legacy) : ignoré
     }
   }
+  if (r.attachments) {
+    try {
+      const parsed = JSON.parse(r.attachments) as { id: string; name: string; mimeType: string }[]
+      if (parsed.length > 0) {
+        attachments = parsed.map((a) => ({ ...a, base64: "" })) // base64 non stocké pour l'historique
+      }
+    } catch {
+      // ignore
+    }
+  }
   return {
-    id: r.id, role: r.role, content: r.content,
+    id: r.id, role: r.role, content: r.content, attachments,
     modelLabel: r.model_label ?? undefined,
     latencyMs: r.latency_ms ?? undefined,
     apiError, interrupted,

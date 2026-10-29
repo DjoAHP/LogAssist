@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react"
 import { Check, Plus, Star, Trash2, X } from "lucide-react"
 import { t } from "@/i18n/fr"
+import { logger } from "@/lib/logger"
 import { createProvider } from "@/lib/ai/factory"
 import { KIND_TO_KEY } from "@/lib/ai/errors"
 import { providers, secretRefFor, type ProviderRow, type ModelRow } from "@/lib/db/providers"
@@ -63,6 +64,7 @@ export function SettingsDialog({ onClose, onChanged }: Props) {
       }
       // Signature exacte (Task 5) : { ok: boolean; error?: ApiError } — pas de latence.
       const res = await prov.testConnection(key)
+        logger.debug("[SettingsDialog] testConnection result:", res)
       setTestStatus((s) => ({
         ...s,
         [p.id]: res.ok
@@ -70,6 +72,7 @@ export function SettingsDialog({ onClose, onChanged }: Props) {
           : { state: "fail", message: t.errors[KIND_TO_KEY[res.error!.kind]] },
       }))
     } catch (e) {
+      console.error("[SettingsDialog] testConnection error:", e)
       setTestStatus((s) => ({ ...s, [p.id]: { state: "fail", message: e instanceof Error ? e.message : String(e) } }))
     }
   }

@@ -1,6 +1,19 @@
+import { isTauri } from "@tauri-apps/api/core"
+import { fetch as tauriFetch } from "@tauri-apps/plugin-http"
 import { ApiError, normalizeHttpStatus, normalizeNetworkError } from "./errors"
+import { logger } from "../logger"
 import { parseSseStream } from "./sse"
 import type { ChatRequest, ProviderConfig, StreamCallbacks } from "./types"
+
+// fetch passe par le backend Rust via tauri-plugin-http quand on est dans Tauri :
+// la webview n'est pas soumise au CORS (certains fournisseurs ex. NVIDIA NIM
+// ne renvoient pas Access-Control-Allow-Origin). En test/node : fetch natif,
+// stubbable via vi.stubGlobal("fetch") — résolu à l'APPEL, pas à l'import, pour
+// que les stubs posés après le chargement du module soient honorés.
+function getFetch(): typeof globalThis.fetch {
+  return (isTauri() ? (tauriFetch as unknown as typeof globalThis.fetch) : globalThis.fetch) ??
+    globalThis.fetch
+}
 
 export interface IProvider {
   complete(req: ChatRequest, apiKey: string, modelId: string): Promise<{ text: string; totalMs: number }>
@@ -16,7 +29,8 @@ function retryAfterMs(headers: Headers): number | undefined {
 }
 
 export function createOpenAICompatible(cfg: ProviderConfig): IProvider {
-  const base = cfg.baseUrl.replace(/\/+$/, "")
+  // Nettoie l'URL de base : retire trailing slashes ET chemins API connus (/models, /chat/completions, etc.)
+  const base = cfg.baseUrl.replace(/\/+$/, "").replace(/\/(models|chat\/completions|v1\/models)$/, "")
 
   async function chatRequest(req: ChatRequest, apiKey: string, modelId: string, stream: boolean, signal?: AbortSignal) {
     const messages = req.messages.map((m) => ({
@@ -28,7 +42,7 @@ export function createOpenAICompatible(cfg: ProviderConfig): IProvider {
           ]
         : m.content,
     }))
-    return fetch(`${base}/chat/completions`, {
+    return getFetch()(`${base}/chat/completions`, {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
       body: JSON.stringify({ model: modelId, messages, stream }),
@@ -91,8 +105,9 @@ export function createOpenAICompatible(cfg: ProviderConfig): IProvider {
         })
       } catch (e: unknown) {
         // Critère 1 : erreurs réseau normalisées ; critère 5 : abort passthrough
+        // (abort natif = AbortError ; plugin Tauri = message "Request cancelled")
         if (e instanceof ApiError) cb.onError?.(e)
-        else if (e instanceof Error && e.name === "AbortError") cb.onError?.(e)
+        else if (e instanceof Error && (e.name === "AbortError" || e.message === "Request cancelled")) cb.onError?.(e)
         else cb.onError?.(normalizeNetworkError(e))
         return
       } finally {
@@ -108,13 +123,36 @@ export function createOpenAICompatible(cfg: ProviderConfig): IProvider {
 
     async testConnection(apiKey) {
       try {
-        const res = await fetch(`${base}/models`, { headers: { Authorization: `Bearer ${apiKey}` } })
-        if (!res.ok) {
-          const body = await res.text()
-          return { ok: false, error: normalizeHttpStatus(res.status, body, retryAfterMs(res.headers)) }
+        // Try /models first (standard OpenAI)
+        const res = await getFetch()(`${base}/models`, { headers: { Authorization: `Bearer ${apiKey}` } })
+        if (res.ok) {
+          return { ok: true }
         }
-        return { ok: true }
+        // If /models fails (404, 405, etc.), try a minimal chat completion as fallback
+        // Some OpenAI-compatible APIs (like NVIDIA NIM) don't implement /models
+        const bodyText = await res.text()
+        logger.debug("[testConnection] /models failed:", res.status, bodyText.slice(0, 200))
+        
+        // Fallback: try a minimal completion request
+        const testRes = await getFetch()(`${base}/chat/completions`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
+          body: JSON.stringify({ model: "test", messages: [{ role: "user", content: "test" }], max_tokens: 1 }),
+        })
+        if (testRes.ok || testRes.status === 400) {
+          // 400 = bad request (model not found) but auth worked
+          // 401/403 = auth error
+          // 404 = endpoint not found
+          if (testRes.status === 401 || testRes.status === 403) {
+            const body = await testRes.text()
+            return { ok: false, error: normalizeHttpStatus(testRes.status, body, retryAfterMs(testRes.headers)) }
+          }
+          return { ok: true }
+        }
+        const body = await testRes.text()
+        return { ok: false, error: normalizeHttpStatus(testRes.status, body, retryAfterMs(testRes.headers)) }
       } catch (e) {
+        console.error("[testConnection] network error:", e)
         return { ok: false, error: normalizeNetworkError(e) as ApiError }
       }
     },

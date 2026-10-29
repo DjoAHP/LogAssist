@@ -25,3 +25,34 @@
     @apply bg-background text-foreground;
   }
 }
+
+/* Bicolore LogAssist : dégradé de marque sur l'anneau de pagination */
+:root {
+  --brand-from: #d64627;
+  --brand-to: #27c8d6;
+}
+
+/* Anneau de réflexion : conic-gradient masqué en anneau, arc rotatif.
+   La queue transparente (85% → 100%) donne l'arc qui grandit/rétrécit. */
+.thinking-spinner {
+  display: inline-block;
+  width: 0.9rem;
+  height: 0.9rem;
+  border-radius: 9999px;
+  background: conic-gradient(from 0deg, transparent 0%, var(--brand-from) 30%, var(--brand-to) 85%, transparent 100%);
+  -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 2.5px), #000 calc(100% - 2.5px));
+  mask: radial-gradient(farthest-side, transparent calc(100% - 2.5px), #000 calc(100% - 2.5px));
+  animation: thinking-spin 0.8s linear infinite;
+}
+
+@keyframes thinking-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .thinking-spinner {
+    animation-duration: 3s;
+  }
+}
