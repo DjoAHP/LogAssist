@@ -10,6 +10,7 @@ Stack : **Tauri 2 + React + TypeScript + Vite**, Tailwind CSS (préparation shad
 npm install
 npm run tauri dev   # nécessite Rust (tauri) installé
 npm run build       # build frontend seul (tsc + vite)
+npm run tauri build  #Genere le .exe (src-tauri/target/release/bundle/nsis/LogAssist_x64-setup.exe)
 ```
 
 ## Structure
