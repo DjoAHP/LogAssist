@@ -2,11 +2,14 @@ import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import path from "node:path";
 import process from "node:process";
+import { versionDefine } from "./shared/buildVersion";
+
 const host = process.env.TAURI_DEV_HOST;
 
 // https://vite.dev/config/
 export default defineConfig(() => ({
   plugins: [react()],
+  define: versionDefine,
 
   // Vitest : pool threads (forks timeout sous WSL avec jsdom).
   test: {

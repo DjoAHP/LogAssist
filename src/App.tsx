@@ -11,6 +11,7 @@ import { Sidebar } from "@/components/sidebar/Sidebar"
 import { ChatView } from "@/components/chat/ChatView"
 import { InputBar } from "@/components/chat/InputBar"
 import { SettingsDialog } from "@/components/settings/SettingsDialog"
+import { appVersion } from "@/lib/appVersion"
 
 const DEFAULT_SIDEBAR_WIDTH = 280
 
@@ -160,7 +161,12 @@ function App() {
               <img src={logoSrc} alt="" className="size-full object-contain" />
             </span>
             <div>
-              <h1 className="text-base font-semibold">{t.app.title}</h1>
+              <h1 className="text-base font-semibold">
+                {t.app.title}
+                <span className="ml-1.5 align-baseline text-xs font-normal text-muted-foreground">
+                  v{appVersion}
+                </span>
+              </h1>
               <p className="text-xs text-muted-foreground">{t.app.subtitle}</p>
             </div>
           </div>
