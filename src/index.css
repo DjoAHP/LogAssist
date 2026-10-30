@@ -32,16 +32,13 @@
   --brand-to: #27c8d6;
 }
 
-/* Logo provisoire : carré arrondi au dégradé de marque (à remplacer par
-   l'icône officielle via npm run tauri icon <logo.png>) */
+/* Logo du header : l'image seule, sans fond (dégradé retiré à la demande) */
 .brand-mark {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   width: 1.85rem;
   height: 1.85rem;
-  border-radius: 0.55rem;
-  background: linear-gradient(135deg, var(--brand-from) 0%, var(--brand-to) 100%);
 }
 
 /* Anneau de réflexion : conic-gradient masqué en anneau, arc rotatif.

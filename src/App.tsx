@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react"
 import { Settings as SettingsIcon } from "lucide-react"
+import logoSrc from "@/assets/logo.png"
 import { t } from "@/i18n/fr"
 import { conversations } from "@/lib/db/conversations"
 import { getActiveModel, type ActiveModel } from "@/lib/db/activeModel"
@@ -154,9 +155,14 @@ function App() {
       />
       <section className="flex flex-1 flex-col overflow-hidden">
         <header className="flex items-center justify-between border-b border-border px-4 py-3">
-          <div>
-            <h1 className="text-base font-semibold">{t.app.title}</h1>
-            <p className="text-xs text-muted-foreground">{t.app.subtitle}</p>
+          <div className="flex items-center gap-2.5">
+            <span className="brand-mark" aria-hidden="true">
+              <img src={logoSrc} alt="" className="size-full object-contain" />
+            </span>
+            <div>
+              <h1 className="text-base font-semibold">{t.app.title}</h1>
+              <p className="text-xs text-muted-foreground">{t.app.subtitle}</p>
+            </div>
           </div>
           <button
             aria-label={t.settings.title}
