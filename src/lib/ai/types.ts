@@ -18,8 +18,8 @@ export interface CompletionStats { text: string; firstTokenMs: number; totalMs: 
 export interface StreamCallbacks {
   onFirstToken?: () => void
   onDelta?: (text: string) => void
-  onDone?: (stats: CompletionStats) => void
-  onError?: (e: Error) => void // ApiError ou AbortError
+  onDone?: (stats: CompletionStats) => Promise<void> | void
+  onError?: (e: Error) => Promise<void> | void // ApiError ou AbortError
 }
 
 export interface ProviderConfig {

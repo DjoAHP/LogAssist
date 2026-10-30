@@ -36,9 +36,20 @@ function now(): string {
 export const providers = {
   async create(name: string, apiFamily: "openai" | "gemini", baseUrl: string, secret?: string): Promise<ProviderRow> {
     const row: ProviderRow = { id: crypto.randomUUID(), name, api_family: apiFamily, base_url: baseUrl, created_at: now() }
-    await execute("INSERT INTO providers (id, name, api_family, base_url, created_at) VALUES (?,?,?,?,?)", [
-      row.id, row.name, row.api_family, row.base_url, row.created_at,
-    ])
+    try {
+      await execute("INSERT INTO providers (id, name, api_family, base_url, created_at) VALUES (?,?,?,?,?)", [
+        row.id, row.name, row.api_family, row.base_url, row.created_at,
+      ])
+    } catch (e: unknown) {
+      // UNIQUE constraint violation (code 19 / SQLITE_CONSTRAINT) → provider déjà existant
+      // On récupère l'existant au lieu d'échouer (idempotence au niveau DB).
+      const isUniqueViolation = e instanceof Error && (e.message.includes("UNIQUE constraint failed") || e.message.includes("SQLITE_CONSTRAINT"))
+      if (isUniqueViolation) {
+        const existing = await select<ProviderRow>("SELECT * FROM providers WHERE name = ?", [name])
+        if (existing.length > 0) return existing[0]
+      }
+      throw e
+    }
     if (secret) await secrets.set(secretRefFor(row.id), secret)
     return row
   },
@@ -106,10 +117,13 @@ export const providers = {
   },
 
   // Seed OpenRouter par défaut si aucun fournisseur n'existe.
+  // Idempotent : INSERT OR IGNORE grâce à la contrainte UNIQUE(name) (V2).
   async seedDefaultProvider(): Promise<void> {
     const existing = await providers.list()
     if (existing.length > 0) return
 
+    // INSERT OR IGNORE : si un autre processus a déjà inséré "OpenRouter"
+    // entre le list() et ici, on ne crée pas de doublon.
     const openrouter = await providers.create(
       "OpenRouter",
       "openai",

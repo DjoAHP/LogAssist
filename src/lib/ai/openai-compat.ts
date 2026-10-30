@@ -106,9 +106,9 @@ export function createOpenAICompatible(cfg: ProviderConfig): IProvider {
       } catch (e: unknown) {
         // Critère 1 : erreurs réseau normalisées ; critère 5 : abort passthrough
         // (abort natif = AbortError ; plugin Tauri = message "Request cancelled")
-        if (e instanceof ApiError) cb.onError?.(e)
-        else if (e instanceof Error && (e.name === "AbortError" || e.message === "Request cancelled")) cb.onError?.(e)
-        else cb.onError?.(normalizeNetworkError(e))
+        if (e instanceof ApiError) await cb.onError?.(e)
+        else if (e instanceof Error && (e.name === "AbortError" || e.message === "Request cancelled")) await cb.onError?.(e)
+        else await cb.onError?.(normalizeNetworkError(e))
         return
       } finally {
         // Critère 5 : libérer le reader si on a décroché en cours
@@ -118,7 +118,7 @@ export function createOpenAICompatible(cfg: ProviderConfig): IProvider {
       // Critère 5 bis : onDone hors du try/catch — si le consommateur throw dans
       // onDone, l'exception remonte au consommateur sans déclencher onError
       // (pas de onError après un onDone partiel).
-      cb.onDone?.({ text: acc, firstTokenMs, totalMs: performance.now() - start })
+      await cb.onDone?.({ text: acc, firstTokenMs, totalMs: performance.now() - start })
     },
 
     async testConnection(apiKey) {

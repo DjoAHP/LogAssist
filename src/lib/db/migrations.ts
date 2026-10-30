@@ -1,11 +1,11 @@
-export const SCHEMA_VERSION = 1
+export const SCHEMA_VERSION = 2
 
 // Chaque statement est un item distinct : audit-able, et exécution séquentielle
 // garantie (sqlx rejette le multi-statement dans un seul execute).
 export const SCHEMA_V1_STATEMENTS: string[] = [
   `CREATE TABLE IF NOT EXISTS providers (
   id TEXT PRIMARY KEY,
-  name TEXT NOT NULL,
+  name TEXT NOT NULL UNIQUE,
   api_family TEXT NOT NULL CHECK (api_family IN ('openai','gemini')),
   base_url TEXT NOT NULL DEFAULT '',
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
@@ -61,6 +61,52 @@ export const SCHEMA_V1_STATEMENTS: string[] = [
 )`,
   `CREATE INDEX IF NOT EXISTS idx_messages_conversation ON messages(conversation_id)`,
   `CREATE INDEX IF NOT EXISTS idx_conversations_project ON conversations(project_id)`,
+]
+
+// Migration V2 : ajouter contrainte UNIQUE sur providers.name + dédoublonnage
+// SQLite ne supporte pas ALTER TABLE ADD UNIQUE → recréation de table avec dédoublonnage.
+// On désactive les FK le temps de la migration.
+export const SCHEMA_V2_STATEMENTS: string[] = [
+  `PRAGMA foreign_keys = OFF`,
+  // 1. Créer nouvelle table providers avec UNIQUE
+  `CREATE TABLE providers_new (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL UNIQUE,
+  api_family TEXT NOT NULL CHECK (api_family IN ('openai','gemini')),
+  base_url TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+)`,
+  // 2. Copier en dédoublonnant : garde le plus ancien par nom
+  `INSERT INTO providers_new (id, name, api_family, base_url, created_at)
+   SELECT id, name, api_family, base_url, created_at
+   FROM (
+     SELECT *, ROW_NUMBER() OVER (PARTITION BY name ORDER BY created_at ASC) as rn
+     FROM providers
+   ) WHERE rn = 1`,
+  // 3. Créer nouvelle table models avec FK vers providers_new
+  `CREATE TABLE models_new (
+  id TEXT PRIMARY KEY,
+  provider_id TEXT NOT NULL REFERENCES providers_new(id) ON DELETE CASCADE,
+  model_id TEXT NOT NULL,
+  supports_images INTEGER NOT NULL DEFAULT 0,
+  is_default INTEGER NOT NULL DEFAULT 0
+)`,
+  // 4. Copier models en remappant les provider_id vers les providers dédoublonnés
+  // Pour chaque model, trouver le provider_new correspondant au même nom
+  `INSERT INTO models_new (id, provider_id, model_id, supports_images, is_default)
+   SELECT m.id, pn.id, m.model_id, m.supports_images, m.is_default
+   FROM models m
+   JOIN providers p ON m.provider_id = p.id
+   JOIN providers_new pn ON pn.name = p.name`,
+  // 5. Supprimer anciennes tables
+  `DROP TABLE models`,
+  `DROP TABLE providers`,
+  // 6. Renommer
+  `ALTER TABLE providers_new RENAME TO providers`,
+  `ALTER TABLE models_new RENAME TO models`,
+  // 7. Recréer les index
+  `CREATE INDEX IF NOT EXISTS idx_models_provider ON models(provider_id)`,
+  `PRAGMA foreign_keys = ON`,
 ]
 
 export const SCHEMA_V1 = SCHEMA_V1_STATEMENTS.join(";\n")
