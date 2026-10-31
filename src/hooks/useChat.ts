@@ -13,9 +13,12 @@ import { secrets } from "@/lib/secrets/service"
 
 export interface Attachment {
   id: string
+  kind: "image" | "text"
   base64: string
   mimeType: string
   name: string
+  // kind "text" : contenu du fichier importé (l'image, elle, passe en base64)
+  text?: string
 }
 
 // Payload d'erreur persisté en JSON dans messages.error (rond-trip : la class
@@ -76,25 +79,32 @@ export function useChat(modelSelection: { provider: ProviderConfig; modelId: str
         // 1. Stocker les images en base et préparer les pièces jointes pour l'API
         const apiImages: ChatMessage["images"] = []
         const storedAttachments: Attachment[] = []
+        // 1 bis. Fichiers texte : injectés DANS le contenu user (persisté et
+        // envoyé au modèle) — la persistance est gratuite et l'historique
+        // rejoue le contexte sans stockage base64.
+        const textBlocks = attachments
+          .filter((a) => a.kind === "text")
+          .map((a) => `\n\n[Fichier joint : ${a.name}]\n\`\`\`\n${a.text ?? ""}\n\`\`\``)
+          .join("")
+        const fullContent = content + textBlocks
 
-        if (attachments.length > 0 && modelSelection.supportsImages) {
-          for (const att of attachments) {
-            // Stocker en base (table images)
-            await imagesDb.create(att.id, att.name)
-            // Préparer pour l'API
-            apiImages.push({ base64: att.base64, mimeType: att.mimeType })
-            storedAttachments.push(att)
-          }
+        for (const att of attachments) {
+          if (att.kind !== "image") continue
+          // Stocker en base (table images)
+          await imagesDb.create(att.id, att.name)
+          // Préparer pour l'API
+          apiImages.push({ base64: att.base64, mimeType: att.mimeType })
+          storedAttachments.push(att)
         }
 
         // 2. Message user : affiché immédiatement, puis persisté.
         localUserId = crypto.randomUUID()
-        setVm((s) => [...s, { id: localUserId, role: "user", content, attachments: storedAttachments }])
+        setVm((s) => [...s, { id: localUserId, role: "user", content: fullContent, attachments: storedAttachments }])
         await messagesDb.insert({
           conversation_id: conversationId,
           role: "user",
-          content,
-          attachments: JSON.stringify(storedAttachments.map((a) => ({ id: a.id, name: a.name, mimeType: a.mimeType }))),
+          content: fullContent,
+          attachments: JSON.stringify(storedAttachments.map((a) => ({ id: a.id, name: a.name, mimeType: a.mimeType, kind: a.kind }))),
           model_label: null,
           latency_ms: null,
           error: null,
@@ -175,23 +185,27 @@ export function useChat(modelSelection: { provider: ProviderConfig; modelId: str
               accRef.current += d
               upsertLast({ content: accRef.current })
             },
-            // Insertions async en base : onDone résout déjà le stream, l'await
-            // se poursuit en tâche de fond — attrapé localement pour éviter
-            // tout unhandled rejection. Cap défensif : on lit accRef une seule
-            // fois (une interruption simultanée ne peut plus muter le cap).
+            // Insertions persistance : ON RETOURNE la promesse (contrat fix
+            // 85acc6b) — stream() l'attend (openai-compat.ts) avant de se
+            // résoudre. Si on fait `void`, stream résout avant committance →
+            // busy=false → refetch App sans le message (disparition).
+            // Cap défensif : on lit accRef une seule fois (une interruption
+            // simultanée ne peut plus muter le cap).
             onDone: ({ text, totalMs }) => {
               const acc = accRef.current
-              void (async () => {
+              // Retourne la promise : stream() l'await avant de se résoudre.
+              return (async () => {
                 const id = await messagesDb.insert({
                   conversation_id: conversationId, role: "assistant", content: text || acc,
                   attachments: "[]", model_label: label, latency_ms: Math.round(totalMs), error: null,
                 })
                 upsertLast({ id, content: text || acc, latencyMs: Math.round(totalMs) })
-              })().catch(console.error)
+              })().catch(logger.error)
             },
             onError: (e) => {
               const acc = accRef.current
-              void (async () => {
+              // Retourne la promise : stream() l'await avant de se résoudre.
+              return (async () => {
                 if (isAbort(e)) {
                   // Interruption volontaire : contenu accumulé conservé et
                   // persisté, marqué « interrompu », pas de bulle d'erreur.
@@ -216,7 +230,7 @@ export function useChat(modelSelection: { provider: ProviderConfig; modelId: str
                   error: JSON.stringify(payload),
                 })
                 upsertLast({ id, content: acc })
-              })().catch(console.error)
+              })().catch(logger.error)
             },
           },
           controller.signal,
@@ -259,9 +273,11 @@ function mapRow(r: MessageRow): ChatMessageVM {
   }
   if (r.attachments) {
     try {
-      const parsed = JSON.parse(r.attachments) as { id: string; name: string; mimeType: string }[]
+      const parsed = JSON.parse(r.attachments) as Attachment[]
       if (parsed.length > 0) {
-        attachments = parsed.map((a) => ({ ...a, base64: "" })) // base64 non stocké pour l'historique
+        // base64 non stocké pour l'historique ; kind par défaut = image
+        // (les lignes legacy au format pré-kind n'ont que des images).
+        attachments = parsed.map((a) => ({ ...a, base64: "", kind: a.kind ?? "image" }))
       }
     } catch {
       // ignore

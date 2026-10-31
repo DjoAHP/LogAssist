@@ -22,6 +22,7 @@ export const fr = {
     configureProvider: "Configurez un fournisseur dans les réglages pour discuter.",
     selectModel: "Modèle",
     addImage: "Ajouter une image",
+    addFile: "Ajouter un fichier texte (.md/.txt)",
     thinking: "Le modèle réfléchit…",
   },
   settings: {

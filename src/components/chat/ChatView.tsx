@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react"
-import { AlertTriangle, Maximize2, X } from "lucide-react"
+import { AlertTriangle, FileText, Maximize2, X } from "lucide-react"
 import { t } from "@/i18n/fr"
 import { logger } from "@/lib/logger"
 import { KIND_TO_KEY } from "@/lib/ai/errors"
@@ -126,20 +126,31 @@ function MessageBubble({
       >
         {attachments.length > 0 && (
           <div className="flex flex-wrap gap-1.5 mb-2">
-            {attachments.map((a) => (
-              <div key={a.id} className="relative group">
-                <img
-                  src={a.base64 ? `data:${a.mimeType};base64,${a.base64}` : ""}
-                  alt={a.name}
-                  className="max-w-[200px] max-h-[200px] rounded-lg border border-border cursor-zoom-in object-cover"
-                  onClick={() => a.base64 && onImageClick({ src: `data:${a.mimeType};base64,${a.base64}`, alt: a.name })}
-                  title={a.name}
-                />
-                <div className="absolute inset-0 bg-black/50 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity rounded-lg">
-                  <Maximize2 className="size-6 text-white" />
+            {attachments.map((a) =>
+              // Texte (ou légat sans base64) : chip fichier — JAMAIS de <img src="">
+              a.kind === "text" || !a.base64 ? (
+                <div
+                  key={a.id}
+                  className="flex items-center gap-1 rounded-md border border-border px-2 py-1 text-xs"
+                >
+                  <FileText className="size-3.5" />
+                  <span>{a.name}</span>
                 </div>
-              </div>
-            ))}
+              ) : (
+                <div key={a.id} className="relative group">
+                  <img
+                    src={`data:${a.mimeType};base64,${a.base64}`}
+                    alt={a.name}
+                    className="max-w-[200px] max-h-[200px] rounded-lg border border-border cursor-zoom-in object-cover"
+                    onClick={() => onImageClick({ src: `data:${a.mimeType};base64,${a.base64}`, alt: a.name })}
+                    title={a.name}
+                  />
+                  <div className="absolute inset-0 bg-black/50 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity rounded-lg">
+                    <Maximize2 className="size-6 text-white" />
+                  </div>
+                </div>
+              ),
+            )}
           </div>
         )}
         {m.content ? (

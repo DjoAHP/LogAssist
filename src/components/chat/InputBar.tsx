@@ -1,13 +1,7 @@
 import { useCallback, useRef, useState } from "react"
-import { Send, Square, Image, X } from "lucide-react"
+import { Send, Square, Image, X, FileText } from "lucide-react"
 import { t } from "@/i18n/fr"
-
-interface Attachment {
-  id: string
-  base64: string
-  mimeType: string
-  name: string
-}
+import type { Attachment } from "@/hooks/useChat"
 
 interface Props {
   disabled?: boolean
@@ -18,9 +12,37 @@ interface Props {
 
 const MAX_IMAGE_SIZE = 10 * 1024 * 1024 // 10MB
 const ALLOWED_TYPES = ["image/png", "image/jpeg", "image/webp", "image/gif"]
+// Contexte texte : .md/.txt uniquement (PDF demanderait une lib d'extraction)
+const MAX_TEXT_SIZE = 512 * 1024
+const TEXT_EXTENSIONS = [".md", ".txt"]
+
+function isTextFile(file: File): boolean {
+  return file.type === "text/markdown" || file.type === "text/plain" || (file.type === "" && TEXT_EXTENSIONS.some((ext) => file.name.toLowerCase().endsWith(ext)))
+}
+
+function fileToText(file: File): Promise<Attachment> {
+  return new Promise((resolve, reject) => {
+    if (!isTextFile(file)) {
+      reject(new Error("Type de fichier texte non supporté"))
+      return
+    }
+    if (file.size > MAX_TEXT_SIZE) {
+      reject(new Error("Fichier texte trop volumineux (max 512KB)"))
+      return
+    }
+    void file
+      .text()
+      .then((text) =>
+        resolve({
+          id: crypto.randomUUID(), kind: "text", base64: "", mimeType: file.type || "text/plain", name: file.name, text,
+        }),
+      )
+      .catch(reject)
+  })
+}
 
 function fileToBase64(file: File): Promise<Attachment> {
-  return new Promise((resolve, reject) => {
+  return new Promise<Attachment>((resolve, reject) => {
     if (!ALLOWED_TYPES.includes(file.type)) {
       reject(new Error("Type de fichier non supporté"))
       return
@@ -32,7 +54,7 @@ function fileToBase64(file: File): Promise<Attachment> {
     const reader = new FileReader()
     reader.onload = () => {
       const base64 = (reader.result as string).split(",")[1]
-      resolve({ id: crypto.randomUUID(), base64, mimeType: file.type, name: file.name })
+      resolve({ id: crypto.randomUUID(), kind: "image", base64, mimeType: file.type, name: file.name })
     }
     reader.onerror = reject
     reader.readAsDataURL(file)
@@ -44,6 +66,7 @@ export function InputBar({ disabled = false, busy = false, onSend, onInterrupt }
   const [attachments, setAttachments] = useState<Attachment[]>([])
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const textInputRef = useRef<HTMLInputElement>(null)
 
   const autoGrow = () => {
     const el = textareaRef.current
@@ -76,19 +99,36 @@ export function InputBar({ disabled = false, busy = false, onSend, onInterrupt }
   const handleFileSelect = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files
     if (!files) return
-    const images: Attachment[] = []
+    const added: Attachment[] = []
     for (const file of Array.from(files)) {
       try {
-        images.push(await fileToBase64(file))
+        added.push(await fileToBase64(file))
       } catch {
         // silencieux
       }
     }
-    if (images.length > 0) {
-      setAttachments((prev) => [...prev, ...images])
+    if (added.length > 0) {
+      setAttachments((prev) => [...prev, ...added])
     }
     // Reset input pour permettre la sélection du même fichier
     if (fileInputRef.current) fileInputRef.current.value = ""
+  }, [])
+
+  const handleTextSelect = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files
+    if (!files) return
+    const added: Attachment[] = []
+    for (const file of Array.from(files)) {
+      try {
+        added.push(await fileToText(file))
+      } catch {
+        // silencieux (même convention que les images)
+      }
+    }
+    if (added.length > 0) {
+      setAttachments((prev) => [...prev, ...added])
+    }
+    if (textInputRef.current) textInputRef.current.value = ""
   }, [])
 
   const removeAttachment = useCallback((id: string) => {
@@ -138,11 +178,11 @@ export function InputBar({ disabled = false, busy = false, onSend, onInterrupt }
           <div className="flex flex-wrap gap-1.5">
             {attachments.map((a) => (
               <div key={a.id} className="relative inline-flex items-center gap-1 rounded-md border border-border bg-background/50 px-2 py-1">
-                <img
-                  src={`data:${a.mimeType};base64,${a.base64}`}
-                  alt={a.name}
-                  className="size-6 rounded object-cover"
-                />
+            {(a as Attachment).kind === "text" ? (
+              <FileText className="size-3.5" />
+            ) : (
+              <img src={`data:${a.mimeType};base64,${a.base64}`} alt={a.name} className="size-6 rounded object-cover" />
+            )}
                 <span className="text-xs truncate max-w-[120px]">{a.name}</span>
                 <button
                   type="button"
@@ -186,6 +226,23 @@ export function InputBar({ disabled = false, busy = false, onSend, onInterrupt }
             title={t.chat.addImage}
           >
             <Image className="size-4" />
+          </label>
+          <input
+            ref={textInputRef}
+            type="file"
+            accept=".md,.txt,text/markdown,text/plain"
+            multiple
+            onChange={handleTextSelect}
+            className="hidden"
+            id="text-file-upload"
+          />
+          <label
+            htmlFor="text-file-upload"
+            className="flex h-[38px] items-center gap-1.5 rounded-md border border-border bg-background px-3 text-sm hover:bg-foreground/5 cursor-pointer"
+            title={t.chat.addFile}
+            aria-label={t.chat.addFile}
+          >
+            <FileText className="size-4" />
           </label>
           {busy ? (
             <button
