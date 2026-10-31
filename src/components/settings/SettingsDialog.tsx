@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react"
-import { Check, Plus, Star, Trash2, X } from "lucide-react"
+import { Check, ChevronDown, Plus, Star, Trash2, X } from "lucide-react"
 import { t } from "@/i18n/fr"
 import { logger } from "@/lib/logger"
 import { createProvider } from "@/lib/ai/factory"
@@ -28,6 +28,8 @@ export function SettingsDialog({ onClose, onChanged }: Props) {
   const [testStatus, setTestStatus] = useState<Record<string, TestStatus>>({})
   const [newModel, setNewModel] = useState<Record<string, string>>({})
   const [fetchStatus, setFetchStatus] = useState<Record<string, FetchStatus | undefined>>({})
+  const [fetchedModels, setFetchedModels] = useState<Record<string, string[]>>({})
+  const [fetchOpen, setFetchOpen] = useState<string | null>(null)
 
   const refresh = useCallback(async () => {
     const list = await providers.list()
@@ -114,14 +116,22 @@ export function SettingsDialog({ onClose, onChanged }: Props) {
         return
       }
       const existing = new Set((await providers.listModels(p.id)).map((m) => m.model_id))
+      // Dédoublonnage : contre la base (existing) + doublons du retour API
+      const seen = new Set<string>()
+      const newModels = ids.filter((id) => !existing.has(id) && !seen.has(id) && (seen.add(id), true))
+      if (newModels.length === 0) {
+        setFetchStatus((s) => ({ ...s, [p.id]: { state: "fail", message: t.settings.fetchFail } }))
+        return
+      }
+      // Auto-ajout (comme avant) + affichage dropdown pour référence
       let added = 0
-      for (const modelId of ids) {
-        if (existing.has(modelId)) continue
+      for (const modelId of newModels) {
         await providers.addModel(p.id, modelId)
-        existing.add(modelId) // doublons du retour API : ajouté en continu
         added++
       }
-      await refresh()
+      await afterChange()
+      setFetchedModels((s) => ({ ...s, [p.id]: newModels }))
+      setFetchOpen(p.id)
       setFetchStatus((s) => ({ ...s, [p.id]: { state: "ok", added } }))
     } catch (e) {
       const api = e as { kind?: keyof typeof KIND_TO_KEY }
@@ -234,6 +244,32 @@ export function SettingsDialog({ onClose, onChanged }: Props) {
                       <p data-fetch-status className="mt-2 text-xs text-destructive">
                         {t.settings.fetchFail} — {fetchSt.message}
                       </p>
+                    )}
+
+                    {/* Dropdown modèles récupérés (auto-ajoutés, lecture seule) */}
+                    {fetchOpen === p.id && fetchedModels[p.id]?.length && (
+                      <div className="mt-2">
+                        <div className="relative">
+                          <button
+                            onClick={() => setFetchOpen(null)}
+                            className="w-full flex items-center justify-between gap-2 rounded-md border border-border px-2 py-1.5 text-xs text-left bg-background hover:bg-foreground/5"
+                          >
+                            <span>{t.settings.fetchedModels} ({fetchedModels[p.id]!.length})</span>
+                            <ChevronDown className="size-3.5 text-muted-foreground flex-shrink-0" />
+                          </button>
+                          <div className="absolute top-full left-0 right-0 mt-1 z-10 rounded-md border border-border bg-background shadow-lg max-h-60 overflow-auto">
+                            {fetchedModels[p.id]!.map((modelId) => (
+                              <div
+                                key={modelId}
+                                className="flex items-center justify-between gap-2 px-2 py-1.5 text-xs"
+                              >
+                                <span className="truncate">{modelId}</span>
+                                <Check className="size-3.5 text-green-600 flex-shrink-0" />
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
                     )}
 
                     <div className="mt-2 space-y-1">

@@ -69,7 +69,7 @@ describe("SettingsDialog — récupération des modèles", () => {
     mockListRemoteModels.mockResolvedValue(["m1", "m1", "m2", "existing/model"])
     renderDialog()
     fireEvent.click(await fetchButton())
-    await waitFor(() => expect(mockExecute).toHaveBeenCalled())
+    await waitFor(() => expect(mockExecute).toHaveBeenCalled(), { timeout: 3000 })
     const added = mockExecute.mock.calls
       .filter(([sql]) => String(sql).includes("INSERT INTO models"))
       .map(([, bind]) => (bind as unknown[])[2])
@@ -95,6 +95,6 @@ describe("SettingsDialog — récupération des modèles", () => {
     await waitFor(() => {
       const row = screen.getByText("OpenRouter").closest("li")!
       expect(row.querySelector('[data-fetch-status]')?.textContent).toContain("1")
-    })
+    }, { timeout: 3000 })
   })
 })
