@@ -43,6 +43,39 @@ function sseStream(chunks: string[]): ReadableStream {
 // Format SSE standard : chaque événement est terminé par une ligne vide ("\n\n")
 const SSE = "\n\n"
 
+describe("createOpenAICompatible — listRemoteModels", () => {
+  it("GET /models avec Bearer key, extrait data[].id (les entrées sans id sont filtrées)", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      makeRes({ json: { data: [{ id: "openai/gpt-4o" }, { id: "m/b" }, {}] } }),
+    )
+    vi.stubGlobal("fetch", fetchMock)
+    const adapter = createOpenAICompatible(CFG)
+    const ids = await adapter.listRemoteModels("KEY-123")
+    expect(ids).toEqual(["openai/gpt-4o", "m/b"])
+    const [url, init] = fetchMock.mock.calls[0]
+    expect(String(url)).toContain("/models")
+    expect(init.headers.Authorization).toBe("Bearer KEY-123")
+  })
+
+  it("statut non-OK → ApiError normalisée (auth pour 401)", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(makeRes({ ok: false, status: 401, text: "bad key" })))
+    const adapter = createOpenAICompatible(CFG)
+    await expect(adapter.listRemoteModels("KEY-123")).rejects.toMatchObject({ kind: "auth" })
+  })
+
+  it("Erreur réseau → ApiError normalisée (kind network)", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new TypeError("fetch failed")))
+    const adapter = createOpenAICompatible(CFG)
+    await expect(adapter.listRemoteModels("KEY-123")).rejects.toMatchObject({ kind: "network" })
+  })
+
+  it("data manquante → liste vide", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(makeRes({ json: {} })))
+    const adapter = createOpenAICompatible(CFG)
+    await expect(adapter.listRemoteModels("KEY-123")).resolves.toEqual([])
+  })
+})
+
 afterEach(() => {
   vi.unstubAllGlobals()
 })

@@ -19,6 +19,8 @@ export interface IProvider {
   complete(req: ChatRequest, apiKey: string, modelId: string): Promise<{ text: string; totalMs: number }>
   stream(req: ChatRequest, apiKey: string, modelId: string, cb: StreamCallbacks, signal: AbortSignal): Promise<void>
   testConnection(apiKey: string): Promise<{ ok: boolean; error?: ApiError }>
+  // Récupération des modèles annoncés par le fournisseur (GET /models)
+  listRemoteModels(apiKey: string): Promise<string[]>
 }
 
 function retryAfterMs(headers: Headers): number | undefined {
@@ -121,7 +123,7 @@ export function createOpenAICompatible(cfg: ProviderConfig): IProvider {
       await cb.onDone?.({ text: acc, firstTokenMs, totalMs: performance.now() - start })
     },
 
-    async testConnection(apiKey) {
+    async     testConnection(apiKey) {
       try {
         // Try /models first (standard OpenAI)
         const res = await getFetch()(`${base}/models`, { headers: { Authorization: `Bearer ${apiKey}` } })
@@ -154,6 +156,21 @@ export function createOpenAICompatible(cfg: ProviderConfig): IProvider {
       } catch (e) {
         console.error("[testConnection] network error:", e)
         return { ok: false, error: normalizeNetworkError(e) as ApiError }
+      }
+    },
+
+    async listRemoteModels(apiKey) {
+      try {
+        const res = await getFetch()(`${base}/models`, { headers: { Authorization: `Bearer ${apiKey}` } })
+        if (!res.ok) {
+          const body = await res.text()
+          throw normalizeHttpStatus(res.status, body, retryAfterMs(res.headers))
+        }
+        const data = await res.json()
+        const list: { id?: string }[] = data?.data ?? []
+        return list.map((m) => m.id).filter((id): id is string => typeof id === "string" && id.length > 0)
+      } catch (e) {
+        throw e instanceof ApiError ? e : normalizeNetworkError(e)
       }
     },
   }

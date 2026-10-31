@@ -9,6 +9,10 @@ import { secrets } from "@/lib/secrets/service"
 import { ProviderForm } from "./ProviderForm"
 
 type TestStatus = { state: "idle" } | { state: "testing" } | { state: "ok" } | { state: "fail"; message: string }
+type FetchStatus =
+  | { state: "fetching" }
+  | { state: "ok"; added: number }
+  | { state: "fail"; message: string }
 
 interface Props {
   onClose: () => void
@@ -23,6 +27,7 @@ export function SettingsDialog({ onClose, onChanged }: Props) {
   const [editing, setEditing] = useState<ProviderRow | "new" | null>(null)
   const [testStatus, setTestStatus] = useState<Record<string, TestStatus>>({})
   const [newModel, setNewModel] = useState<Record<string, string>>({})
+  const [fetchStatus, setFetchStatus] = useState<Record<string, FetchStatus | undefined>>({})
 
   const refresh = useCallback(async () => {
     const list = await providers.list()
@@ -91,6 +96,43 @@ export function SettingsDialog({ onClose, onChanged }: Props) {
     await afterChange()
   }
 
+  // Récupération des modèles annoncés par le fournisseur (GET /models) —
+  // dédoublonnage contre la base ET contre les doublons du retour API.
+  const fetchModels = async (p: ProviderRow) => {
+    setFetchStatus((s) => ({ ...s, [p.id]: { state: "fetching" } }))
+    try {
+      const key = await secrets.get(secretRefFor(p.id))
+      if (!key) {
+        setFetchStatus((s) => ({ ...s, [p.id]: { state: "fail", message: t.settings.noKey } }))
+        return
+      }
+      const ids = await createProvider({
+        id: p.id, name: p.name, apiFamily: p.api_family, baseUrl: p.base_url, secretRef: secretRefFor(p.id),
+      }).listRemoteModels(key)
+      if (ids.length === 0) {
+        setFetchStatus((s) => ({ ...s, [p.id]: { state: "fail", message: t.settings.fetchFail } }))
+        return
+      }
+      const existing = new Set((await providers.listModels(p.id)).map((m) => m.model_id))
+      let added = 0
+      for (const modelId of ids) {
+        if (existing.has(modelId)) continue
+        await providers.addModel(p.id, modelId)
+        existing.add(modelId) // doublons du retour API : ajouté en continu
+        added++
+      }
+      await refresh()
+      setFetchStatus((s) => ({ ...s, [p.id]: { state: "ok", added } }))
+    } catch (e) {
+      const api = e as { kind?: keyof typeof KIND_TO_KEY }
+      const key = api.kind && KIND_TO_KEY[api.kind] ? KIND_TO_KEY[api.kind] : undefined
+      setFetchStatus((s) => ({
+        ...s,
+        [p.id]: { state: "fail", message: key ? t.errors[key] : e instanceof Error ? e.message : String(e) },
+      }))
+    }
+  }
+
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
@@ -134,6 +176,7 @@ export function SettingsDialog({ onClose, onChanged }: Props) {
             <ul className="space-y-3">
               {rows.map((p) => {
                 const status = testStatus[p.id] ?? { state: "idle" as const }
+                const fetchSt = fetchStatus[p.id]
                 return (
                   <li key={p.id} className="rounded-md border border-border p-3">
                     <div className="flex items-center justify-between gap-2">
@@ -148,6 +191,14 @@ export function SettingsDialog({ onClose, onChanged }: Props) {
                           className="rounded-md border border-border px-2 py-1 text-xs hover:bg-foreground/5 disabled:opacity-50"
                         >
                           {status.state === "testing" ? t.settings.testing : t.settings.test}
+                        </button>
+                        <button
+                          data-action="fetch-models"
+                          onClick={() => void fetchModels(p).catch(console.error)}
+                          disabled={fetchStatus[p.id]?.state === "fetching"}
+                          className="rounded-md border border-border px-2 py-1 text-xs hover:bg-foreground/5 disabled:opacity-50"
+                        >
+                          {fetchStatus[p.id]?.state === "fetching" ? t.settings.fetchingModels : t.settings.fetchModels}
                         </button>
                         <button
                           onClick={() => setEditing(p)}
@@ -172,6 +223,17 @@ export function SettingsDialog({ onClose, onChanged }: Props) {
                     )}
                     {status.state === "fail" && (
                       <p className="mt-2 text-xs text-destructive">{t.settings.fail} — {status.message}</p>
+                    )}
+
+                    {fetchSt?.state === "ok" && (
+                      <p data-fetch-status className="mt-2 text-xs text-green-600">
+                        {fetchSt.added} {t.settings.fetchOkAdded}
+                      </p>
+                    )}
+                    {fetchSt?.state === "fail" && (
+                      <p data-fetch-status className="mt-2 text-xs text-destructive">
+                        {t.settings.fetchFail} — {fetchSt.message}
+                      </p>
                     )}
 
                     <div className="mt-2 space-y-1">
