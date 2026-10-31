@@ -24,17 +24,32 @@ describe("conversations.create", () => {
 })
 
 describe("conversations.list", () => {
-  it("exclut les archivées par défaut et mappe archived en booléen-friendly numérique", async () => {
-    mockDb.select.mockResolvedValueOnce([{ id: "a", project_id: null, title: "T", archived: 0, created_at: "x", updated_at: "y" }])
+  it("exclude les archivées par défaut, épinglées d'abord (ORDER BY pinned DESC, updated_at DESC)", async () => {
+    mockDb.select.mockResolvedValueOnce([{ id: "a", project_id: null, title: "T", archived: 0, pinned: 1, created_at: "x", updated_at: "y" }])
     const rows = await conversations.list()
     const [sql] = mockDb.select.mock.calls[0]
     expect(sql).toContain("archived = 0")
+    expect(sql).toContain("ORDER BY pinned DESC, updated_at DESC")
     expect(rows[0].id).toBe("a")
   })
-  it("includeArchived=true ne filtre pas", async () => {
+  it("includeArchived=true ne filtre pas (mais garde le tri épinglées d'abord)", async () => {
     mockDb.select.mockResolvedValueOnce([])
     await conversations.list(true)
-    expect(mockDb.select.mock.calls[0][0]).not.toContain("archived = 0")
+    const sql = mockDb.select.mock.calls[0][0] as string
+    expect(sql).not.toContain("archived = 0")
+    expect(sql).toContain("ORDER BY pinned DESC, updated_at DESC")
+  })
+})
+
+describe("conversations.setPinned", () => {
+  it("émet UPDATE conversations SET pinned (sans toucher updated_at)", async () => {
+    mockDb.execute.mockResolvedValue({ rowsAffected: 1 })
+    await conversations.setPinned("id1", true)
+    const [sql, bind] = mockDb.execute.mock.calls[0]
+    expect(String(sql)).toContain("UPDATE conversations SET pinned = ?")
+    expect(String(sql)).not.toContain("updated_at")
+    expect(bind[0]).toBe(1)
+    expect(bind[1]).toBe("id1")
   })
 })
 

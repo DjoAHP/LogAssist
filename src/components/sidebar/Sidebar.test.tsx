@@ -7,30 +7,54 @@ import type { ConversationRow } from "@/lib/db/conversations"
 afterEach(cleanup)
 
 const conversations: ConversationRow[] = [
-  { id: "c1", project_id: null, title: "Première conv", archived: 0, created_at: "2026-01-01 00:00:00", updated_at: "2026-01-01 00:00:00" },
+  { id: "c1", project_id: null, title: "Première conv", archived: 0, pinned: 0, created_at: "2026-01-01 00:00:00", updated_at: "2026-01-01 00:00:00" },
+  { id: "c2", project_id: null, title: "Conv épinglée", archived: 0, pinned: 1, created_at: "2026-01-01 00:00:00", updated_at: "2026-01-02 00:00:00" },
 ]
 
-function setup() {
+function setup(list = conversations) {
   const onDelete = vi.fn().mockResolvedValue(undefined)
+  const onTogglePin = vi.fn().mockResolvedValue(undefined)
   render(
     <Sidebar
-      conversations={conversations}
+      conversations={list}
       activeId={null}
       onSelect={() => {}}
       onNew={() => {}}
       onDelete={onDelete}
       onRename={() => {}}
+      onTogglePin={onTogglePin}
       width={280}
       onWidthChange={() => {}}
       collapsed={false}
       onToggleCollapse={() => {}}
     />,
   )
-  return { onDelete }
+  return { onDelete, onTogglePin }
 }
 
-const deleteBtn = () => screen.getByRole("button", { name: "Supprimer" })
+const deleteBtn = (title = "Première conv") => {
+  const row = screen.getByText(title).closest('[role="button"]')!
+  return row.querySelector('[aria-label="Supprimer"]')!
+}
 const confirmBtn = () => screen.getByRole("button", { name: "Confirmer la suppression ?" })
+
+describe("Sidebar — épinglage", () => {
+  it("conversation épinglée : aria-pressed, icône toujours visible, clic désépingle", () => {
+    const { onTogglePin } = setup()
+    const pinC2 = screen.getByRole("button", { name: "Désépingler" })
+    expect(pinC2.getAttribute("aria-pressed")).toBe("true")
+    fireEvent.click(pinC2)
+    expect(onTogglePin).toHaveBeenCalledWith("c2", false)
+  })
+
+  it("conversation non épinglée : aria-pressed false, clic épingle", () => {
+    const { onTogglePin } = setup()
+    const pinC1 = screen.getByRole("button", { name: "Épingler" })
+    expect(pinC1.getAttribute("aria-pressed")).toBe("false")
+    fireEvent.click(pinC1)
+    expect(onTogglePin).toHaveBeenCalledWith("c1", true)
+  })
+})
 
 describe("Sidebar — suppression avec confirmation", () => {
   it("premier clic : n'appelle PAS onDelete, affiche l'état de confirmation", () => {

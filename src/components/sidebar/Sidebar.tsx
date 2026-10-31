@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react"
-import { ChevronLeft, ChevronRight, Plus, Search, Trash2, Edit2, GripVertical } from "lucide-react"
+import { ChevronLeft, ChevronRight, Plus, Search, Trash2, Edit2, GripVertical, Pin, PinOff } from "lucide-react"
 import { t } from "@/i18n/fr"
 import type { ConversationRow } from "@/lib/db/conversations"
 
@@ -10,6 +10,8 @@ interface Props {
   onNew: () => void
   onDelete: (id: string) => void
   onRename: (id: string, newTitle: string) => void
+  // Épinglage (migration V4) : un flip → refetch parent → tri SQL pinned DESC
+  onTogglePin: (id: string, pinned: boolean) => void
   width: number
   onWidthChange: (width: number) => void
   collapsed: boolean
@@ -27,6 +29,7 @@ export function Sidebar({
   onNew,
   onDelete,
   onRename,
+  onTogglePin,
   width,
   onWidthChange,
   collapsed,
@@ -230,9 +233,23 @@ export function Sidebar({
                 <span className="truncate flex-1 min-w-0 pr-2">{c.title.trim() || t.sidebar.newConversation}</span>
                 <div
                   className={`flex items-center gap-1 transition-opacity ${
-                    confirmDeleteId === c.id ? "opacity-100" : "opacity-0 group-hover:opacity-100"
+                    confirmDeleteId === c.id || c.pinned === 1
+                      ? "opacity-100"
+                      : "opacity-0 group-hover:opacity-100"
                   }`}
                 >
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      onTogglePin(c.id, c.pinned === 0)
+                    }}
+                    aria-label={c.pinned === 0 ? t.sidebar.pin : t.sidebar.unpin}
+                    aria-pressed={c.pinned === 0 ? "false" : "true"}
+                    className={`rounded p-1 hover:bg-foreground/10 ${c.pinned === 0 ? "" : "text-[#D64627]"}`}
+                    title={c.pinned === 0 ? t.sidebar.pin : t.sidebar.unpin}
+                  >
+                    {c.pinned === 0 ? <Pin className="size-3.5" /> : <PinOff className="size-3.5" />}
+                  </button>
                   <button
                     onClick={(e) => {
                       e.stopPropagation()

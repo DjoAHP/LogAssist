@@ -128,6 +128,14 @@ function App() {
     [refresh],
   )
 
+  const onTogglePin = useCallback(
+    async (id: string, pinned: boolean) => {
+      await conversations.setPinned(id, pinned)
+      await refresh()
+    },
+    [refresh],
+  )
+
   const onSend = useCallback(
     (text: string, attachments: Attachment[]): Promise<boolean> => {
       if (!activeId) return Promise.resolve(false)
@@ -151,6 +159,7 @@ function App() {
         onNew={() => void onNew().catch(console.error)}
         onDelete={(id) => void onDelete(id).catch(console.error)}
         onRename={onRename}
+        onTogglePin={onTogglePin}
         width={sidebarWidth}
         onWidthChange={setSidebarWidth}
         collapsed={sidebarCollapsed}

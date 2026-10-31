@@ -6,6 +6,8 @@ export const fr = {
     general: "Générales",
     rename: "Renommer",
     archive: "Archiver",
+    pin: "Épingler",
+    unpin: "Désépingler",
     delete: "Supprimer",
     deleteConfirm: "Confirmer la suppression ?",
     collapse: "Réduire la barre latérale",
