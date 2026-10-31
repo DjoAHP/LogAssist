@@ -4,7 +4,8 @@ import { logger } from "@/lib/logger"
 import type { ApiError } from "@/lib/ai/errors"
 import type { ApiErrorKind, ProviderConfig, ChatMessage } from "@/lib/ai/types"
 import { buildSystemPrompt } from "@/lib/prompts/compose"
-import { DEFAULT_GENERAL_INSTRUCTIONS, PROFILE_APPRENTISSAGE } from "@/lib/prompts/defaults"
+import { loadPromptSettings } from "@/lib/prompts/store"
+import { knowledge as knowledgeDb } from "@/lib/db/knowledge"
 import { messages as messagesDb, type MessageRow } from "@/lib/db/messages"
 import { images as imagesDb } from "@/lib/db/images"
 import { conversations } from "@/lib/db/conversations"
@@ -102,9 +103,16 @@ export function useChat(modelSelection: { provider: ProviderConfig; modelId: str
         userPersisted = true
 
         // 3. Historique APRÈS l'insert user : le message fait partie du contexte API.
+        // Prompt reconstruit à CHAQUE envoi : modifs des réglages / interrupteurs
+        // de connaissances prennent effet au prochain message.
+        const [promptSettings, enabledKnowledge] = await Promise.all([
+          loadPromptSettings(),
+          knowledgeDb.listEnabled(),
+        ])
         const system = buildSystemPrompt({
-          general: DEFAULT_GENERAL_INSTRUCTIONS,
-          profile: PROFILE_APPRENTISSAGE,
+          general: promptSettings.general,
+          profile: promptSettings.profile,
+          knowledge: enabledKnowledge.map((k) => ({ name: k.name, content: k.content })),
         })
         const history = await messagesDb.listByConversation(conversationId)
         const apiMessages: ChatMessage[] = [

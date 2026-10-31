@@ -5,6 +5,7 @@ import { useChat } from "@/hooks/useChat"
 import type { ProviderConfig } from "@/lib/ai/types"
 
 const streamMock = vi.hoisted(() => vi.fn())
+const systemPromptMock = vi.hoisted(() => vi.fn())
 
 vi.mock("@/lib/db/messages", () => ({
   messages: { insert: vi.fn(), listByConversation: vi.fn(), updateError: vi.fn(), removeByConversation: vi.fn() },
@@ -12,11 +13,11 @@ vi.mock("@/lib/db/messages", () => ({
 vi.mock("@/lib/db/images", () => ({ images: { create: vi.fn(), get: vi.fn(), remove: vi.fn() } }))
 vi.mock("@/lib/db/conversations", () => ({ conversations: { touch: vi.fn(), create: vi.fn(), rename: vi.fn(), remove: vi.fn() } }))
 vi.mock("@/lib/secrets/service", () => ({ secrets: { set: vi.fn(), get: vi.fn(), remove: vi.fn() } }))
-vi.mock("@/lib/prompts/compose", () => ({ buildSystemPrompt: () => "" }))
-vi.mock("@/lib/prompts/defaults", () => ({
-  DEFAULT_GENERAL_INSTRUCTIONS: "",
-  PROFILE_APPRENTISSAGE: "",
+vi.mock("@/lib/prompts/compose", () => ({ buildSystemPrompt: systemPromptMock }))
+vi.mock("@/lib/prompts/store", () => ({
+  loadPromptSettings: vi.fn().mockResolvedValue({ general: "GEN", profile: "PROF" }),
 }))
+vi.mock("@/lib/db/knowledge", () => ({ knowledge: { listEnabled: vi.fn().mockResolvedValue([]) } }))
 vi.mock("@/lib/ai/factory", () => ({
   buildPreview: (p: string, m: string) => `${p} › ${m}`,
   createProvider: () => ({ stream: streamMock, complete: vi.fn(), testConnection: vi.fn() }),
@@ -25,6 +26,7 @@ vi.mock("@/lib/ai/factory", () => ({
 import { messages as messagesDb } from "@/lib/db/messages"
 import { conversations } from "@/lib/db/conversations"
 import { secrets } from "@/lib/secrets/service"
+import { knowledge } from "@/lib/db/knowledge"
 
 const provider = {
   name: "Test",
@@ -76,5 +78,24 @@ describe("useChat.send — contract anti-perte", () => {
     })
     expect(ok).toBe(false)
     expect(streamMock).not.toHaveBeenCalled()
+  })
+
+  it("construit le prompt système depuis les réglages stockés et les connaissances activées", async () => {
+    vi.mocked(knowledge.listEnabled).mockResolvedValueOnce([
+      { id: "k1", name: "HISE", content: "## HISE", enabled: 1, created_at: "x" },
+    ])
+    const { result } = renderHook(() => useChat(modelSelection))
+    await act(async () => {
+      await result.current.send("conv-1", "Salut")
+    })
+    const calls = systemPromptMock.mock.calls
+    const arg = calls[calls.length - 1][0] as {
+      general: string
+      profile: string
+      knowledge: { name: string; content: string }[]
+    }
+    expect(arg.general).toBe("GEN")
+    expect(arg.profile).toBe("PROF")
+    expect(arg.knowledge).toEqual([{ name: "HISE", content: "## HISE" }])
   })
 })

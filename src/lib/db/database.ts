@@ -1,5 +1,5 @@
 import Database from "@tauri-apps/plugin-sql"
-import { SCHEMA_VERSION, SCHEMA_V1_STATEMENTS, SCHEMA_V2_STATEMENTS } from "./migrations"
+import { SCHEMA_VERSION, SCHEMA_V1_STATEMENTS, SCHEMA_V2_STATEMENTS, SCHEMA_V3_STATEMENTS } from "./migrations"
 
 let dbPromise: Promise<Database> | null = null
 
@@ -36,7 +36,12 @@ async function executeSchema(db: Database, fromVersion: number): Promise<void> {
       await db.execute(statement)
     }
   }
-  // Ajouter ici les futures migrations (fromVersion < 3, etc.)
+  if (fromVersion < 3) {
+    for (const statement of SCHEMA_V3_STATEMENTS) {
+      await db.execute(statement)
+    }
+  }
+  // Ajouter ici les futures migrations (fromVersion < 4, etc.)
 }
 
 export async function execute(sql: string, bind: unknown[] = []): Promise<void> {

@@ -16,8 +16,14 @@ describe("buildSystemPrompt", () => {
     expect(p).not.toContain("## Profil")
     expect(p).not.toContain("## Projet")
   })
-  it("retourne une chaîne vide si tout est vide", () => {
+  it("une connaissance activée porte le prompt quand les sections de base sont vides", () => {
+    const p = buildSystemPrompt({ general: "", profile: "", knowledge: [{ name: "HISE", content: "md" }] })
+    expect(p).toContain("## Connaissance : HISE")
+    expect(p).not.toContain("## Instructions générales")
+  })
+  it("retourne une chaîne vide sans section ni connaissance", () => {
     expect(buildSystemPrompt({ general: "", profile: "" })).toBe("")
+    expect(buildSystemPrompt({ general: "", profile: "", knowledge: [] })).toBe("")
   })
   it("trimme chaque section", () => {
     const p = buildSystemPrompt({ general: "  GEN  ", profile: " PROF " })
@@ -26,5 +32,24 @@ describe("buildSystemPrompt", () => {
   it("les defaults sont non vides et pédagogiques", () => {
     expect(DEFAULT_GENERAL_INSTRUCTIONS.length).toBeGreaterThan(50)
     expect(PROFILE_APPRENTISSAGE.length).toBeGreaterThan(20)
+  })
+  it("injecte chaque connaissance activée après les sections de base", () => {
+    const p = buildSystemPrompt({
+      general: "GEN",
+      profile: "PROF",
+      knowledge: [
+        { name: "HISE", content: "## Mode d'emploi HISE" },
+        { name: "DaVinci", content: "## Color grading" },
+      ],
+    })
+    expect(p).toContain("## Connaissance : HISE")
+    expect(p).toContain("## Mode d'emploi HISE")
+    expect(p).toContain("## Connaissance : DaVinci")
+    expect(p.indexOf("## Profil")).toBeLessThan(p.indexOf("## Connaissance : HISE"))
+    expect(p.indexOf("## Connaissance : HISE")).toBeLessThan(p.indexOf("## Connaissance : DaVinci"))
+  })
+  it("omet un contenu de connaissance vide", () => {
+    const p = buildSystemPrompt({ general: "GEN", profile: "", knowledge: [{ name: "HISE", content: "  " }] })
+    expect(p).not.toContain("## Connaissance : HISE")
   })
 })

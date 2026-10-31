@@ -11,6 +11,11 @@ export default {
         muted: "hsl(var(--muted))",
         "muted-foreground": "hsl(var(--muted-foreground))",
         destructive: "hsl(var(--destructive))",
+        // Accents de marque (AGENTS.md) : variables définies dans index.css.
+        brand: {
+          from: "var(--brand-from)",
+          to: "var(--brand-to)",
+        },
       },
     },
   },

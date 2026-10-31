@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react"
-import { Settings as SettingsIcon } from "lucide-react"
+import { BookOpen, Settings as SettingsIcon } from "lucide-react"
 import logoSrc from "@/assets/logo.png"
 import { t } from "@/i18n/fr"
 import { conversations } from "@/lib/db/conversations"
@@ -11,6 +11,7 @@ import { Sidebar } from "@/components/sidebar/Sidebar"
 import { ChatView } from "@/components/chat/ChatView"
 import { InputBar } from "@/components/chat/InputBar"
 import { SettingsDialog } from "@/components/settings/SettingsDialog"
+import { AssistantDialog } from "@/components/settings/AssistantDialog"
 import { appVersion } from "@/lib/appVersion"
 
 const DEFAULT_SIDEBAR_WIDTH = 280
@@ -21,6 +22,7 @@ function App() {
   const [activeModel, setActiveModel] = useState<ActiveModel | null>(null)
   const [modelOptions, setModelOptions] = useState<{ rowId: string; label: string; isDefault: boolean; supportsImages: boolean }[]>([])
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [assistantOpen, setAssistantOpen] = useState(false)
   const [sidebarWidth, setSidebarWidth] = useState(DEFAULT_SIDEBAR_WIDTH)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
 
@@ -170,6 +172,14 @@ function App() {
               <p className="text-xs text-muted-foreground">{t.app.subtitle}</p>
             </div>
           </div>
+        <div className="flex items-center gap-1">
+          <button
+            aria-label={t.assistant.title}
+            onClick={() => setAssistantOpen(true)}
+            className="rounded-md p-1.5 hover:bg-foreground/5"
+          >
+            <BookOpen className="size-4" />
+          </button>
           <button
             aria-label={t.settings.title}
             onClick={() => setSettingsOpen(true)}
@@ -177,6 +187,7 @@ function App() {
           >
             <SettingsIcon className="size-4" />
           </button>
+        </div>
         </header>
         <ChatView
           vm={vm}
@@ -197,6 +208,7 @@ function App() {
       {settingsOpen && (
         <SettingsDialog onClose={() => setSettingsOpen(false)} onChanged={onSettingsChanged} />
       )}
+      {assistantOpen && <AssistantDialog onClose={() => setAssistantOpen(false)} />}
     </main>
   )
 }
