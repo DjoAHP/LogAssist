@@ -8,6 +8,10 @@
     "opener:default",
     "sql:default",
     "sql:allow-execute",
+    "dialog:default",
+    "dialog:allow-save",
+    "fs:default",
+    "fs:allow-write",
     {
       "identifier": "http:default",
       "allow": [

@@ -12,6 +12,7 @@ export const fr = {
     deleteConfirm: "Confirmer la suppression ?",
     collapse: "Réduire la barre latérale",
     expand: "Étendre la barre latérale",
+    export: "Exporter en Markdown",
   },
   chat: {
     placeholder: "Écrivez votre message… (Entrée pour envoyer, Maj+Entrée pour une nouvelle ligne)",

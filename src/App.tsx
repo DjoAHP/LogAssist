@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useState } from "react"
-import { BookOpen, Settings as SettingsIcon } from "lucide-react"
+import { BookOpen, Settings as SettingsIcon, Download } from "lucide-react"
 import logoSrc from "@/assets/logo.png"
 import { t } from "@/i18n/fr"
 import { conversations } from "@/lib/db/conversations"
+import { exportConversation } from "@/lib/export"
 import { getActiveModel, type ActiveModel } from "@/lib/db/activeModel"
 import { providers, type ProviderRow, type ModelRow } from "@/lib/db/providers"
 import { useConversations } from "@/hooks/useConversations"
@@ -182,6 +183,33 @@ function App() {
             </div>
           </div>
         <div className="flex items-center gap-1">
+          <button
+            aria-label={t.sidebar.export}
+            onClick={async () => {
+              if (!activeId) return
+              const md = await exportConversation(activeId)
+              if (!md) return
+              try {
+                // @tauri-apps/plugin-dialog + @tauri-apps/plugin-fs
+                // Installation requise : PowerShell → npm install @tauri-apps/plugin-dialog @tauri-apps/plugin-fs
+                const { save } = await import("@tauri-apps/plugin-dialog")
+                const { writeTextFile } = await import("@tauri-apps/plugin-fs")
+                const path = await save({
+                  filters: [{ name: "Markdown", extensions: ["md"] }],
+                  defaultPath: `conversation-${activeId.slice(0, 8)}.md`,
+                })
+                if (path) {
+                  await writeTextFile(path, md)
+                }
+              } catch (e) {
+                console.error("[Export] Tauri plugins non disponibles ou erreur:", e)
+              }
+            }}
+            disabled={!activeId}
+            className="rounded-md p-1.5 hover:bg-foreground/5 disabled:opacity-30 disabled:hover:bg-transparent"
+          >
+            <Download className="size-4" />
+          </button>
           <button
             aria-label={t.assistant.title}
             onClick={() => setAssistantOpen(true)}
