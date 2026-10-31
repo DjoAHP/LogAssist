@@ -153,15 +153,18 @@ export function SettingsDialog({ onClose, onChanged }: Props) {
         setFetchStatus((s) => ({ ...s, [p.id]: { state: "fail", message: t.settings.fetchFail } }))
         return
       }
-      // Auto-ajout (comme avant) + affichage dropdown pour référence
+      // Auto-ajout en base
       let added = 0
       for (const modelId of newModels) {
         await providers.addModel(p.id, modelId)
         added++
       }
+      // Refresh pour recharger models depuis la DB (inclut les nouveaux)
       await afterChange()
-      setFetchedModels((s) => ({ ...s, [p.id]: newModels }))
+      // Ouvre le dropdown APRÈS le refresh : les modèles sont maintenant dans models[p.id]
       setFetchOpen(p.id)
+      // Nettoie fetchedModels (plus utile, les modèles sont en base)
+      setFetchedModels((s) => { const n = { ...s }; delete n[p.id]; return n })
       setFetchStatus((s) => ({ ...s, [p.id]: { state: "ok", added } }))
     } catch (e) {
       const api = e as { kind?: keyof typeof KIND_TO_KEY }
