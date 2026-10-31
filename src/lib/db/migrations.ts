@@ -1,4 +1,4 @@
-export const SCHEMA_VERSION = 3
+export const SCHEMA_VERSION = 4
 
 // Chaque statement est un item distinct : audit-able, et exécution séquentielle
 // garantie (sqlx rejette le multi-statement dans un seul execute).
@@ -120,6 +120,19 @@ export const SCHEMA_V3_STATEMENTS: string[] = [
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 )`,
   `CREATE INDEX IF NOT EXISTS idx_knowledge_enabled ON knowledge(enabled)`,
+]
+
+// Migration V4 : épinglage de conversations, ordre manuel des connaissances
+// et activations par conversation (overrides). ALTER idempotents impossible
+// en SQLite : les statements ne s'exécutent qu'une fois (user_version gate).
+export const SCHEMA_V4_STATEMENTS: string[] = [
+  `ALTER TABLE conversations ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0`,
+  `ALTER TABLE knowledge ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0`,
+  `CREATE TABLE IF NOT EXISTS conversation_knowledge (
+  conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+  knowledge_id TEXT NOT NULL REFERENCES knowledge(id) ON DELETE CASCADE,
+  PRIMARY KEY (conversation_id, knowledge_id)
+)`,
 ]
 
 export const SCHEMA_V1 = SCHEMA_V1_STATEMENTS.join(";\n")
