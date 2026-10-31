@@ -48,6 +48,7 @@ export const fr = {
     fetchModels: "Récupérer les modèles",
     fetchingModels: "Récupération…",
     fetchedModels: "Modèles récupérés",
+    searchModels: "Filtrer les modèles…",
     fetchOkAdded: "modèle(s) ajouté(s)",
     fetchFail: "Échec de récupération",
     ok: "Connexion réussie",

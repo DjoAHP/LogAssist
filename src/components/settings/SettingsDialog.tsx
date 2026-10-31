@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useState } from "react"
-import { Check, ChevronDown, Plus, Star, Trash2, X } from "lucide-react"
+import { useCallback, useEffect, useMemo, useState } from "react"
+import { Check, Plus, Trash2, X } from "lucide-react"
 import { t } from "@/i18n/fr"
 import { logger } from "@/lib/logger"
 import { createProvider } from "@/lib/ai/factory"
@@ -7,6 +7,7 @@ import { KIND_TO_KEY } from "@/lib/ai/errors"
 import { providers, secretRefFor, type ProviderRow, type ModelRow } from "@/lib/db/providers"
 import { secrets } from "@/lib/secrets/service"
 import { ProviderForm } from "./ProviderForm"
+import { ModelDropdown } from "./ModelDropdown"
 
 type TestStatus = { state: "idle" } | { state: "testing" } | { state: "ok" } | { state: "fail"; message: string }
 type FetchStatus =
@@ -30,6 +31,35 @@ export function SettingsDialog({ onClose, onChanged }: Props) {
   const [fetchStatus, setFetchStatus] = useState<Record<string, FetchStatus | undefined>>({})
   const [fetchedModels, setFetchedModels] = useState<Record<string, string[]>>({})
   const [fetchOpen, setFetchOpen] = useState<string | null>(null)
+  const [modelSearch, setModelSearch] = useState<Record<string, string>>({})
+
+  // Modèles combinés (BDD + fraîchement récupérés) par provider
+  const combinedModels = useMemo(() => {
+    const result: Record<string, Array<{ id: string; label: string; inDb: boolean; isDefault: boolean }>> = {}
+    for (const p of rows) {
+      const dbModels = (models[p.id] ?? []).map((m) => ({
+        id: m.id, label: m.model_id, inDb: true, isDefault: m.is_default === 1,
+      }))
+      const fetched = (fetchedModels[p.id] ?? []).map((m) => ({
+        id: `fetched-${m}`, label: m, inDb: false, isDefault: false,
+      }))
+      const all = [...dbModels, ...fetched]
+      // Dédup par label
+      const seen = new Set<string>()
+      result[p.id] = all.filter((m) => !seen.has(m.label) && !seen.add(m.label))
+    }
+    return result
+  }, [rows, models, fetchedModels])
+
+  // Modèles filtrés par recherche
+  const filteredModels = useMemo(() => {
+    const result: Record<string, typeof combinedModels[string]> = {}
+    for (const [pid, ms] of Object.entries(combinedModels)) {
+      const search = (modelSearch[pid] ?? "").toLowerCase()
+      result[pid] = ms.filter((m) => m.label.toLowerCase().includes(search))
+    }
+    return result
+  }, [combinedModels, modelSearch])
 
   const refresh = useCallback(async () => {
     const list = await providers.list()
@@ -246,95 +276,39 @@ export function SettingsDialog({ onClose, onChanged }: Props) {
                       </p>
                     )}
 
-                    {/* Dropdown modèles récupérés (auto-ajoutés, lecture seule) */}
-                    {fetchOpen === p.id && fetchedModels[p.id]?.length && (
-                      <div className="mt-2">
-                        <div className="relative">
-                          <button
-                            onClick={() => setFetchOpen(null)}
-                            className="w-full flex items-center justify-between gap-2 rounded-md border border-border px-2 py-1.5 text-xs text-left bg-background hover:bg-foreground/5"
-                          >
-                            <span>{t.settings.fetchedModels} ({fetchedModels[p.id]!.length})</span>
-                            <ChevronDown className="size-3.5 text-muted-foreground flex-shrink-0" />
-                          </button>
-                          <div className="absolute top-full left-0 right-0 mt-1 z-10 rounded-md border border-border bg-background shadow-lg max-h-60 overflow-auto">
-                            {fetchedModels[p.id]!.map((modelId) => (
-                              <div
-                                key={modelId}
-                                className="flex items-center justify-between gap-2 px-2 py-1.5 text-xs"
-                              >
-                                <span className="truncate">{modelId}</span>
-                                <Check className="size-3.5 text-green-600 flex-shrink-0" />
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      </div>
-                    )}
+                    {/* Dropdown unifié modèles (BDD + fraîchement récupérés) avec recherche */}
+                    <ModelDropdown
+                      models={filteredModels[p.id] ?? []}
+                      search={modelSearch[p.id] ?? ""}
+                      onSearchChange={(q) => setModelSearch((s) => ({ ...s, [p.id]: q }))}
+                      fetchOpen={fetchOpen === p.id ? p.id : null}
+                      onFetchToggle={(open) => setFetchOpen(open ? p.id : null)}
+                      onAddFetched={async (label) => {
+                        await providers.addModel(p.id, label)
+                        await afterChange()
+                      }}
+                    />
 
-                    <div className="mt-2 space-y-1">
-                      <p className="text-xs text-muted-foreground">{t.settings.models}</p>
-                      {(models[p.id]?.length ?? 0) === 0 ? (
-                        <p className="text-xs text-muted-foreground">{t.settings.noModels}</p>
-                      ) : (
-                        <div className="flex flex-wrap gap-1.5">
-                          {(models[p.id] ?? []).map((m) => (
-                            <span
-                              key={m.id}
-                              className="flex items-center gap-1 rounded-full border border-border px-2 py-0.5 text-xs"
-                            >
-                              {m.is_default === 1 && <Star className="size-3 text-amber-500" />}
-                              {m.model_id}
-                              <button
-                                aria-label={t.settings.setDefault}
-                                onClick={() => {
-                                  if (m.is_default === 1) return
-                                  void providers
-                                    .setDefaultModel(m.id)
-                                    .then(afterChange)
-                                    .catch(console.error)
-                                }}
-                                className="hover:opacity-70"
-                              >
-                                <Star className={`size-3 ${m.is_default === 1 ? "fill-amber-500 text-amber-500" : ""}`} />
-                              </button>
-                              <button
-                                aria-label={t.settings.delete}
-                                onClick={() => {
-                                  void providers
-                                    .removeModel(m.id)
-                                    .then(afterChange)
-                                    .catch(console.error)
-                                }}
-                                className="hover:opacity-70"
-                              >
-                                <Trash2 className="size-3" />
-                              </button>
-                            </span>
-                          ))}
-                        </div>
-                      )}
-                      <div className="flex gap-1.5">
-                        <input
-                          value={newModel[p.id] ?? ""}
-                          onChange={(e) => setNewModel((s) => ({ ...s, [p.id]: e.target.value }))}
-                          onKeyDown={(e) => {
-                            if (e.key === "Enter") {
-                              e.preventDefault()
-                              void addModel(p).catch(console.error)
-                            }
-                          }}
-                          aria-label={t.settings.addModel}
-                          placeholder={t.settings.addModelPlaceholder}
-                          className="w-48 rounded-md border border-border bg-transparent px-2 py-1 text-xs outline-none"
-                        />
-                        <button
-                          onClick={() => void addModel(p).catch(console.error)}
-                          className="rounded-md border border-border px-2 py-1 text-xs hover:bg-foreground/5"
-                        >
-                          <Plus className="size-3" />
-                        </button>
-                      </div>
+                    <div className="mt-2 flex gap-1.5">
+                      <input
+                        value={newModel[p.id] ?? ""}
+                        onChange={(e) => setNewModel((s) => ({ ...s, [p.id]: e.target.value }))}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") {
+                            e.preventDefault()
+                            void addModel(p).catch(console.error)
+                          }
+                        }}
+                        aria-label={t.settings.addModel}
+                        placeholder={t.settings.addModelPlaceholder}
+                        className="flex-1 min-w-0 rounded-md border border-border bg-transparent px-2 py-1 text-xs outline-none"
+                      />
+                      <button
+                        onClick={() => void addModel(p).catch(console.error)}
+                        className="rounded-md border border-border px-2 py-1 text-xs hover:bg-foreground/5 flex-shrink-0"
+                      >
+                        <Plus className="size-3" />
+                      </button>
                     </div>
                   </li>
                 )
