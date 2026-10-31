@@ -49,7 +49,7 @@ afterEach(cleanup)
 
 describe("AssistantDialog", () => {
   it("affiche les 3 sections avec les valeurs chargées", async () => {
-    render(<AssistantDialog onClose={() => {}} />)
+    render(<AssistantDialog onClose={() => {}} conversationId="test-conv" />)
     const general = await screen.findByLabelText(/Instructions générales/) as HTMLTextAreaElement
     expect(general.value).toBe("Défaut general")
     expect((screen.getByLabelText(/Profil/) as HTMLTextAreaElement).value).toBe("Défaut profil")
@@ -58,7 +58,7 @@ describe("AssistantDialog", () => {
   })
 
   it("Enregistrer sauvegarde les deux sections éditées", async () => {
-    render(<AssistantDialog onClose={() => {}} />)
+    render(<AssistantDialog onClose={() => {}} conversationId="test-conv" />)
     const general = await screen.findByLabelText(/Instructions générales/)
     fireEvent.change(general, { target: { value: "Nouveau general" } })
     fireEvent.click(screen.getByRole("button", { name: "Enregistrer le prompt" }))
@@ -68,7 +68,7 @@ describe("AssistantDialog", () => {
   })
 
   it("Restaurer les défauts remet les textes par défaut", async () => {
-    render(<AssistantDialog onClose={() => {}} />)
+    render(<AssistantDialog onClose={() => {}} conversationId="test-conv" />)
     const general = await screen.findByLabelText(/Instructions générales/) as HTMLTextAreaElement
     fireEvent.change(general, { target: { value: "Modifié" } })
     fireEvent.click(screen.getByRole("button", { name: "Restaurer les défauts" }))
@@ -76,7 +76,7 @@ describe("AssistantDialog", () => {
   })
 
   it("l'interrupteur d'une connaissance alterne enabled", async () => {
-    render(<AssistantDialog onClose={() => {}} />)
+    render(<AssistantDialog onClose={() => {}} conversationId="test-conv" />)
     const HISE = await screen.findByText("HISE")
     const article = HISE.closest("article")!
     const checkbox = article.querySelector('input[type="checkbox"]') as HTMLInputElement
@@ -87,7 +87,7 @@ describe("AssistantDialog", () => {
 
   it("supprimer une connaissance passe par knowledge.remove", async () => {
     vi.spyOn(window, "confirm").mockReturnValue(true)
-    render(<AssistantDialog onClose={() => {}} />)
+    render(<AssistantDialog onClose={() => {}} conversationId="test-conv" />)
     const Resolve = await screen.findByText("Resolve")
     const article = Resolve.closest("article")!
     fireEvent.click(article.querySelector('[aria-label="Supprimer"]')!)
@@ -95,7 +95,7 @@ describe("AssistantDialog", () => {
   })
 
   it("Ajouter connaissance : nom + fichier .md importé + enregistrer", async () => {
-    render(<AssistantDialog onClose={() => {}} />)
+    render(<AssistantDialog onClose={() => {}} conversationId="test-conv" />)
     fireEvent.click(await screen.findByRole("button", { name: "Ajouter connaissance" }))
     fireEvent.change(await screen.findByLabelText("Nom de la connaissance"), { target: { value: "HISE" } })
     // Import fichier : File.text() retourne le markdown
@@ -110,7 +110,7 @@ describe("AssistantDialog", () => {
   })
 
   it("modifier une connaissance existante passe par knowledge.update", async () => {
-    render(<AssistantDialog onClose={() => {}} />)
+    render(<AssistantDialog onClose={() => {}} conversationId="test-conv" />)
     const HISE = await screen.findByText("HISE")
     const article = HISE.closest("article")!
     fireEvent.click(article.querySelector('[aria-label="Modifier"]')!)

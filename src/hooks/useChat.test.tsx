@@ -18,7 +18,8 @@ vi.mock("@/lib/prompts/compose", () => ({ buildSystemPrompt: systemPromptMock })
 vi.mock("@/lib/prompts/store", () => ({
   loadPromptSettings: vi.fn().mockResolvedValue({ general: "GEN", profile: "PROF" }),
 }))
-vi.mock("@/lib/db/knowledge", () => ({ knowledge: { listEnabled: vi.fn().mockResolvedValue([]) } }))
+vi.mock("@/lib/db/knowledge", () => ({ knowledge: { listEnabled: vi.fn().mockResolvedValue([]), list: vi.fn().mockResolvedValue([]) } }))
+vi.mock("@/lib/db/conversationKnowledge", () => ({ conversationKnowledge: { listOn: vi.fn().mockResolvedValue([]) } }))
 vi.mock("@/lib/ai/factory", () => ({
   buildPreview: (p: string, m: string) => `${p} › ${m}`,
   createProvider: () => ({ stream: streamMock, complete: vi.fn(), testConnection: vi.fn() }),
@@ -28,6 +29,7 @@ import { messages as messagesDb } from "@/lib/db/messages"
 import { conversations } from "@/lib/db/conversations"
 import { secrets } from "@/lib/secrets/service"
 import { knowledge } from "@/lib/db/knowledge"
+import { conversationKnowledge } from "@/lib/db/conversationKnowledge"
 
 const provider = {
   name: "Test",
@@ -82,6 +84,7 @@ describe("useChat.send — contract anti-perte", () => {
   })
 
   it("construit le prompt système depuis les réglages stockés et les connaissances activées", async () => {
+    vi.mocked(conversationKnowledge.listOn).mockResolvedValueOnce([])
     vi.mocked(knowledge.listEnabled).mockResolvedValueOnce([
       { id: "k1", name: "HISE", content: "## HISE", enabled: 1, sort_order: 0, created_at: "x" },
     ])

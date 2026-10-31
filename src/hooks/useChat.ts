@@ -6,6 +6,7 @@ import type { ApiErrorKind, ProviderConfig, ChatMessage } from "@/lib/ai/types"
 import { buildSystemPrompt } from "@/lib/prompts/compose"
 import { loadPromptSettings } from "@/lib/prompts/store"
 import { knowledge as knowledgeDb } from "@/lib/db/knowledge"
+import { conversationKnowledge } from "@/lib/db/conversationKnowledge"
 import { messages as messagesDb, type MessageRow } from "@/lib/db/messages"
 import { images as imagesDb } from "@/lib/db/images"
 import { conversations } from "@/lib/db/conversations"
@@ -117,7 +118,17 @@ export function useChat(modelSelection: { provider: ProviderConfig; modelId: str
         // de connaissances prennent effet au prochain message.
         const [promptSettings, enabledKnowledge] = await Promise.all([
           loadPromptSettings(),
-          knowledgeDb.listEnabled(),
+          // Overrides par conversation : si la conversation a des knowledge_id explicites,
+          // on les utilise (respectant l'ordre sort_order), sinon fallback global listEnabled.
+          (async () => {
+            const overrideIds = await conversationKnowledge.listOn(conversationId)
+            if (overrideIds.length > 0) {
+              const rows = await knowledgeDb.list()
+              const byId = new Map(rows.map((k) => [k.id, k]))
+              return overrideIds.map((id) => byId.get(id)).filter((k): k is typeof rows[0] => !!k && k.enabled === 1)
+            }
+            return knowledgeDb.listEnabled()
+          })(),
         ])
         const system = buildSystemPrompt({
           general: promptSettings.general,

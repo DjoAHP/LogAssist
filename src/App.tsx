@@ -245,7 +245,7 @@ function App() {
       {settingsOpen && (
         <SettingsDialog onClose={() => setSettingsOpen(false)} onChanged={onSettingsChanged} />
       )}
-      {assistantOpen && <AssistantDialog onClose={() => setAssistantOpen(false)} />}
+      {assistantOpen && <AssistantDialog onClose={() => setAssistantOpen(false)} conversationId={activeId} />}
     </main>
   )
 }

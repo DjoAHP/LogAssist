@@ -5,9 +5,11 @@ import { logger } from "@/lib/logger"
 import { loadPromptSettings, savePromptSettings } from "@/lib/prompts/store"
 import { DEFAULT_GENERAL_INSTRUCTIONS, PROFILE_APPRENTISSAGE } from "@/lib/prompts/defaults"
 import { knowledge, type KnowledgeRow } from "@/lib/db/knowledge"
+import { conversationKnowledge } from "@/lib/db/conversationKnowledge"
 
 interface Props {
   onClose: () => void
+  conversationId: string | null
 }
 
 interface KnowledgeFormState {
@@ -22,16 +24,27 @@ const EMPTY_FORM: KnowledgeFormState = { editingId: null, name: "", content: "" 
 // Trois sections : 1) instructions générales, 2) profil (stockées dans la table
 // settings), 3) bibliothèque de connaissances .md activables (table knowledge).
 // Leak-on-top : le contenu des connaissances n'est JAMAIS loggué.
-export function AssistantDialog({ onClose }: Props) {
+export function AssistantDialog({ onClose, conversationId }: Props) {
   const [general, setGeneral] = useState("")
   const [profile, setProfile] = useState("")
   const [rows, setRows] = useState<KnowledgeRow[]>([])
   const [form, setForm] = useState<KnowledgeFormState | null>(null)
   const [saved, setSaved] = useState(false)
+  const [overrideOpen, setOverrideOpen] = useState(false)
+  const [overrideIds, setOverrideIds] = useState<string[]>([])
 
   const refreshKnowledge = useCallback(async () => {
     setRows(await knowledge.list())
   }, [])
+
+  const loadOverrides = useCallback(async () => {
+    if (conversationId) {
+      const ids = await conversationKnowledge.listOn(conversationId)
+      setOverrideIds(ids)
+    } else {
+      setOverrideIds([])
+    }
+  }, [conversationId])
 
   useEffect(() => {
     void (async () => {
@@ -40,7 +53,8 @@ export function AssistantDialog({ onClose }: Props) {
       setProfile(s.profile)
     })().catch(logger.error)
     void refreshKnowledge().catch(logger.error)
-  }, [refreshKnowledge])
+    void loadOverrides().catch(logger.error)
+  }, [refreshKnowledge, loadOverrides])
 
   // Escape ferme en premier la sous-modal, sinon la principale.
   useEffect(() => {
@@ -95,6 +109,12 @@ export function AssistantDialog({ onClose }: Props) {
     },
     [refreshKnowledge],
   )
+
+  const saveOverrides = useCallback(async () => {
+    if (!conversationId) return
+    await conversationKnowledge.setOn(conversationId, overrideIds)
+    setOverrideOpen(false)
+  }, [conversationId, overrideIds])
 
   const openForm = (k?: KnowledgeRow) =>
     setForm(k ? { editingId: k.id, name: k.name, content: k.content } : { ...EMPTY_FORM })
@@ -196,12 +216,21 @@ export function AssistantDialog({ onClose }: Props) {
         <section>
           <div className="mb-1 flex items-baseline justify-between">
             <h3 className="text-sm font-medium">{t.assistant.knowledgeTitle}</h3>
-            <button
-              onClick={() => openForm()}
-              className="flex items-center gap-1.5 rounded-md border border-border px-3 py-1.5 text-sm hover:bg-foreground/5"
-            >
-              <Plus className="size-4" /> {t.assistant.addKnowledge}
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setOverrideOpen(true)}
+                disabled={!conversationId || rows.length === 0}
+                className="rounded-md border border-border px-3 py-1.5 text-sm hover:bg-foreground/5 disabled:opacity-30"
+              >
+                {t.assistant.perConversation}
+              </button>
+              <button
+                onClick={() => openForm()}
+                className="flex items-center gap-1.5 rounded-md border border-border px-3 py-1.5 text-sm hover:bg-foreground/5"
+              >
+                <Plus className="size-4" /> {t.assistant.addKnowledge}
+              </button>
+            </div>
           </div>
           <p className="mb-2 text-xs text-muted-foreground">{t.assistant.knowledgeHint}</p>
 
@@ -333,6 +362,66 @@ export function AssistantDialog({ onClose }: Props) {
                   className="rounded-md bg-brand-from px-3 py-1.5 text-sm text-white hover:opacity-90 disabled:opacity-50"
                 >
                   {t.assistant.saveKnowledge}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Popover : connaissances par conversation (overrides) */}
+        {overrideOpen && conversationId && (
+          <div
+            className="fixed inset-0 z-60 flex items-center justify-center bg-black/70"
+            onClick={() => setOverrideOpen(false)}
+          >
+            <div
+              role="dialog"
+              aria-modal="true"
+              aria-label={t.assistant.perConversationTitle}
+              className="w-[480px] max-w-[92vw] max-h-[70vh] overflow-y-auto rounded-lg border border-border bg-background p-4"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <header className="mb-3 flex items-center justify-between">
+                <h3 className="text-sm font-semibold">{t.assistant.perConversationTitle}</h3>
+                <button aria-label={t.assistant.close} onClick={() => setOverrideOpen(false)} className="rounded-md p-1 hover:bg-foreground/5">
+                  <X className="size-4" />
+                </button>
+              </header>
+              <p className="mb-3 text-xs text-muted-foreground">{t.assistant.perConversationHint}</p>
+              {rows.length === 0 && <p className="text-sm text-muted-foreground">{t.assistant.noKnowledge}</p>}
+              <ul className="space-y-2 mb-4">
+                {rows.map((k) => (
+                  <li key={k.id}>
+                    <label className="flex items-center justify-between gap-2 rounded-md border border-border p-2">
+                      <span className="truncate text-sm">{k.name}</span>
+                      <input
+                        type="checkbox"
+                        checked={overrideIds.includes(k.id)}
+                        onChange={(e) =>
+                          setOverrideIds((prev) =>
+                            e.target.checked ? [...prev, k.id] : prev.filter((id) => id !== k.id)
+                          )
+                        }
+                        disabled={k.enabled !== 1}
+                        className="size-4 accent-brand-from disabled:opacity-30"
+                        aria-label={`${t.assistant.toggle} pour cette conversation`}
+                      />
+                    </label>
+                  </li>
+                ))}
+              </ul>
+              <div className="flex justify-end gap-2">
+                <button
+                  onClick={() => setOverrideOpen(false)}
+                  className="rounded-md border border-border px-3 py-1.5 text-sm hover:bg-foreground/5"
+                >
+                  {t.assistant.cancel}
+                </button>
+                <button
+                  onClick={saveOverrides}
+                  className="rounded-md bg-brand-from px-3 py-1.5 text-sm text-white hover:opacity-90"
+                >
+                  {t.assistant.saveOverrides}
                 </button>
               </div>
             </div>

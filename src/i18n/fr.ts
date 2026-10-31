@@ -91,6 +91,10 @@ export const fr = {
     noKnowledge: "Aucune connaissance — importez un fichier .md.",
     nameRequired: "Le nom est obligatoire.",
     close: "Fermer",
+    perConversation: "Par conversation…",
+    perConversationTitle: "Connaissances pour cette conversation",
+    perConversationHint: "Cochez les connaissances à activer spécifiquement pour cette conversation (remplace la sélection globale).",
+    saveOverrides: "Enregistrer la sélection",
   },
   errors: {
     auth: "Clé API invalide ou expirée",
