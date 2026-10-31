@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react"
-import { Check, Pencil, Plus, Trash2, Upload, X } from "lucide-react"
+import { Check, Pencil, Plus, Trash2, Upload, X, ChevronUp, ChevronDown } from "lucide-react"
 import { t } from "@/i18n/fr"
 import { logger } from "@/lib/logger"
 import { loadPromptSettings, savePromptSettings } from "@/lib/prompts/store"
@@ -64,6 +64,16 @@ export function AssistantDialog({ onClose }: Props) {
     setGeneral(DEFAULT_GENERAL_INSTRUCTIONS)
     setProfile(PROFILE_APPRENTISSAGE)
   }, [])
+
+  const move = useCallback(
+    (k: KnowledgeRow, delta: -1 | 1) => {
+      void knowledge
+        .move(k.id, delta)
+        .then(refreshKnowledge)
+        .catch(logger.error)
+    },
+    [refreshKnowledge],
+  )
 
   const toggle = useCallback(
     (k: KnowledgeRow) => {
@@ -211,6 +221,21 @@ export function AssistantDialog({ onClose }: Props) {
                     <span className="truncate text-sm font-medium">{k.name}</span>
                   </label>
                   <div className="flex flex-shrink-0 items-center gap-1">
+                    <button
+                      aria-label={t.assistant.moveUp}
+                      onClick={() => move(k, -1)}
+                      disabled={k.sort_order === 0}
+                      className="rounded-md p-1 hover:bg-foreground/5 disabled:opacity-30"
+                    >
+                      <ChevronUp className="size-3.5" />
+                    </button>
+                    <button
+                      aria-label={t.assistant.moveDown}
+                      onClick={() => move(k, 1)}
+                      className="rounded-md p-1 hover:bg-foreground/5"
+                    >
+                      <ChevronDown className="size-3.5" />
+                    </button>
                     <button
                       aria-label={t.assistant.edit}
                       onClick={() => openForm(k)}

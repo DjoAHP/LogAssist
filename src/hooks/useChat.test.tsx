@@ -83,7 +83,7 @@ describe("useChat.send — contract anti-perte", () => {
 
   it("construit le prompt système depuis les réglages stockés et les connaissances activées", async () => {
     vi.mocked(knowledge.listEnabled).mockResolvedValueOnce([
-      { id: "k1", name: "HISE", content: "## HISE", enabled: 1, created_at: "x" },
+      { id: "k1", name: "HISE", content: "## HISE", enabled: 1, sort_order: 0, created_at: "x" },
     ])
     const { result } = renderHook(() => useChat(modelSelection))
     await act(async () => {

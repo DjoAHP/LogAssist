@@ -78,6 +78,8 @@ export const fr = {
     delete: "Supprimer",
     deleteConfirm: "Supprimer cette connaissance ?",
     toggle: "Activer/désactiver cette connaissance",
+    moveUp: "Monter",
+    moveDown: "Descendre",
     formTitleNew: "Nouvelle connaissance",
     formTitleEdit: "Modifier la connaissance",
     nameLabel: "Nom de la connaissance",
