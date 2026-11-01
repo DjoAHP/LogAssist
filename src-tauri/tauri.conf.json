@@ -17,12 +17,13 @@
         "height": 800,
         "minWidth": 900,
         "minHeight": 600,
-        "maximized": true
+        "maximized": true,
+        "backgroundColor": "#09090b"
       }
     ],
     "security": {
-      "csp": "default-src 'self' ipc: http://ipc.localhost; connect-src 'self' https: ipc: http://ipc.localhost; img-src 'self' data:; style-src 'self' 'unsafe-inline'",
-      "devCsp": "default-src 'self' ipc: http://ipc.localhost; connect-src 'self' https: ws://localhost:* ipc: http://ipc.localhost; img-src 'self' data:; style-src 'self' 'unsafe-inline'"
+      "csp": "default-src 'self' ipc: http://ipc.localhost; connect-src 'self' https: ipc: http://ipc.localhost; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self' 'wasm-unsafe-eval'",
+      "devCsp": "default-src 'self' ipc: http://ipc.localhost; connect-src 'self' https: ws://localhost:* ipc: http://ipc.localhost; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self' 'wasm-unsafe-eval'"
     }
   },
   "bundle": {

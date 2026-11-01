@@ -19,7 +19,9 @@ function lineEnding(text) {
 // tauri.conf.json — version du bundle (.exe, installateur)
 const tauriConfPath = path.join(root, "src-tauri", "tauri.conf.json");
 const tauriConfRaw = fs.readFileSync(tauriConfPath, "utf-8");
-const tauriConf = JSON.parse(tauriConfRaw);
+// Invariant : JSON.parse refuse le BOM UTF-8 (U+FEFF) que les outils Windows
+// (PowerShell 5.1 Out-File/Set-Content) ajoutent par défaut — on le strip toujours.
+const tauriConf = JSON.parse(tauriConfRaw.replace(/^\uFEFF/, ""));
 if (tauriConf.version !== version) {
   tauriConf.version = version;
   const eol = lineEnding(tauriConfRaw);

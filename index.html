@@ -1,12 +1,14 @@
 <!doctype html>
-<html lang="fr" class="dark">
+<!-- Invariant : fond sombre inline = aucun flash blanc au premier paint
+     (la fenêtre native s'affiche avant que le CSS Tailwind soit chargé) -->
+<html lang="fr" class="dark" style="background: #09090b">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>LogAssist</title>
   </head>
 
-  <body>
+  <body style="background: #09090b">
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
