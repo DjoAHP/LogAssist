@@ -1,9 +1,8 @@
 import { useCallback, useEffect, useState } from "react"
-import { BookOpen, Settings as SettingsIcon, Download } from "lucide-react"
+import { BookOpen, Settings as SettingsIcon, Sun, Moon } from "lucide-react"
 import logoSrc from "@/assets/logo.png"
 import { t } from "@/i18n/fr"
 import { conversations } from "@/lib/db/conversations"
-import { exportConversation } from "@/lib/export"
 import { getActiveModel, type ActiveModel } from "@/lib/db/activeModel"
 import { providers, type ProviderRow, type ModelRow } from "@/lib/db/providers"
 import { useConversations } from "@/hooks/useConversations"
@@ -26,6 +25,25 @@ function App() {
   const [assistantOpen, setAssistantOpen] = useState(false)
   const [sidebarWidth, setSidebarWidth] = useState(DEFAULT_SIDEBAR_WIDTH)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
+
+  // Dark mode (défaut dark) — persisté dans localStorage
+  const [isDark, setIsDark] = useState(() => {
+    if (typeof window !== "undefined") {
+      const stored = localStorage.getItem("logassist:dark")
+      if (stored !== null) return JSON.parse(stored)
+    }
+    return true // défaut dark
+  })
+
+  // Applique la classe .dark sur <html> au montage et à chaque changement
+  useEffect(() => {
+    const root = document.documentElement
+    if (isDark) root.classList.add("dark")
+    else root.classList.remove("dark")
+    localStorage.setItem("logassist:dark", JSON.stringify(isDark))
+  }, [isDark])
+
+  const toggleDark = useCallback(() => setIsDark((d: boolean) => !d), [])
 
   // Lecture refetchable du modèle actif (erreurs → null : l'UI affiche
   // l'état « non configuré » plutôt qu'un écran vide).
@@ -183,35 +201,20 @@ function App() {
             </div>
           </div>
         <div className="flex items-center gap-1">
+          {/* Dark mode toggle */}
           <button
-            aria-label={t.sidebar.export}
-            onClick={async () => {
-              if (!activeId) return
-              const md = await exportConversation(activeId)
-              if (!md) return
-              try {
-                // @tauri-apps/plugin-dialog + @tauri-apps/plugin-fs
-                // Installation requise : PowerShell → npm install @tauri-apps/plugin-dialog @tauri-apps/plugin-fs
-                const { save } = await import("@tauri-apps/plugin-dialog")
-                const { writeTextFile } = await import("@tauri-apps/plugin-fs")
-                const path = await save({
-                  filters: [{ name: "Markdown", extensions: ["md"] }],
-                  defaultPath: `conversation-${activeId.slice(0, 8)}.md`,
-                })
-                if (path) {
-                  await writeTextFile(path, md)
-                }
-              } catch (e) {
-                console.error("[Export] Tauri plugins non disponibles ou erreur:", e)
-              }
-            }}
-            disabled={!activeId}
-            className="rounded-md p-1.5 hover:bg-foreground/5 disabled:opacity-30 disabled:hover:bg-transparent"
+            aria-label={isDark ? t.chat.darkMode : t.chat.lightMode}
+            title={isDark ? t.chat.darkMode : t.chat.lightMode}
+            onClick={toggleDark}
+            className="rounded-md p-1.5 hover:bg-foreground/5 transition-colors"
           >
-            <Download className="size-4" />
+            {isDark ? <Moon className="size-4" /> : <Sun className="size-4" />}
           </button>
+          {/* Séparateur discret */}
+          <div className="w-px h-5 bg-border mx-1" aria-hidden="true" />
           <button
             aria-label={t.assistant.title}
+            title={t.assistant.systemPrompt}
             onClick={() => setAssistantOpen(true)}
             className="rounded-md p-1.5 hover:bg-foreground/5"
           >
@@ -219,6 +222,7 @@ function App() {
           </button>
           <button
             aria-label={t.settings.title}
+            title={t.settings.modelsSettings}
             onClick={() => setSettingsOpen(true)}
             className="rounded-md p-1.5 hover:bg-foreground/5"
           >

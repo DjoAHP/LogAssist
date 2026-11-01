@@ -36,6 +36,7 @@ compatible, testé avec NVIDIA NIM), clé API stockée dans le Credential Manage
 7. **Contrat anti-perte** : `useChat.send()` retourne `Promise<boolean>` et ne lève
    jamais ; `false` = échec AVANT persistence du message utilisateur ⇒ InputBar restaure
    le contenu. Ne pas renvoyer d'exception à la place.
+8. **Version sync** : `npm run sync:version` maintient `package.json`, `Cargo.toml` et `tauri.conf.json` alignés.
 
 ---
 
@@ -135,7 +136,11 @@ Priorisés dans l'ordre du rapport d'audit :
 2. **Cluster sécurité** : bouger le HTTP côté Rust + valider le format `secret_ref`,
    CSP `connect-src https:` à restreindre en prod.
 3. **Cluster UI** : focus clavier invisible (`--ring` absent), palette de tokens
-   incomplète, dark mode défini mais inactivable, auto-scroll forcé pendant le stream.
+   incomplète, auto-scroll forcé pendant le stream.
+   ✅ **Dark mode toggle** implémenté (v2.1.2) — défaut dark, toggle header + persistance localStorage.
+   ✅ **Fenêtre maximisée au lancement** (v2.1.2) — `maximized: true` dans `tauri.conf.json`.
+   ✅ **Icônes unifiées** (v2.1.2) — régénérées depuis `logo3.png` (script `scripts/generate-icons.js`).
+   ✅ **ModelPickerModal** — remplace `ModelDropdown` (modal recherche/ajout/clic-activer).
 4. **Tooling** : ESLint/Prettier/CI absents ; tests hooks à élargir.
 
 Consulter la conversation d'audit pour le détail fichier/ligne avant de commenter.
