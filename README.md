@@ -1,4 +1,4 @@
-# LogAssist v2.1.2
+# LogAssist
 
 Assistant IA de bureau (Windows) pour apprendre des logiciels par conversation persistée.
 
