@@ -1,8 +1,9 @@
 export const fr = {
   app: { title: "LogAssist", subtitle: "Assistant IA" },
   sidebar: {
-    newConversation: "Nouvelle conversation",
+    newConversation: "Nouveau chat",
     search: "Rechercher…",
+    clearSearch: "Effacer la recherche",
     general: "Générales",
     rename: "Renommer",
     archive: "Archiver",
@@ -20,7 +21,7 @@ export const fr = {
     stop: "Interrompre",
     copy: "Copier",
     regenerate: "Régénérer",
-    noConversation: "Sélectionnez ou créez une conversation",
+    noConversation: "Sélectionnez ou créez un chat",
     interrupted: "Interrompu",
     configureProvider: "Configurez un fournisseur dans les réglages pour discuter.",
     selectModel: "Modèle",

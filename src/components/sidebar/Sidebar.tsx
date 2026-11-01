@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react"
-import { ChevronLeft, ChevronRight, Plus, Search, Trash2, Edit2, GripVertical, Pin, PinOff } from "lucide-react"
+import { ChevronLeft, ChevronRight, Plus, Search, Trash2, Edit2, GripVertical, Pin, PinOff, X } from "lucide-react"
 import { t } from "@/i18n/fr"
 import type { ConversationRow } from "@/lib/db/conversations"
 
@@ -36,7 +36,27 @@ export function Sidebar({
   onToggleCollapse,
 }: Props) {
   const [query, setQuery] = useState("")
+  const searchInputRef = useRef<HTMLInputElement>(null)
   const [renamingId, setRenamingId] = useState<string | null>(null)
+
+  // Raccourcis clavier : Ctrl+K / Ctrl+F = focus recherche, Échap = vider recherche
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      // Ctrl+K ou Ctrl+F (ou Meta+K/Meta+F sur Mac) → focus recherche
+      if ((e.ctrlKey || e.metaKey) && (e.key === "k" || e.key === "f")) {
+        e.preventDefault()
+        searchInputRef.current?.focus()
+        searchInputRef.current?.select()
+      }
+      // Échap → vider recherche si non vide
+      if (e.key === "Escape" && query) {
+        setQuery("")
+        searchInputRef.current?.blur()
+      }
+    }
+    window.addEventListener("keydown", onKeyDown)
+    return () => window.removeEventListener("keydown", onKeyDown)
+  }, [query])
   const [renameValue, setRenameValue] = useState("")
   const renameInputRef = useRef<HTMLInputElement>(null)
   const isResizing = useRef(false)
@@ -190,106 +210,144 @@ export function Sidebar({
       <div className="flex items-center gap-2 rounded-md border border-border px-2 py-1 mx-2">
         <Search className="size-4 opacity-50 flex-shrink-0" />
         <input
+          ref={searchInputRef}
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           placeholder={t.sidebar.search}
           className="w-full bg-transparent text-sm outline-none"
         />
+        {query && (
+          <button
+            type="button"
+            onClick={() => {
+              setQuery("")
+              searchInputRef.current?.focus()
+            }}
+            aria-label={t.sidebar.clearSearch}
+            className="flex-shrink-0 rounded p-0.5 hover:bg-foreground/10 text-muted-foreground hover:text-foreground transition-colors"
+            title={t.sidebar.clearSearch}
+          >
+            <X className="size-3.5" />
+          </button>
+        )}
       </div>
 
-      <nav className="flex-1 space-y-1 overflow-y-auto px-2">
-        {filtered.map((c) => (
-          <div
-            key={c.id}
-            role="button"
-            tabIndex={0}
-            aria-label={c.title.trim() || t.sidebar.newConversation}
-            aria-current={c.id === activeId ? "true" : undefined}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" || e.key === " ") onSelect(c.id)
-              else if (e.key === "F2") startRename(c)
-            }}
-            onDoubleClick={() => onDoubleClick(c)}
-            className={`group flex cursor-pointer items-center justify-between rounded-md px-2 py-1.5 text-sm transition-colors ${
-              c.id === activeId ? "bg-foreground/10" : "hover:bg-foreground/5"
-            }`}
-            onClick={() => {
-              disarmDelete()
-              onSelect(c.id)
-            }}
-          >
-            {renamingId === c.id ? (
-              <input
-                ref={renameInputRef}
-                value={renameValue}
-                onChange={(e) => setRenameValue(e.target.value)}
-                onBlur={() => confirmRename(c.id)}
-                onKeyDown={(e) => handleRenameKeyDown(e, c.id)}
-                className="w-full bg-background border border-primary px-2 py-1 text-sm outline-none focus:border-primary"
-                autoFocus
+      {/* Séparateur discret sous la barre de recherche */}
+      <div className="mx-2 my-2 border-t border-border/30" aria-hidden="true" />
+
+<nav className="flex-1 space-y-1 overflow-y-auto px-2">
+        {filtered.flatMap((c, index) => {
+          const isFirstUnpinned = c.pinned === 0 && filtered.findIndex(f => f.pinned === 0) === index
+          const showPinnedSeparator = isFirstUnpinned && filtered.some(f => f.pinned === 1)
+          
+          const elements = []
+          
+          if (showPinnedSeparator) {
+            elements.push(
+              <div 
+                key={`${c.id}-separator`}
+                className="mx-2 my-1 border-t border-border/50" 
+                aria-hidden="true" 
+                role="separator"
               />
-            ) : (
-              <>
-                <span className="truncate flex-1 min-w-0 pr-2">{c.title.trim() || t.sidebar.newConversation}</span>
-                <div
-                  className={`flex items-center gap-1 transition-opacity ${
-                    confirmDeleteId === c.id || c.pinned === 1
-                      ? "opacity-100"
-                      : "opacity-0 group-hover:opacity-100"
-                  }`}
-                >
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      onTogglePin(c.id, c.pinned === 0)
-                    }}
-                    aria-label={c.pinned === 0 ? t.sidebar.pin : t.sidebar.unpin}
-                    aria-pressed={c.pinned === 0 ? "false" : "true"}
-                    className={`rounded p-1 hover:bg-foreground/10 ${c.pinned === 0 ? "" : "text-[#D64627]"}`}
-                    title={c.pinned === 0 ? t.sidebar.pin : t.sidebar.unpin}
+            )
+          }
+          
+          elements.push(
+            <div
+              key={c.id}
+              role="button"
+              tabIndex={0}
+              aria-label={c.title.trim() || t.sidebar.newConversation}
+              aria-current={c.id === activeId ? "true" : undefined}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") onSelect(c.id)
+                else if (e.key === "F2") startRename(c)
+              }}
+              onDoubleClick={() => onDoubleClick(c)}
+              className={`group flex cursor-pointer items-center justify-between rounded-md px-2 py-1.5 text-sm transition-colors ${
+                c.id === activeId ? "bg-foreground/10" : "hover:bg-foreground/5"
+              }`}
+              onClick={() => {
+                disarmDelete()
+                onSelect(c.id)
+              }}
+            >
+              {renamingId === c.id ? (
+                <input
+                  ref={renameInputRef}
+                  value={renameValue}
+                  onChange={(e) => setRenameValue(e.target.value)}
+                  onBlur={() => confirmRename(c.id)}
+                  onKeyDown={(e) => handleRenameKeyDown(e, c.id)}
+                  className="w-full bg-background border border-primary px-2 py-1 text-sm outline-none focus:border-primary"
+                  autoFocus
+                />
+              ) : (
+                <>
+                  <span className="truncate flex-1 min-w-0 pr-2">{c.title.trim() || t.sidebar.newConversation}</span>
+                  <div
+                    className={`flex items-center gap-1 transition-opacity ${
+                      confirmDeleteId === c.id || c.pinned === 1
+                        ? "opacity-100"
+                        : "opacity-0 group-hover:opacity-100"
+                    }`}
                   >
-                    {c.pinned === 0 ? <Pin className="size-3.5" /> : <PinOff className="size-3.5" />}
-                  </button>
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      startRename(c)
-                    }}
-                    aria-label={t.sidebar.rename}
-                    className="rounded p-1 hover:bg-foreground/10"
-                    title={t.sidebar.rename}
-                  >
-                    <Edit2 className="size-3.5" />
-                  </button>
-                  {confirmDeleteId === c.id ? (
                     <button
-                      onClick={(e) => handleDeleteClick(e, c.id)}
-                      onKeyDown={(e) => {
-                        if (e.key === "Escape") {
-                          e.stopPropagation()
-                          disarmDelete()
-                        }
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        onTogglePin(c.id, c.pinned === 0)
                       }}
-                      aria-label={t.sidebar.deleteConfirm}
-                      className="rounded bg-destructive/10 px-1.5 py-1 text-[11px] font-medium text-destructive"
+                      aria-label={c.pinned === 0 ? t.sidebar.pin : t.sidebar.unpin}
+                      aria-pressed={c.pinned === 0 ? "false" : "true"}
+                      className={`rounded p-1 hover:bg-foreground/10 ${c.pinned === 0 ? "" : "text-[#D64627]"}`}
+                      title={c.pinned === 0 ? t.sidebar.pin : t.sidebar.unpin}
                     >
-                      {t.sidebar.deleteConfirm}
+                      {c.pinned === 0 ? <Pin className="size-3.5" /> : <PinOff className="size-3.5" />}
                     </button>
-                  ) : (
                     <button
-                      onClick={(e) => handleDeleteClick(e, c.id)}
-                      aria-label={t.sidebar.delete}
-                      className="rounded p-1 hover:bg-destructive/10 text-destructive"
-                      title={t.sidebar.delete}
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        startRename(c)
+                      }}
+                      aria-label={t.sidebar.rename}
+                      className="rounded p-1 hover:bg-foreground/10"
+                      title={t.sidebar.rename}
                     >
-                      <Trash2 className="size-3.5" />
+                      <Edit2 className="size-3.5" />
                     </button>
-                  )}
-                </div>
-              </>
-            )}
-          </div>
-        ))}
+                    {confirmDeleteId === c.id ? (
+                      <button
+                        onClick={(e) => handleDeleteClick(e, c.id)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Escape") {
+                            e.stopPropagation()
+                            disarmDelete()
+                          }
+                        }}
+                        aria-label={t.sidebar.deleteConfirm}
+                        className="rounded bg-destructive/10 px-1.5 py-1 text-[11px] font-medium text-destructive"
+                      >
+                        {t.sidebar.deleteConfirm}
+                      </button>
+                    ) : (
+                      <button
+                        onClick={(e) => handleDeleteClick(e, c.id)}
+                        aria-label={t.sidebar.delete}
+                        className="rounded p-1 hover:bg-destructive/10 text-destructive"
+                        title={t.sidebar.delete}
+                      >
+                        <Trash2 className="size-3.5" />
+                      </button>
+                    )}
+                  </div>
+                </>
+              )}
+            </div>
+          )
+          
+          return elements
+        })}
       </nav>
 
       {/* Resize handle - positioned absolutely on right edge */}
