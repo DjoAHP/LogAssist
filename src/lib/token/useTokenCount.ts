@@ -1,4 +1,4 @@
-import { useMemo } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { encoding_for_model, get_encoding, Tiktoken } from "@dqbd/tiktoken"
 import { getModelPricing, getTiktokenModel } from "./pricing"
 
@@ -22,6 +22,22 @@ export function useTokenCount(
   systemPrompt: string = "",
   knowledgeContent: string = ""
 ): TokenCountResult {
+  const [wasmReady, setWasmReady] = useState(false)
+
+  // Initialisation du WASM tiktoken (chargement asynchrone)
+  useEffect(() => {
+    let mounted = true
+    // Force le chargement du WASM en créant un encodeur temporaire
+    try {
+      const testEnc = encoding_for_model("gpt-4o")
+      testEnc.free()
+      if (mounted) setWasmReady(true)
+    } catch (e) {
+      console.error("Failed to initialize tiktoken WASM:", e)
+    }
+    return () => { mounted = false }
+  }, [])
+
   // Modèle tiktoken à utiliser
   const tiktokenModel = useMemo(
     () => getTiktokenModel(providerId, modelId),
@@ -29,13 +45,14 @@ export function useTokenCount(
   )
 
   // Instancie l'encodeur (memoized pour éviter réinstanciation)
-  const encoder = useMemo((): Tiktoken => {
+  const encoder = useMemo((): Tiktoken | null => {
+    if (!wasmReady) return null
     try {
       return encoding_for_model(tiktokenModel)
     } catch {
       return get_encoding("cl100k_base")
     }
-  }, [tiktokenModel])
+  }, [tiktokenModel, wasmReady])
 
   // Pricing
   const pricing = useMemo(
@@ -43,8 +60,10 @@ export function useTokenCount(
     [providerId, modelId]
   )
 
-  // Comptage tokens
+  // Comptage tokens (seulement si WASM prêt)
   const { inputTokens, outputTokens } = useMemo(() => {
+    if (!encoder) return { inputTokens: 0, outputTokens: 0 }
+
     let input = 0
     let output = 0
 
@@ -81,11 +100,6 @@ export function useTokenCount(
       estimatedCost: inputCost + outputCost,
     }
   }, [inputTokens, outputTokens, pricing])
-
-  // Nettoyage de l'encodeur au démontage
-  // (tiktoken utilise WASM, nettoyage manuel recommandé)
-  // Note: on ne peut pas facilement disposer l'encoder ici car useMemo
-  // Le GC gérera, mais pour production on pourrait faire un useEffect cleanup
 
   return {
     inputTokens,
