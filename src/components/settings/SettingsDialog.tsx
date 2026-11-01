@@ -32,8 +32,6 @@ export function SettingsDialog({ onClose, onChanged }: Props) {
   const [fetchedModels, setFetchedModels] = useState<Record<string, string[]>>({})
   const [fetchOpen, setFetchOpen] = useState<string | null>(null)
   const [modelSearch, setModelSearch] = useState<Record<string, string>>({})
-  // Provider pour lequel on attend la fin du refresh avant d'ouvrir le dropdown
-  const [pendingFetchOpen, setPendingFetchOpen] = useState<string | null>(null)
 
   // Modèles combinés (BDD + fraîchement récupérés) par provider
   const combinedModels = useMemo(() => {
@@ -84,15 +82,6 @@ export function SettingsDialog({ onClose, onChanged }: Props) {
     window.addEventListener("keydown", onKey)
     return () => window.removeEventListener("keydown", onKey)
   }, [onClose])
-
-  // Ouvre le dropdown APRÈS que le refresh a peuplé models[providerId]
-  useEffect(() => {
-    const pid = pendingFetchOpen
-    if (pid && models[pid] && models[pid].length > 0) {
-      setFetchOpen(pid)
-      setPendingFetchOpen(null)
-    }
-  }, [pendingFetchOpen, models])
 
   const afterChange = useCallback(async () => {
     await refresh()
@@ -172,8 +161,8 @@ export function SettingsDialog({ onClose, onChanged }: Props) {
       }
       // Refresh pour recharger models depuis la DB (inclut les nouveaux)
       await afterChange()
-      // Demande l'ouverture APRÈS le prochain render où models sera peuplé
-      setPendingFetchOpen(p.id)
+      // Ouvre le dropdown APRÈS un tick (React a eu le temps de traiter setModels)
+      setTimeout(() => setFetchOpen(p.id), 0)
       // Nettoie fetchedModels (plus utile, les modèles sont en base)
       setFetchedModels((s) => { const n = { ...s }; delete n[p.id]; return n })
       setFetchStatus((s) => ({ ...s, [p.id]: { state: "ok", added } }))
