@@ -14,6 +14,9 @@ afterEach(cleanup)
 const base = {
   hasModel: true,
   showConversation: true,
+  systemPrompt: "test prompt",
+  activeModel: null,
+  conversationId: null,
 }
 
 const msg = (over: Partial<ChatMessageVM>): ChatMessageVM => ({
