@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react"
-import { ChevronLeft, ChevronRight, Plus, Search, Trash2, Edit2, GripVertical, Pin, PinOff, X } from "lucide-react"
+import { Plus, Search, Trash2, Edit2, GripVertical, Pin, PinOff, X } from "lucide-react"
+import { ChevronIcon } from "@/icons"
 import { t } from "@/i18n/fr"
 import type { ConversationRow } from "@/lib/db/conversations"
 
@@ -171,7 +172,7 @@ export function Sidebar({
           aria-label={t.sidebar.expand}
           className="flex h-10 items-center justify-center rounded-md hover:bg-foreground/5 mx-1 mt-2"
         >
-          <ChevronRight className="size-5" />
+          <ChevronIcon className="size-5 -scale-x-100" />
         </button>
         <div className="flex-1 overflow-hidden" />
         <button
@@ -203,7 +204,7 @@ export function Sidebar({
           aria-label={t.sidebar.collapse}
           className="flex h-10 items-center justify-center rounded-md hover:bg-foreground/5 flex-shrink-0"
         >
-          <ChevronLeft className="size-5" />
+          <ChevronIcon className="size-5" />
         </button>
       </header>
 

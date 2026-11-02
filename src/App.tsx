@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react"
-import { BookOpen, Settings as SettingsIcon, Sun, Moon } from "lucide-react"
+import { Sun, Moon } from "lucide-react"
+import { BookIcon, ReglageIcon } from "@/icons"
 import logoSrc from "@/assets/logo.png"
 import bgDark from "@/assets/background_dark_logassist.png"
 import bgLight from "@/assets/background_light_logassist.png"
@@ -236,7 +237,7 @@ function App() {
             onClick={() => setAssistantOpen(true)}
             className="rounded-md p-1.5 hover:bg-foreground/5"
           >
-            <BookOpen className="size-4" />
+            <BookIcon className="size-[22px]" />
           </button>
           <button
             aria-label={t.settings.title}
@@ -244,7 +245,7 @@ function App() {
             onClick={() => setSettingsOpen(true)}
             className="rounded-md p-1.5 hover:bg-foreground/5"
           >
-            <SettingsIcon className="size-4" />
+            <ReglageIcon className="size-[22px]" />
           </button>
         </div>
         </header>
