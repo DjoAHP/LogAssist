@@ -20,6 +20,7 @@ export const fr = {
     send: "Envoyer",
     stop: "Interrompre",
     copy: "Copier",
+    copied: "Copié !",
     regenerate: "Régénérer",
     noConversation: "Sélectionnez ou créez un chat",
     interrupted: "Interrompu",

@@ -7,6 +7,7 @@ import type { ChatMessageVM } from "@/hooks/useChat"
 import { useTokenCount, formatCost, formatTokens } from "@/lib/token"
 import { knowledge as knowledgeDb } from "@/lib/db/knowledge"
 import { conversationKnowledge } from "@/lib/db/conversationKnowledge"
+import { MarkdownMessage } from "./MarkdownMessage"
 
 interface ModelSelectorProps {
   options: { rowId: string; label: string; isDefault: boolean; supportsImages: boolean }[]
@@ -209,7 +210,13 @@ function MessageBubble({
           </div>
         )}
         {m.content ? (
-          <pre className="whitespace-pre-wrap font-sans text-sm">{m.content}</pre>
+          // Assistant : markdown rendu (GFM + coloration). Utilisateur :
+          // texte brut — ses « ## » ne doivent pas devenir des titres.
+          isUser ? (
+            <pre className="whitespace-pre-wrap font-sans text-sm">{m.content}</pre>
+          ) : (
+            <MarkdownMessage content={m.content} />
+          )
         ) : !isUser && !m.apiError && !m.interrupted ? (
           // Attente du 1er token : anneau de réflexion au lieu du « … »
           <span role="status" aria-label={t.chat.thinking}>

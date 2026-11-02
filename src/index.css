@@ -26,6 +26,104 @@
   }
 }
 
+/* ---- Rendu markdown des réponses assistant (.md-body) ----
+   Styles dérivés des variables du thème (dark et light) — pas de plugin
+   typography : contrôle total sur l'esthétique, une dépendance de moins. */
+.md-body > :first-child { margin-top: 0; }
+.md-body > :last-child { margin-bottom: 0; }
+.md-body { overflow-wrap: anywhere; }
+.md-body p { margin: 0.5em 0; }
+.md-body h1, .md-body h2, .md-body h3, .md-body h4 {
+  font-weight: 600;
+  line-height: 1.3;
+  margin: 1.1em 0 0.4em;
+}
+.md-body h1 { font-size: 1.25rem; }
+.md-body h2 { font-size: 1.125rem; }
+.md-body h3 { font-size: 1rem; }
+.md-body ul, .md-body ol { margin: 0.5em 0; padding-left: 1.4em; }
+.md-body ul { list-style: disc; }
+.md-body ol { list-style: decimal; }
+.md-body li { margin: 0.2em 0; }
+.md-body blockquote {
+  border-left: 3px solid hsl(var(--border));
+  margin: 0.6em 0;
+  padding: 0.1em 0.8em;
+  color: hsl(var(--muted-foreground));
+}
+/* Tableaux : bordures discrètes, scroll horizontal si débordement */
+.md-body table {
+  border-collapse: collapse;
+  margin: 0.6em 0;
+  display: block;
+  overflow-x: auto;
+  max-width: 100%;
+  font-size: 0.8125rem;
+}
+.md-body th, .md-body td {
+  border: 1px solid hsl(var(--border));
+  padding: 0.3rem 0.6rem;
+  text-align: left;
+}
+.md-body th { background: hsl(var(--muted)); font-weight: 600; }
+/* Code inline : pill discrète. Dans un bloc (pre code) : neutre, le style
+   vient du pre (fond distinct, coins arrondis, scroll horizontal). */
+.md-body code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.8125rem;
+  background: hsl(var(--muted));
+  padding: 0.1rem 0.35rem;
+  border-radius: 0.3rem;
+}
+.md-body pre code { background: none; padding: 0; border-radius: 0; font-size: inherit; }
+.md-body a { text-decoration: underline; text-underline-offset: 2px; color: var(--brand-from); }
+.dark .md-body a { color: var(--brand-to); }
+
+/* ---- Coloration syntaxique (highlight.js) ----
+   Palettes One Light / One Dark via variables — le même code source est
+   lisible dans les deux thèmes. */
+:root {
+  --hl-keyword: #a626a4;
+  --hl-string: #50a14f;
+  --hl-number: #b76b01;
+  --hl-comment: #a0a1a7;
+  --hl-function: #4078f2;
+  --hl-type: #c18401;
+}
+.dark {
+  --hl-keyword: #c678dd;
+  --hl-string: #98c379;
+  --hl-number: #d19a66;
+  --hl-comment: #7f848e;
+  --hl-function: #61afef;
+  --hl-type: #e5c07b;
+}
+.md-body .hljs-keyword, .md-body .hljs-selector-tag, .md-body .hljs-literal,
+.md-body .hljs-section, .md-body .hljs-doctag, .md-body .hljs-name {
+  color: var(--hl-keyword);
+}
+.md-body .hljs-string, .md-body .hljs-regexp, .md-body .hljs-addition,
+.md-body .hljs-attribute, .md-body .hljs-meta .hljs-string {
+  color: var(--hl-string);
+}
+.md-body .hljs-number, .md-body .hljs-symbol, .md-body .hljs-bullet,
+.md-body .hljs-link {
+  color: var(--hl-number);
+}
+.md-body .hljs-comment, .md-body .hljs-quote {
+  color: var(--hl-comment);
+  font-style: italic;
+}
+.md-body .hljs-function, .md-body .hljs-title, .md-body .hljs-title.function_ {
+  color: var(--hl-function);
+}
+.md-body .hljs-type, .md-body .hljs-class .hljs-title, .md-body .hljs-title.class_,
+.md-body .hljs-built_in {
+  color: var(--hl-type);
+}
+.md-body .hljs-emphasis { font-style: italic; }
+.md-body .hljs-strong { font-weight: 600; }
+
 /* Bicolore LogAssist : dégradé de marque sur l'anneau de pagination */
 :root {
   --brand-from: #d64627;
