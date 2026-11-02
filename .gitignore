@@ -23,9 +23,11 @@ dist-ssr
 .opencode
 .superpowers
 
+# Documentation et notes de version (locales, jamais partagées)
+docs/
+
 # Editor directories and files
-.vscode/*
-!.vscode/extensions.json
+.vscode/
 .idea
 .DS_Store
 *.suo
