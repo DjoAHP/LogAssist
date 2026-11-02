@@ -1,14 +1,25 @@
 <!doctype html>
-<!-- Invariant : fond sombre inline = aucun flash blanc au premier paint
-     (la fenêtre native s'affiche avant que le CSS Tailwind soit chargé) -->
+<!-- Invariant : fond inline sur html UNIQUEMENT = anti-flash du premier paint.
+     Le body n'a aucun style inline — sinon il écrase `bg-background` de
+     index.css et le mode clair affiche un fond noir (régression v2.4.0).
+     Le script précoces adapte le fond html à la préférence persistée AVANT
+     tout paint (logique identique à App.tsx : clé logassist:dark, défaut dark). -->
 <html lang="fr" class="dark" style="background: #09090b">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>LogAssist</title>
+    <script>
+      try {
+        var stored = localStorage.getItem("logassist:dark")
+        if (stored !== null && JSON.parse(stored) === false) {
+          document.documentElement.style.background = "#ffffff"
+        }
+      } catch (e) {}
+    </script>
   </head>
 
-  <body style="background: #09090b">
+  <body>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

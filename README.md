@@ -1,5 +1,7 @@
 # LogAssist
 
+![Capture d'écran de l'application](src/assets/capture_ecran_interface.png)
+
 Assistant IA de bureau (Windows) pour apprendre des logiciels par conversation persistée.
 
 **Stack** : **Tauri 2 + React 19 + TypeScript + Vite**, Tailwind CSS, SQLite (`tauri-plugin-sql`), Credential Manager Windows.

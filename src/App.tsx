@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState } from "react"
 import { BookOpen, Settings as SettingsIcon, Sun, Moon } from "lucide-react"
 import logoSrc from "@/assets/logo.png"
+import bgDark from "@/assets/background_dark_logassist.png"
+import bgLight from "@/assets/background_light_logassist.png"
 import { t } from "@/i18n/fr"
 import { conversations } from "@/lib/db/conversations"
 import { getActiveModel, type ActiveModel } from "@/lib/db/activeModel"
@@ -197,7 +199,10 @@ function App() {
         collapsed={sidebarCollapsed}
         onToggleCollapse={toggleSidebar}
       />
-      <section className="flex flex-1 flex-col overflow-hidden">
+      <section
+        className="flex flex-1 flex-col overflow-hidden bg-cover bg-center"
+        style={{ backgroundImage: `url(${isDark ? bgDark : bgLight})` }}
+      >
         <header className="flex items-center justify-between border-b border-border px-4 py-3">
           <div className="flex items-center gap-2.5">
             <span className="brand-mark" aria-hidden="true">

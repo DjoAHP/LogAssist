@@ -8,7 +8,11 @@
 import fs from "node:fs";
 import path from "node:path";
 
-const root = path.resolve(import.meta.dirname, "..");
+// Couture de test : LOGASSIST_ROOT EST la racine du projet (fixture temporaire
+// des tests src/syncVersion.test.ts). En usage réel : parent de scripts/.
+const root = process.env.LOGASSIST_ROOT
+  ? path.resolve(process.env.LOGASSIST_ROOT)
+  : path.resolve(import.meta.dirname, "..");
 const pkg = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf-8"));
 const version = pkg.version;
 
@@ -16,20 +20,24 @@ function lineEnding(text) {
   return text.includes("\r\n") ? "\r\n" : "\n";
 }
 
-// tauri.conf.json — version du bundle (.exe, installateur)
+// tauri.conf.json — version du bundle (.exe, installateur) + titre de la
+// fenêtre native « Produit vX » (suffixe version, même source de vérité).
 const tauriConfPath = path.join(root, "src-tauri", "tauri.conf.json");
 const tauriConfRaw = fs.readFileSync(tauriConfPath, "utf-8");
 // Invariant : JSON.parse refuse le BOM UTF-8 (U+FEFF) que les outils Windows
 // (PowerShell 5.1 Out-File/Set-Content) ajoutent par défaut — on le strip toujours.
 const tauriConf = JSON.parse(tauriConfRaw.replace(/^\uFEFF/, ""));
-if (tauriConf.version !== version) {
+const desiredTitle = `${tauriConf.productName} v${version}`;
+const needsWrite = tauriConf.version !== version || tauriConf.app.windows[0].title !== desiredTitle;
+if (needsWrite) {
   tauriConf.version = version;
+  for (const w of tauriConf.app.windows) w.title = desiredTitle;
   const eol = lineEnding(tauriConfRaw);
   const rewritten = JSON.stringify(tauriConf, null, 2).replace(/\n/g, eol) + eol;
   fs.writeFileSync(tauriConfPath, rewritten);
-  console.log(`sync-version: tauri.conf.json -> ${version}`);
+  console.log(`sync-version: tauri.conf.json -> ${version} / titre « ${desiredTitle} »`);
 } else {
-  console.log(`sync-version: tauri.conf.json déjà à ${version}`);
+  console.log(`sync-version: tauri.conf.json déjà à ${version} / titre « ${desiredTitle} »`);
 }
 
 // Cargo.toml — remplacement de la première ligne `version = "…"` du [package]
