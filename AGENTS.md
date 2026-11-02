@@ -131,8 +131,10 @@ src-tauri/
 ## 6. Chantiers connus (issus de l'audit d'oct. 2026 — à ne pas re-découvrir)
 
 Priorisés dans l'ordre du rapport d'audit :
-1. **Cluster robustesse** : images d'historique `base64: ""` (bulles `<img src="">`),
-   race `onDone`/refetch (`App.tsx` recharge avant l'insert async), clés React par index.
+1. **Cluster robustesse** :
+   ✅ Images d'historique `base64: ""` corrigé — garde `!a.base64` → chip texte, jamais `<img src="">` (ChatView.tsx).
+   ✅ Clés React stables `m.id ?? local-${i}` (ChatView.tsx) — élargir la règle aux nouveaux `.map()`.
+   ⚠️ Race `onDone`/refetch (`App.tsx` recharge avant l'insert async) — à re-vérifier avant de commenter.
 2. **Cluster sécurité** : bouger le HTTP côté Rust + valider le format `secret_ref`,
    CSP `connect-src https:` à restreindre en prod.
 3. **Cluster UI** : focus clavier invisible (`--ring` absent), palette de tokens
@@ -143,4 +145,6 @@ Priorisés dans l'ordre du rapport d'audit :
    ✅ **ModelPickerModal** — remplace `ModelDropdown` (modal recherche/ajout/clic-activer).
 4. **Tooling** : ESLint/Prettier/CI absents ; tests hooks à élargir.
 
-Consulter la conversation d'audit pour le détail fichier/ligne avant de commenter.
+Historique des livraisons : `docs/release-notes/` (détails par version : markdown,
+compteur tokens, arrière-plans, sync:version BOM…). Consulter la conversation d'audit
+pour le détail fichier/ligne avant de commenter.

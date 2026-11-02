@@ -19,11 +19,14 @@ dist-ssr
 *.db-shm
 *.db-wal
 
+# Outils agents IA (locaux, jamais partagés)
+.opencode
+.superpowers
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
 .idea
-.opencode
 .DS_Store
 *.suo
 *.ntvs*
@@ -31,4 +34,8 @@ dist-ssr
 *.sln
 *.sw?
 
-*note.text
+# Artifacts générés par Tauri (schémas capabilities, bundles)
+src-tauri/gen/
+
+# Brouillon local de session
+note.text

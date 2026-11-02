@@ -14,9 +14,14 @@ Assistant IA de bureau (Windows) pour apprendre des logiciels par conversation p
 - **Fournisseurs LLM configurables** (OpenAI-compatible : OpenRouter, OpenAI, Gemini, NVIDIA NIM…)
 - **Clé API stockée dans le Credential Manager Windows** (jamais en clair dans la DB/logs)
 - **System prompt modulaire** + base de connaissances (.md) par conversation
-- **Parcourt des modèles** : modal unifié (recherche, ajout textuel, activation par clic)
+- **Parcours des modèles** : modal unifié (recherche, ajout textuel, activation par clic)
+- **Rendu Markdown des réponses** (blocs de code + bouton copier, streaming fluide)
+- **Compteur de tokens et de coût** par message (tiktoken WASM)
+- **Arrière-plan personnalisé** sombre/clair selon le thème actif
 - **Dark / Light mode** (toggle header, défaut dark, persistance `localStorage`)
 - **Fenêtre maximisée au lancement** (Windows)
+
+Voir `docs/release-notes/` pour l'historique détaillé par version.
 
 ---
 
@@ -64,18 +69,6 @@ src-tauri/              # Backend Tauri (Rust)
 
 ---
 
-## Fonctionnalités v2.1.2
-
-| Fonctionnalité | État | Détails |
-|----------------|------|---------|
-| **Dark / Light mode** | ✅ | Toggle header (🌙/☀️), défaut dark, `localStorage` |
-| **Fenêtre maximisée** | ✅ | `maximized: true` dans `tauri.conf.json` |
-| **Icônes unifiées** | ✅ | Générées depuis `logo3.png` (script `scripts/generate-icons.js`) |
-| **Parcourt modèles** | ✅ | Modal (recherche + ajout textuel + clic = activation) |
-| **Suppression provider avec confirmation** | ✅ | Dialogue natif Windows (`@tauri-apps/plugin-dialog`) |
-
----
-
 ## Scripts utiles
 
 ```bash
@@ -92,8 +85,8 @@ npm run sync:version  # Sync version package.json / Cargo.toml / tauri.conf.json
 # Depuis PowerShell (pas WSL)
 cd C:\dev\LogAssist
 npm run tauri build
-# → src-tauri/target/release/bundle/msi/LogAssist_2.1.2_x64_en-US.msi
-# → src-tauri/target/release/bundle/nsis/LogAssist_2.1.2_x64-setup.exe
+# → src-tauri/target/release/bundle/msi/LogAssist_<version>_x64_en-US.msi
+# → src-tauri/target/release/bundle/nsis/LogAssist_<version>_x64-setup.exe
 ```
 
 ---
@@ -101,7 +94,7 @@ npm run tauri build
 ## Tests
 
 ```bash
-npm run test          # 152 tests (unitaires + composants jsdom)
+npm run test          # 163 tests (unitaires + composants jsdom)
 # gated dans npm run build
 ```
 
