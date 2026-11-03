@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react"
 import { Sun, Moon } from "lucide-react"
-import { BookIcon, ReglageIcon } from "@/icons"
+import { BookIcon, McpIcon, ReglageIcon } from "@/icons"
 import logoSrc from "@/assets/logo.png"
 import bgDark from "@/assets/background_dark_logassist.png"
 import bgLight from "@/assets/background_light_logassist.png"
@@ -9,14 +9,17 @@ import { conversations } from "@/lib/db/conversations"
 import { getActiveModel, type ActiveModel } from "@/lib/db/activeModel"
 import { providers, type ProviderRow, type ModelRow } from "@/lib/db/providers"
 import { useConversations } from "@/hooks/useConversations"
-import { useChat, type Attachment } from "@/hooks/useChat"
+import { useChat, type Attachment, type SendOptions } from "@/hooks/useChat"
 import { Sidebar } from "@/components/sidebar/Sidebar"
 import { ChatView } from "@/components/chat/ChatView"
 import { InputBar } from "@/components/chat/InputBar"
 import { SettingsDialog } from "@/components/settings/SettingsDialog"
 import { AssistantDialog } from "@/components/settings/AssistantDialog"
+import { McpDialog } from "@/components/settings/McpDialog"
 import { appVersion } from "@/lib/appVersion"
 import { loadPromptSettings } from "@/lib/prompts/store"
+import { loadWebAccess } from "@/lib/mcp/settings"
+import type { WebAccessConfig } from "@/lib/mcp/types"
 
 const DEFAULT_SIDEBAR_WIDTH = 280
 
@@ -27,6 +30,8 @@ function App() {
   const [modelOptions, setModelOptions] = useState<{ rowId: string; label: string; isDefault: boolean; supportsImages: boolean }[]>([])
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [assistantOpen, setAssistantOpen] = useState(false)
+  const [mcpOpen, setMcpOpen] = useState(false)
+  const [webAccess, setWebAccess] = useState<WebAccessConfig>({ enabled: false, configured: false })
   const [sidebarWidth, setSidebarWidth] = useState(DEFAULT_SIDEBAR_WIDTH)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
 
@@ -40,6 +45,12 @@ function App() {
       setSystemPrompt(settings.general + "\n\n" + settings.profile)
     })()
   }, [])
+
+  const refetchWebAccess = useCallback(() => {
+    void loadWebAccess().then(setWebAccess).catch(console.error)
+  }, [])
+
+  useEffect(() => refetchWebAccess(), [refetchWebAccess])
 
   // Dark mode (défaut dark) — persisté dans localStorage
   const [isDark, setIsDark] = useState(() => {
@@ -124,7 +135,7 @@ function App() {
         supportsImages: modelOptions.find((o) => o.isDefault)?.supportsImages ?? false,
       }
     : null
-  const { vm, busy, send, interrupt, load } = useChat(modelSelection)
+  const { vm, busy, send, interrupt, load, webToolsUnsupported } = useChat(modelSelection, webAccess)
 
   // Chargement de l'historique à chaque changement de conversation active.
   useEffect(() => {
@@ -172,11 +183,11 @@ function App() {
   )
 
   const onSend = useCallback(
-    (text: string, attachments: Attachment[]): Promise<boolean> => {
+    (text: string, attachments: Attachment[], options: SendOptions): Promise<boolean> => {
       if (!activeId) return Promise.resolve(false)
       // send ne rejette jamais : false = échec de persistance (InputBar
       // restaurera le contenu), true en fin de stream.
-      return send(activeId, text, attachments)
+      return send(activeId, text, attachments, options)
     },
     [activeId, send],
   )
@@ -230,8 +241,16 @@ function App() {
             {isDark ? <Moon className="size-4" /> : <Sun className="size-4" />}
           </button>
           {/* Séparateur discret */}
-          <div className="w-px h-5 bg-border mx-1" aria-hidden="true" />
-          <button
+           <div className="w-px h-5 bg-border mx-1" aria-hidden="true" />
+           <button
+             aria-label={t.mcp.open}
+             title={t.mcp.open}
+             onClick={() => setMcpOpen(true)}
+             className="rounded-md p-1.5 hover:bg-foreground/5"
+           >
+             <McpIcon className="size-[22px]" />
+           </button>
+           <button
             aria-label={t.assistant.title}
             title={t.assistant.systemPrompt}
             onClick={() => setAssistantOpen(true)}
@@ -266,12 +285,20 @@ function App() {
           busy={busy}
           onSend={onSend}
           onInterrupt={interrupt}
+          webAvailable={webAccess.enabled && webAccess.configured && !webToolsUnsupported}
+          webUnavailableReason={webToolsUnsupported ? t.chat.webModelUnsupported : t.chat.webUnavailable}
         />
       </section>
       {settingsOpen && (
         <SettingsDialog onClose={() => setSettingsOpen(false)} onChanged={onSettingsChanged} />
       )}
       {assistantOpen && <AssistantDialog onClose={() => setAssistantOpen(false)} conversationId={activeId} />}
+      {mcpOpen && (
+        <McpDialog
+          onClose={() => setMcpOpen(false)}
+          onChanged={refetchWebAccess}
+        />
+      )}
     </main>
   )
 }

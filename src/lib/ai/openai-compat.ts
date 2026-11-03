@@ -3,7 +3,16 @@ import { fetch as tauriFetch } from "@tauri-apps/plugin-http"
 import { ApiError, normalizeHttpStatus, normalizeNetworkError } from "./errors"
 import { logger } from "../logger"
 import { parseSseStream } from "./sse"
-import type { ChatRequest, ProviderConfig, StreamCallbacks } from "./types"
+import type {
+  ChatMessage,
+  ChatRequest,
+  ProviderConfig,
+  StreamCallbacks,
+  ToolCall,
+  TurnCallbacks,
+  TurnOptions,
+  TurnResult,
+} from "./types"
 
 // fetch passe par le backend Rust via tauri-plugin-http quand on est dans Tauri :
 // la webview n'est pas soumise au CORS (certains fournisseurs ex. NVIDIA NIM
@@ -17,6 +26,14 @@ function getFetch(): typeof globalThis.fetch {
 
 export interface IProvider {
   complete(req: ChatRequest, apiKey: string, modelId: string): Promise<{ text: string; totalMs: number }>
+  runTurn(
+    req: ChatRequest,
+    apiKey: string,
+    modelId: string,
+    options: TurnOptions,
+    callbacks: TurnCallbacks,
+    signal: AbortSignal,
+  ): Promise<TurnResult>
   stream(req: ChatRequest, apiKey: string, modelId: string, cb: StreamCallbacks, signal: AbortSignal): Promise<void>
   testConnection(apiKey: string): Promise<{ ok: boolean; error?: ApiError }>
   // Récupération des modèles annoncés par le fournisseur (GET /models)
@@ -34,22 +51,150 @@ export function createOpenAICompatible(cfg: ProviderConfig): IProvider {
   // Nettoie l'URL de base : retire trailing slashes ET chemins API connus (/models, /chat/completions, etc.)
   const base = cfg.baseUrl.replace(/\/+$/, "").replace(/\/(models|chat\/completions|v1\/models)$/, "")
 
-  async function chatRequest(req: ChatRequest, apiKey: string, modelId: string, stream: boolean, signal?: AbortSignal) {
-    const messages = req.messages.map((m) => ({
-      role: m.role,
-      content: m.images?.length
-        ? [
-            { type: "text", text: m.content },
-            ...m.images.map((i) => ({ type: "image_url", image_url: { url: `data:${i.mimeType};base64,${i.base64}` } })),
-          ]
-        : m.content,
-    }))
+  function toOpenAiMessage(message: ChatMessage): Record<string, unknown> {
+    const content = message.images?.length
+      ? [
+          { type: "text", text: message.content },
+          ...message.images.map((image) => ({
+            type: "image_url",
+            image_url: { url: `data:${image.mimeType};base64,${image.base64}` },
+          })),
+        ]
+      : message.content
+    const wire: Record<string, unknown> = { role: message.role, content }
+    if (message.role === "tool" && message.toolCallId) {
+      wire.tool_call_id = message.toolCallId
+    }
+    if (message.role === "assistant" && message.toolCalls?.length) {
+      wire.tool_calls = message.toolCalls.map((call) => ({
+        id: call.id,
+        type: "function",
+        function: { name: call.name, arguments: JSON.stringify(call.arguments) },
+      }))
+    }
+    return wire
+  }
+
+  async function chatRequest(
+    req: ChatRequest,
+    apiKey: string,
+    modelId: string,
+    stream: boolean,
+    signal?: AbortSignal,
+    options: TurnOptions = {},
+  ) {
+    const body: Record<string, unknown> = {
+      model: modelId,
+      messages: req.messages.map(toOpenAiMessage),
+      stream,
+    }
+    if (options.tools !== undefined) body.tools = options.tools
+    if (options.toolChoice !== undefined) body.tool_choice = options.toolChoice
     return getFetch()(`${base}/chat/completions`, {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
-      body: JSON.stringify({ model: modelId, messages, stream }),
+      body: JSON.stringify(body),
       signal,
     })
+  }
+
+  function isAbortError(error: unknown): error is Error {
+    return error instanceof Error &&
+      (error.name === "AbortError" || error.message === "Request cancelled")
+  }
+
+  async function runTurn(
+    req: ChatRequest,
+    apiKey: string,
+    modelId: string,
+    options: TurnOptions,
+    callbacks: TurnCallbacks,
+    signal: AbortSignal,
+  ): Promise<TurnResult> {
+    const start = performance.now()
+    let firstTokenMs = 0
+    let text = ""
+    let reader: ReadableStreamDefaultReader<Uint8Array> | null = null
+    const pendingCalls = new Map<number, { id: string; name: string; arguments: string }>()
+
+    try {
+      const res = await chatRequest(req, apiKey, modelId, true, signal, options)
+      if (!res.ok) {
+        const body = await res.text()
+        throw normalizeHttpStatus(res.status, body, retryAfterMs(res.headers))
+      }
+      if (!res.body) throw new ApiError("unknown", "Réponse vide du fournisseur")
+      reader = res.body.getReader()
+      await parseSseStream(reader, (chunk) => {
+        if (chunk.data === "[DONE]") return
+        let json: unknown
+        try {
+          json = JSON.parse(chunk.data)
+        } catch {
+          return
+        }
+        const delta = (json as {
+          choices?: {
+            delta?: {
+              content?: string
+              tool_calls?: {
+                index: number
+                id?: string
+                function?: { name?: string; arguments?: string }
+              }[]
+            }
+          }[]
+        })?.choices?.[0]?.delta
+        const content = delta?.content ?? ""
+        const toolDeltas = delta?.tool_calls ?? []
+        if (!firstTokenMs && (content || toolDeltas.length > 0)) {
+          firstTokenMs = performance.now() - start
+          callbacks.onFirstToken?.()
+        }
+        if (content) {
+          text += content
+          callbacks.onDelta?.(content)
+        }
+        for (const toolDelta of toolDeltas) {
+          const current = pendingCalls.get(toolDelta.index) ?? {
+            id: "",
+            name: "",
+            arguments: "",
+          }
+          if (toolDelta.id) current.id = toolDelta.id
+          if (toolDelta.function?.name) current.name += toolDelta.function.name
+          if (toolDelta.function?.arguments) current.arguments += toolDelta.function.arguments
+          pendingCalls.set(toolDelta.index, current)
+        }
+      })
+
+      const toolCalls: ToolCall[] = [...pendingCalls.entries()]
+        .sort(([left], [right]) => left - right)
+        .map(([, call]) => {
+          let parsed: unknown
+          try {
+            parsed = JSON.parse(call.arguments || "{}")
+          } catch {
+            throw new ApiError("unknown", "Arguments d'appel d'outil invalides")
+          }
+          if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+            throw new ApiError("unknown", "Arguments d'appel d'outil invalides")
+          }
+          return { id: call.id, name: call.name, arguments: parsed as Record<string, unknown> }
+        })
+
+      return {
+        text,
+        toolCalls,
+        firstTokenMs,
+        totalMs: performance.now() - start,
+      }
+    } catch (error) {
+      if (error instanceof ApiError || isAbortError(error)) throw error
+      throw normalizeNetworkError(error)
+    } finally {
+      if (reader) reader.cancel().catch(() => {})
+    }
   }
 
   return {
@@ -70,57 +215,18 @@ export function createOpenAICompatible(cfg: ProviderConfig): IProvider {
       }
     },
 
+    runTurn,
+
     async stream(req, apiKey, modelId, cb, signal) {
-      const start = performance.now()
-      let firstTokenMs = 0
-      let acc = ""
-      let reader: ReadableStreamDefaultReader<Uint8Array> | null = null
+      let result: TurnResult
       try {
-        const res = await chatRequest(req, apiKey, modelId, true, signal)
-        if (!res.ok) {
-          const body = await res.text()
-          throw normalizeHttpStatus(res.status, body, retryAfterMs(res.headers))
-        }
-        if (!res.body) throw new ApiError("unknown", "Réponse vide du fournisseur")
-        reader = res.body.getReader()
-        await parseSseStream(reader, (chunk) => {
-          if (chunk.data === "[DONE]") return
-          let json: unknown
-          try {
-            // Ligne non-JSON (keep-alive restant, commentaire SSE) : ignorée définitivement.
-            // Try séparé : SEUL le parse JSON est absorbé — un throw du consommateur
-            // dans onDelta/onFirstToken remonte au catch global → onError, stream interrompu.
-            json = JSON.parse(chunk.data)
-          } catch {
-            return
-          }
-          const delta: string =
-            (json as { choices?: { delta?: { content?: string } }[] })?.choices?.[0]?.delta?.content ?? ""
-          if (delta) {
-            if (!firstTokenMs) {
-              firstTokenMs = performance.now() - start
-              cb.onFirstToken?.()
-            }
-            acc += delta
-            cb.onDelta?.(delta)
-          }
-        })
-      } catch (e: unknown) {
-        // Critère 1 : erreurs réseau normalisées ; critère 5 : abort passthrough
-        // (abort natif = AbortError ; plugin Tauri = message "Request cancelled")
-        if (e instanceof ApiError) await cb.onError?.(e)
-        else if (e instanceof Error && (e.name === "AbortError" || e.message === "Request cancelled")) await cb.onError?.(e)
-        else await cb.onError?.(normalizeNetworkError(e))
+        result = await runTurn(req, apiKey, modelId, {}, cb, signal)
+      } catch (error: unknown) {
+        const normalized = error instanceof Error ? error : normalizeNetworkError(error)
+        await cb.onError?.(normalized)
         return
-      } finally {
-        // Critère 5 : libérer le reader si on a décroché en cours
-        // (cancel sur un stream déjà consommé = no-op sûr)
-        if (reader) reader.cancel().catch(() => {})
       }
-      // Critère 5 bis : onDone hors du try/catch — si le consommateur throw dans
-      // onDone, l'exception remonte au consommateur sans déclencher onError
-      // (pas de onError après un onDone partiel).
-      await cb.onDone?.({ text: acc, firstTokenMs, totalMs: performance.now() - start })
+      await cb.onDone?.(result)
     },
 
     async     testConnection(apiKey) {

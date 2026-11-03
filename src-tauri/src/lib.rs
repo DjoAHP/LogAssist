@@ -1,6 +1,10 @@
 mod commands;
+pub mod mcp;
 
-use commands::{delete_secret, get_secret, set_secret};
+use commands::{
+    delete_secret, get_secret, mcp_call, mcp_cancel, mcp_configure, mcp_delete_secret,
+    mcp_has_secret, set_secret,
+};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -10,7 +14,17 @@ pub fn run() {
         .plugin(tauri_plugin_http::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
-        .invoke_handler(tauri::generate_handler![set_secret, get_secret, delete_secret])
+        .manage(mcp::client::McpState::default())
+        .invoke_handler(tauri::generate_handler![
+            set_secret,
+            get_secret,
+            delete_secret,
+            mcp_has_secret,
+            mcp_configure,
+            mcp_delete_secret,
+            mcp_call,
+            mcp_cancel
+        ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

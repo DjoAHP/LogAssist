@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { createProvider, buildPreview } from "@/lib/ai/factory"
 import { logger } from "@/lib/logger"
 import type { ApiError } from "@/lib/ai/errors"
@@ -11,6 +11,10 @@ import { messages as messagesDb, type MessageRow } from "@/lib/db/messages"
 import { images as imagesDb } from "@/lib/db/images"
 import { conversations } from "@/lib/db/conversations"
 import { secrets } from "@/lib/secrets/service"
+import { tinyfish } from "@/lib/mcp/client"
+import { resolveWebChoice } from "@/lib/mcp/webIntent"
+import { runWebAgent } from "@/lib/mcp/webAgent"
+import type { WebAccessConfig, WebSource, WebStatus } from "@/lib/mcp/types"
 
 export interface Attachment {
   id: string
@@ -39,16 +43,38 @@ export interface ChatMessageVM {
   latencyMs?: number
   apiError?: ApiErrorPayload
   interrupted?: boolean
+  sources?: WebSource[]
+  webStatus?: WebStatus
+  webWarning?: string
 }
 
-export function useChat(modelSelection: { provider: ProviderConfig; modelId: string; supportsImages: boolean } | null) {
+export interface SendOptions {
+  forceWeb?: boolean
+}
+
+const WEB_DISABLED: WebAccessConfig = { enabled: false, configured: false }
+
+export function useChat(
+  modelSelection: { provider: ProviderConfig; modelId: string; supportsImages: boolean } | null,
+  webAccess: WebAccessConfig = WEB_DISABLED,
+) {
   const [vm, setVm] = useState<ChatMessageVM[]>([])
   const [busy, setBusy] = useState(false)
+  const [webToolsUnsupported, setWebToolsUnsupported] = useState(false)
   // Hoistés au niveau du hook : useRef dans une callback violerait les règles
   // des hooks. Un seul stream actif à la fois (gate busy) → un ref partagé sûr.
   const accRef = useRef("")
   const abortRef = useRef<AbortController | null>(null)
+  const mcpRequestRef = useRef<string | null>(null)
+  const unsupportedToolsRef = useRef(new Set<string>())
   const loadSeqRef = useRef(0)
+
+  useEffect(() => {
+    const key = modelSelection
+      ? `${modelSelection.provider.id}/${modelSelection.modelId}`
+      : ""
+    setWebToolsUnsupported(key !== "" && unsupportedToolsRef.current.has(key))
+  }, [modelSelection?.provider.id, modelSelection?.modelId])
 
   const load = useCallback(async (conversationId: string) => {
     // Token de séquence : une réponse de load obsolète (switch rapide entre
@@ -60,7 +86,12 @@ export function useChat(modelSelection: { provider: ProviderConfig; modelId: str
   }, [])
 
   const send = useCallback(
-    async (conversationId: string, text: string, attachments: Attachment[] = []): Promise<boolean> => {
+    async (
+      conversationId: string,
+      text: string,
+      attachments: Attachment[] = [],
+      options: SendOptions = {},
+    ): Promise<boolean> => {
       const content = text.trim()
       if (!content && attachments.length === 0) return false
       if (busy || !modelSelection) return false
@@ -134,6 +165,7 @@ export function useChat(modelSelection: { provider: ProviderConfig; modelId: str
           general: promptSettings.general,
           profile: promptSettings.profile,
           knowledge: enabledKnowledge.map((k) => ({ name: k.name, content: k.content })),
+          webEnabled: webAccess.enabled && webAccess.configured,
         })
         const history = await messagesDb.listByConversation(conversationId)
         const apiMessages: ChatMessage[] = [
@@ -175,7 +207,75 @@ export function useChat(modelSelection: { provider: ProviderConfig; modelId: str
         const upsertLast = (patch: Partial<ChatMessageVM>) =>
           setVm((s) => s.map((m) => (m.id === assistantId ? { ...m, ...patch } : m)))
 
-        const isAbort = (e: unknown) => e instanceof Error && e.name === "AbortError"
+        const isAbort = (e: unknown) =>
+          typeof e === "object" && e !== null &&
+          (("name" in e && e.name === "AbortError") ||
+            ("message" in e && e.message === "Request cancelled"))
+
+        const persistDone = (
+          result: { text: string; totalMs: number },
+          sources: WebSource[] = [],
+          webWarning?: string,
+        ) => {
+          const acc = accRef.current
+          return (async () => {
+            const finalContent = result.text || acc
+            const id = await messagesDb.insert({
+              conversation_id: conversationId,
+              role: "assistant",
+              content: finalContent,
+              attachments: "[]",
+              model_label: label,
+              latency_ms: Math.round(result.totalMs),
+              error: null,
+              sources: JSON.stringify(sources),
+            })
+            upsertLast({
+              id,
+              content: finalContent,
+              latencyMs: Math.round(result.totalMs),
+              sources,
+              webWarning,
+              webStatus: undefined,
+            })
+          })().catch(logger.error)
+        }
+
+        const persistError = (e: unknown) => {
+          const acc = accRef.current
+          return (async () => {
+            if (isAbort(e)) {
+              const id = await messagesDb.insert({
+                conversation_id: conversationId, role: "assistant", content: acc,
+                attachments: "[]", model_label: label, latency_ms: null,
+                error: JSON.stringify({ interrupted: true }), sources: "[]",
+              })
+              upsertLast({ id, content: acc, interrupted: true, webStatus: undefined })
+              return
+            }
+            const api = e as Partial<ApiError>
+            const payload: ApiErrorPayload = {
+              kind: api.kind ?? "unknown",
+              message: api.message ?? "Erreur inattendue",
+              ...(api.detail ? { detail: api.detail } : {}),
+            }
+            upsertLast({ apiError: payload, interrupted: false, webStatus: undefined })
+            const id = await messagesDb.insert({
+              conversation_id: conversationId, role: "assistant", content: acc,
+              attachments: "[]", model_label: label, latency_ms: null,
+              error: JSON.stringify(payload), sources: "[]",
+            })
+            upsertLast({ id, content: acc })
+          })().catch(logger.error)
+        }
+
+        const turnCallbacks = {
+          onFirstToken: () => { /* réservé V1.1 (temps de première réponse) */ },
+          onDelta: (d: string) => {
+            accRef.current += d
+            upsertLast({ content: accRef.current })
+          },
+        }
 
         // DEBUG: log ce qui part vers l'API (no-op en production)
         logger.debug("[useChat] Envoi à l'API:", {
@@ -186,66 +286,57 @@ export function useChat(modelSelection: { provider: ProviderConfig; modelId: str
           messagesCount: apiMessages.length,
         })
 
-        await apiProvider.stream(
-          { messages: apiMessages },
-          apiKey,
-          modelId,
-          {
-            onFirstToken: () => { /* réservé V1.1 (temps de première réponse) */ },
-            onDelta: (d) => {
-              accRef.current += d
-              upsertLast({ content: accRef.current })
-            },
+        if (webAccess.enabled && webAccess.configured) {
+          try {
+            const webResult = await runWebAgent({
+              provider: apiProvider,
+              webClient: {
+                call: async (requestId, request) => {
+                  mcpRequestRef.current = requestId
+                  try {
+                    return await tinyfish.call(requestId, request)
+                  } finally {
+                    if (mcpRequestRef.current === requestId) mcpRequestRef.current = null
+                  }
+                },
+              },
+              request: { messages: apiMessages },
+              apiKey,
+              modelId,
+              toolChoice: resolveWebChoice(fullContent, options.forceWeb ?? false),
+              callbacks: turnCallbacks,
+              signal: controller.signal,
+              requestId: assistantId,
+              compatibilityKey: `${provider.id}/${modelId}`,
+              unsupportedTools: unsupportedToolsRef.current,
+              onStatus: (webStatus) => upsertLast({ webStatus }),
+            })
+            setWebToolsUnsupported(unsupportedToolsRef.current.has(`${provider.id}/${modelId}`))
+            if (controller.signal.aborted) throw controller.signal.reason
+            accRef.current = webResult.text
+            await persistDone(webResult, webResult.sources, webResult.warning)
+          } catch (e) {
+            await persistError(e)
+          }
+        } else {
+          await apiProvider.stream(
+            { messages: apiMessages },
+            apiKey,
+            modelId,
+            {
+              ...turnCallbacks,
             // Insertions persistance : ON RETOURNE la promesse (contrat fix
             // 85acc6b) — stream() l'attend (openai-compat.ts) avant de se
             // résoudre. Si on fait `void`, stream résout avant committance →
             // busy=false → refetch App sans le message (disparition).
             // Cap défensif : on lit accRef une seule fois (une interruption
             // simultanée ne peut plus muter le cap).
-            onDone: ({ text, totalMs }) => {
-              const acc = accRef.current
-              // Retourne la promise : stream() l'await avant de se résoudre.
-              return (async () => {
-                const id = await messagesDb.insert({
-                  conversation_id: conversationId, role: "assistant", content: text || acc,
-                  attachments: "[]", model_label: label, latency_ms: Math.round(totalMs), error: null,
-                })
-                upsertLast({ id, content: text || acc, latencyMs: Math.round(totalMs) })
-              })().catch(logger.error)
+              onDone: persistDone,
+              onError: persistError,
             },
-            onError: (e) => {
-              const acc = accRef.current
-              // Retourne la promise : stream() l'await avant de se résoudre.
-              return (async () => {
-                if (isAbort(e)) {
-                  // Interruption volontaire : contenu accumulé conservé et
-                  // persisté, marqué « interrompu », pas de bulle d'erreur.
-                  const id = await messagesDb.insert({
-                    conversation_id: conversationId, role: "assistant", content: acc,
-                    attachments: "[]", model_label: label, latency_ms: null,
-                    error: JSON.stringify({ interrupted: true }),
-                  })
-                  upsertLast({ id, content: acc, interrupted: true })
-                  return
-                }
-                const api = e as ApiError
-                const payload: ApiErrorPayload = {
-                  kind: api.kind ?? "unknown",
-                  message: api.message,
-                  ...(api.detail ? { detail: api.detail } : {}),
-                }
-                upsertLast({ apiError: payload, interrupted: false })
-                const id = await messagesDb.insert({
-                  conversation_id: conversationId, role: "assistant", content: acc,
-                  attachments: "[]", model_label: label, latency_ms: null,
-                  error: JSON.stringify(payload),
-                })
-                upsertLast({ id, content: acc })
-              })().catch(logger.error)
-            },
-          },
-          controller.signal,
-        )
+            controller.signal,
+          )
+        }
         return true
       } catch (e) {
         // Contrat anti-perte : !userPersisted → false (contenu restauré par
@@ -260,19 +351,25 @@ export function useChat(modelSelection: { provider: ProviderConfig; modelId: str
         // réactivé, y compris en cas d'exception du consommateur.
         setBusy(false)
         abortRef.current = null
+        mcpRequestRef.current = null
       }
     },
-    [busy, modelSelection],
+    [busy, modelSelection, webAccess],
   )
 
-  const interrupt = useCallback(() => abortRef.current?.abort(), [])
-  return { vm, busy, send, interrupt, load }
+  const interrupt = useCallback(() => {
+    abortRef.current?.abort()
+    const requestId = mcpRequestRef.current
+    if (requestId) void tinyfish.cancel(requestId).catch(logger.error)
+  }, [])
+  return { vm, busy, send, interrupt, load, webToolsUnsupported }
 }
 
 function mapRow(r: MessageRow): ChatMessageVM {
   let apiError: ApiErrorPayload | undefined
   let interrupted: boolean | undefined
   let attachments: Attachment[] | undefined
+  let sources: WebSource[] = []
   if (r.error) {
     try {
       const parsed = JSON.parse(r.error) as ApiErrorPayload & { interrupted?: boolean }
@@ -294,10 +391,26 @@ function mapRow(r: MessageRow): ChatMessageVM {
       // ignore
     }
   }
+  if (r.sources) {
+    try {
+      const parsed = JSON.parse(r.sources) as unknown
+      if (Array.isArray(parsed)) {
+        sources = parsed.filter((source): source is WebSource => {
+          if (typeof source !== "object" || source === null) return false
+          const candidate = source as Partial<WebSource>
+          return typeof candidate.url === "string" &&
+            (candidate.origin === "search" || candidate.origin === "fetch_content") &&
+            (candidate.title === undefined || typeof candidate.title === "string")
+        })
+      }
+    } catch {
+      // Valeur historique invalide : aucune source affichée.
+    }
+  }
   return {
     id: r.id, role: r.role, content: r.content, attachments,
     modelLabel: r.model_label ?? undefined,
     latencyMs: r.latency_ms ?? undefined,
-    apiError, interrupted,
+    apiError, interrupted, sources,
   }
 }

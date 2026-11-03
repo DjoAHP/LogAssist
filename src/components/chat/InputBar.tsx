@@ -1,12 +1,14 @@
 import { useCallback, useRef, useState } from "react"
-import { Send, Square, Image, X, FileText } from "lucide-react"
+import { Send, Square, Image, X, FileText, Globe2 } from "lucide-react"
 import { t } from "@/i18n/fr"
-import type { Attachment } from "@/hooks/useChat"
+import type { Attachment, SendOptions } from "@/hooks/useChat"
 
 interface Props {
   disabled?: boolean
   busy?: boolean
-  onSend: (text: string, attachments: Attachment[]) => Promise<boolean>
+  webAvailable?: boolean
+  webUnavailableReason?: string
+  onSend: (text: string, attachments: Attachment[], options: SendOptions) => Promise<boolean>
   onInterrupt: () => void
 }
 
@@ -61,9 +63,17 @@ function fileToBase64(file: File): Promise<Attachment> {
   })
 }
 
-export function InputBar({ disabled = false, busy = false, onSend, onInterrupt }: Props) {
+export function InputBar({
+  disabled = false,
+  busy = false,
+  webAvailable = false,
+  webUnavailableReason = t.chat.webUnavailable,
+  onSend,
+  onInterrupt,
+}: Props) {
   const [text, setText] = useState("")
   const [attachments, setAttachments] = useState<Attachment[]>([])
+  const [forceWeb, setForceWeb] = useState(false)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const textInputRef = useRef<HTMLInputElement>(null)
@@ -151,9 +161,10 @@ export function InputBar({ disabled = false, busy = false, onSend, onInterrupt }
     // Vidage optimiste avant l'enregistrement (l'UI ne doit pas geler)
     setText("")
     setAttachments([])
-    void onSend(content, attachments)
+    void onSend(content, attachments, { forceWeb })
       .then((ok) => {
-        if (!ok) restore()
+        if (ok) setForceWeb(false)
+        else restore()
       })
       .catch(restore)
       .finally(() => {
@@ -161,7 +172,7 @@ export function InputBar({ disabled = false, busy = false, onSend, onInterrupt }
           if (textareaRef.current) textareaRef.current.style.height = "auto"
         })
       })
-  }, [text, attachments, busy, disabled, onSend])
+  }, [text, attachments, busy, disabled, forceWeb, onSend])
 
   const onKeyDown = useCallback((e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.nativeEvent.isComposing) return
@@ -244,6 +255,21 @@ export function InputBar({ disabled = false, busy = false, onSend, onInterrupt }
           >
             <FileText className="size-4" />
           </label>
+          <button
+            type="button"
+            aria-label={t.chat.forceWeb}
+            aria-pressed={forceWeb}
+            title={!webAvailable ? webUnavailableReason : forceWeb ? t.chat.forceWebActive : t.chat.forceWeb}
+            disabled={!webAvailable || busy || disabled}
+            onClick={() => setForceWeb((active) => !active)}
+            className={`flex h-[38px] items-center rounded-md border px-3 transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
+              forceWeb
+                ? "border-[var(--brand-to)] bg-[var(--brand-to)]/10 text-[var(--brand-to)]"
+                : "border-border bg-background hover:bg-foreground/5"
+            }`}
+          >
+            <Globe2 className="size-4" />
+          </button>
           {busy ? (
             <button
               onClick={onInterrupt}

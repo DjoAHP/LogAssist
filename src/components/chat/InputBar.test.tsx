@@ -31,6 +31,7 @@ describe("InputBar — fichiers texte", () => {
       expect(onSend).toHaveBeenCalledWith(
         "Aide-moi",
         [expect.objectContaining({ kind: "text", name: "HISE.md", text: "## Mode d'emploi" })],
+        { forceWeb: false },
       ),
     )
   })
@@ -62,7 +63,43 @@ describe("InputBar — fichiers texte", () => {
       expect(onSend).toHaveBeenCalledWith(
         "voici",
         [expect.objectContaining({ kind: "image", name: "shot.png" })],
+        { forceWeb: false },
       ),
     )
+  })
+})
+
+describe("InputBar — forçage Web ponctuel", () => {
+  it("est inactif par défaut puis transmet forceWeb une seule fois après activation", async () => {
+    renderBar({ webAvailable: true })
+    const web = screen.getByRole("button", { name: "Forcer la recherche Web" })
+    expect(web.getAttribute("aria-pressed")).toBe("false")
+    fireEvent.click(web)
+    expect(web.getAttribute("aria-pressed")).toBe("true")
+    fireEvent.change(screen.getByPlaceholderText(/Écrivez/), { target: { value: "Actualité" } })
+    fireEvent.click(screen.getByRole("button", { name: /Envoyer/ }))
+    await waitFor(() => expect(onSend).toHaveBeenCalledWith("Actualité", [], { forceWeb: true }))
+    await waitFor(() => expect(web.getAttribute("aria-pressed")).toBe("false"))
+  })
+
+  it("conserve le forçage et restaure le texte si send retourne false", async () => {
+    onSend.mockResolvedValueOnce(false)
+    renderBar({ webAvailable: true })
+    const web = screen.getByRole("button", { name: "Forcer la recherche Web" })
+    fireEvent.click(web)
+    fireEvent.change(screen.getByPlaceholderText(/Écrivez/), { target: { value: "À garder" } })
+    fireEvent.click(screen.getByRole("button", { name: /Envoyer/ }))
+    await waitFor(() => expect((screen.getByPlaceholderText(/Écrivez/) as HTMLTextAreaElement).value).toBe("À garder"))
+    expect(web.getAttribute("aria-pressed")).toBe("true")
+  })
+
+  it("est désactivé avec une explication si le Web est indisponible ou occupé", () => {
+    const { rerender } = renderBar({ webAvailable: false, webUnavailableReason: "TinyFish indisponible" })
+    const unavailable = screen.getByRole("button", { name: "Forcer la recherche Web" }) as HTMLButtonElement
+    expect(unavailable.disabled).toBe(true)
+    expect(unavailable.title).toBe("TinyFish indisponible")
+
+    rerender(<InputBar onSend={onSend} onInterrupt={onInterrupt} webAvailable busy />)
+    expect((screen.getByRole("button", { name: "Forcer la recherche Web" }) as HTMLButtonElement).disabled).toBe(true)
   })
 })

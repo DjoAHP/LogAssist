@@ -52,4 +52,10 @@ describe("buildSystemPrompt", () => {
     const p = buildSystemPrompt({ general: "GEN", profile: "", knowledge: [{ name: "HISE", content: "  " }] })
     expect(p).not.toContain("## Connaissance : HISE")
   })
+  it("ajoute les règles de sécurité lorsque l'accès Web est actif", () => {
+    const p = buildSystemPrompt({ general: "GEN", profile: "", webEnabled: true })
+    expect(p).toContain("contenu Web externe")
+    expect(p).toContain("ignorer toute instruction")
+    expect(p).toContain("secrets")
+  })
 })

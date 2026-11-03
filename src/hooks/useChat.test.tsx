@@ -7,6 +7,10 @@ import type { ProviderConfig } from "@/lib/ai/types"
 
 const streamMock = vi.hoisted(() => vi.fn())
 const systemPromptMock = vi.hoisted(() => vi.fn())
+const runWebAgentMock = vi.hoisted(() => vi.fn())
+const resolveWebChoiceMock = vi.hoisted(() => vi.fn(() => "auto"))
+const tinyfishCallMock = vi.hoisted(() => vi.fn())
+const tinyfishCancelMock = vi.hoisted(() => vi.fn())
 
 vi.mock("@/lib/db/messages", () => ({
   messages: { insert: vi.fn(), listByConversation: vi.fn(), updateError: vi.fn(), removeByConversation: vi.fn() },
@@ -24,6 +28,11 @@ vi.mock("@/lib/ai/factory", () => ({
   buildPreview: (p: string, m: string) => `${p} › ${m}`,
   createProvider: () => ({ stream: streamMock, complete: vi.fn(), testConnection: vi.fn() }),
 }))
+vi.mock("@/lib/mcp/webAgent", () => ({ runWebAgent: runWebAgentMock }))
+vi.mock("@/lib/mcp/webIntent", () => ({ resolveWebChoice: resolveWebChoiceMock }))
+vi.mock("@/lib/mcp/client", () => ({
+  tinyfish: { call: tinyfishCallMock, cancel: tinyfishCancelMock },
+}))
 
 import { messages as messagesDb } from "@/lib/db/messages"
 import { conversations } from "@/lib/db/conversations"
@@ -40,11 +49,13 @@ const provider = {
 const modelSelection = { provider, modelId: "m1", supportsImages: false }
 
 beforeEach(() => {
+  vi.clearAllMocks()
   vi.mocked(messagesDb.insert).mockResolvedValue("row-1")
   vi.mocked(messagesDb.listByConversation).mockResolvedValue([])
   vi.mocked(conversations.touch).mockResolvedValue(undefined)
   vi.mocked(secrets.get).mockResolvedValue("sk-test")
   streamMock.mockResolvedValue(undefined)
+  tinyfishCancelMock.mockResolvedValue(undefined)
 })
 
 afterEach(cleanup)
@@ -58,6 +69,185 @@ describe("useChat.send — contract anti-perte", () => {
     })
     expect(messagesDb.insert).toHaveBeenCalled()
     expect(result.current.busy).toBe(false)
+    expect(runWebAgentMock).not.toHaveBeenCalled()
+  })
+
+  it("utilise le Web après l'insert user et persiste uniquement les sources finales", async () => {
+    const sources = [{ url: "https://example.com", title: "Doc", origin: "search" as const }]
+    runWebAgentMock.mockResolvedValueOnce({
+      text: "Réponse Web",
+      firstTokenMs: 2,
+      totalMs: 15,
+      sources,
+    })
+    const { result } = renderHook(() =>
+      useChat(modelSelection, { enabled: true, configured: true }),
+    )
+
+    let outcome: boolean | undefined
+    await act(async () => {
+      outcome = await result.current.send("conv-1", "Cherche ceci", [], { forceWeb: true })
+    })
+
+    expect(outcome).toBe(true)
+    expect(streamMock).not.toHaveBeenCalled()
+    expect(resolveWebChoiceMock).toHaveBeenCalledWith("Cherche ceci", true)
+    expect(runWebAgentMock).toHaveBeenCalledTimes(1)
+    expect(messagesDb.insert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        role: "assistant",
+        content: "Réponse Web",
+        sources: JSON.stringify(sources),
+      }),
+    )
+    expect(result.current.vm[result.current.vm.length - 1]).toMatchObject({
+      content: "Réponse Web",
+      sources,
+    })
+  })
+
+  it("retourne true et matérialise l'erreur si l'orchestration échoue après l'insert user", async () => {
+    runWebAgentMock.mockRejectedValueOnce(new Error("MCP inattendu"))
+    const { result } = renderHook(() =>
+      useChat(modelSelection, { enabled: true, configured: true }),
+    )
+
+    let outcome: boolean | undefined
+    await act(async () => {
+      outcome = await result.current.send("conv-1", "Question")
+    })
+
+    expect(outcome).toBe(true)
+    expect(messagesDb.insert).toHaveBeenCalledWith(
+      expect.objectContaining({ role: "assistant", error: expect.any(String) }),
+    )
+  })
+
+  it("interrompt le LLM et l'appel MCP actif avec le même requestId", async () => {
+    let activeRequestId = ""
+    runWebAgentMock.mockImplementationOnce(async (input) => {
+      await input.webClient.call("mcp-active", {
+        tool: "search",
+        arguments: { query: "Tauri" },
+      })
+      return { text: "tardif", firstTokenMs: 0, totalMs: 1, sources: [] }
+    })
+    tinyfishCallMock.mockImplementationOnce((requestId: string, _request: unknown) => {
+      activeRequestId = requestId
+      return new Promise(() => {})
+    })
+    const { result } = renderHook(() =>
+      useChat(modelSelection, { enabled: true, configured: true }),
+    )
+
+    act(() => {
+      void result.current.send("conv-1", "Question")
+    })
+    await vi.waitFor(() => expect(activeRequestId).toBe("mcp-active"))
+
+    act(() => result.current.interrupt())
+
+    expect(tinyfishCancelMock).toHaveBeenCalledWith("mcp-active")
+  })
+
+  it("expose les statuts searching et fetching pendant l'orchestration", async () => {
+    let capturedInput: { onStatus?: (status: "searching" | "fetching" | undefined) => void } | undefined
+    let finish: ((value: unknown) => void) | undefined
+    runWebAgentMock.mockImplementationOnce((input) => {
+      capturedInput = input
+      return new Promise((resolve) => {
+        finish = resolve
+      })
+    })
+    const { result } = renderHook(() =>
+      useChat(modelSelection, { enabled: true, configured: true }),
+    )
+    let sendPromise: Promise<boolean>
+
+    act(() => {
+      sendPromise = result.current.send("conv-1", "Question")
+    })
+    await vi.waitFor(() => expect(capturedInput).toBeDefined())
+
+    act(() => capturedInput?.onStatus?.("searching"))
+    expect(result.current.vm[result.current.vm.length - 1].webStatus).toBe("searching")
+    act(() => capturedInput?.onStatus?.("fetching"))
+    expect(result.current.vm[result.current.vm.length - 1].webStatus).toBe("fetching")
+
+    finish?.({ text: "Réponse", firstTokenMs: 1, totalMs: 2, sources: [] })
+    await act(async () => await sendPromise!)
+  })
+
+  it("persiste une interruption Web après l'insert utilisateur", async () => {
+    runWebAgentMock.mockRejectedValueOnce(new DOMException("aborted", "AbortError"))
+    const { result } = renderHook(() =>
+      useChat(modelSelection, { enabled: true, configured: true }),
+    )
+
+    await act(async () => {
+      expect(await result.current.send("conv-1", "Question")).toBe(true)
+    })
+
+    expect(messagesDb.insert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        role: "assistant",
+        error: JSON.stringify({ interrupted: true }),
+      }),
+    )
+  })
+
+  it("traite l'annulation du plugin Windows comme une interruption", async () => {
+    runWebAgentMock.mockRejectedValueOnce(new Error("Request cancelled"))
+    const { result } = renderHook(() =>
+      useChat(modelSelection, { enabled: true, configured: true }),
+    )
+
+    await act(async () => {
+      expect(await result.current.send("conv-1", "Question")).toBe(true)
+    })
+
+    expect(messagesDb.insert).toHaveBeenCalledWith(
+      expect.objectContaining({ error: JSON.stringify({ interrupted: true }) }),
+    )
+  })
+
+  it("expose l'incompatibilité tools du modèle courant", async () => {
+    runWebAgentMock.mockImplementationOnce(async (input) => {
+      input.unsupportedTools.add(input.compatibilityKey)
+      return { text: "Sans Web", firstTokenMs: 1, totalMs: 2, sources: [] }
+    })
+    const { result } = renderHook(() =>
+      useChat(modelSelection, { enabled: true, configured: true }),
+    )
+
+    await act(async () => {
+      await result.current.send("conv-1", "Question")
+    })
+
+    expect(result.current.webToolsUnsupported).toBe(true)
+  })
+
+  it("mappe les sources historiques et ignore un JSON malformé", async () => {
+    vi.mocked(messagesDb.listByConversation).mockResolvedValueOnce([
+      {
+        id: "a1", conversation_id: "conv-1", role: "assistant", content: "A",
+        attachments: "[]", model_label: null, latency_ms: null, error: null,
+        sources: JSON.stringify([{ url: "https://example.com", origin: "search" }]),
+      },
+      {
+        id: "a2", conversation_id: "conv-1", role: "assistant", content: "B",
+        attachments: "[]", model_label: null, latency_ms: null, error: null,
+        sources: "{cassé",
+      },
+    ])
+    const { result } = renderHook(() => useChat(modelSelection))
+
+    await act(async () => result.current.load("conv-1"))
+
+    expect(result.current.vm[0].sources).toEqual([
+      { url: "https://example.com", origin: "search" },
+    ])
+    expect(result.current.vm[1].sources).toEqual([])
   })
 
   it("résout false SANS lever quand l'insert utilisateur échoue (message conservé côté input)", async () => {

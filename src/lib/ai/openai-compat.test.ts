@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { ApiError } from "./errors"
 import { buildPreview, createOpenAICompatible, createProvider } from "./openai-compat"
-import type { ChatRequest, ProviderConfig } from "./types"
+import type { ChatRequest, ProviderConfig, ToolDefinition } from "./types"
 
 const CFG: ProviderConfig = {
   id: "prov-openrouter",
@@ -42,6 +42,25 @@ function sseStream(chunks: string[]): ReadableStream {
 
 // Format SSE standard : chaque événement est terminé par une ligne vide ("\n\n")
 const SSE = "\n\n"
+
+function sseData(data: unknown): string {
+  return `data: ${JSON.stringify(data)}${SSE}`
+}
+
+const TEST_TOOLS: ToolDefinition[] = [
+  {
+    type: "function",
+    function: {
+      name: "search",
+      description: "Recherche Web",
+      parameters: {
+        type: "object",
+        properties: { query: { type: "string" } },
+        required: ["query"],
+      },
+    },
+  },
+]
 
 describe("createOpenAICompatible — listRemoteModels", () => {
   it("GET /models avec Bearer key, extrait data[].id (les entrées sans id sont filtrées)", async () => {
@@ -329,6 +348,248 @@ describe("createOpenAICompatible — stream", () => {
     const err = onError.mock.calls[0][0]
     expect(err.name).toBe("AbortError")
     expect(err).not.toBeInstanceOf(ApiError)
+  })
+})
+
+describe("createOpenAICompatible — runTurn", () => {
+  it("transmet les outils et recompose les arguments JSON fragmentés", async () => {
+    const stream = sseStream([
+      sseData({
+        choices: [
+          {
+            delta: {
+              tool_calls: [
+                {
+                  index: 0,
+                  id: "call-1",
+                  type: "function",
+                  function: { name: "search", arguments: '{"query":"Tau' },
+                },
+              ],
+            },
+          },
+        ],
+      }),
+      sseData({
+        choices: [
+          {
+            delta: {
+              tool_calls: [{ index: 0, function: { arguments: 'ri 2.9"}' } }],
+            },
+          },
+        ],
+      }),
+      `data: [DONE]${SSE}`,
+    ])
+    const fetchMock = vi.fn().mockResolvedValue(makeRes({ body: stream }))
+    vi.stubGlobal("fetch", fetchMock)
+    const adapter = createOpenAICompatible(CFG)
+
+    const result = await adapter.runTurn(
+      { messages: [{ role: "user", content: "Cherche Tauri" }] },
+      "K",
+      "m",
+      { tools: TEST_TOOLS, toolChoice: "required" },
+      {},
+      new AbortController().signal,
+    )
+
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body)
+    expect(body.tools).toEqual(TEST_TOOLS)
+    expect(body.tool_choice).toBe("required")
+    expect(result.toolCalls).toEqual([
+      { id: "call-1", name: "search", arguments: { query: "Tauri 2.9" } },
+    ])
+  })
+
+  it("recompose indépendamment plusieurs index d'appels", async () => {
+    const stream = sseStream([
+      sseData({
+        choices: [
+          {
+            delta: {
+              tool_calls: [
+                {
+                  index: 1,
+                  id: "call-2",
+                  function: { name: "fetch_content", arguments: '{"urls":[' },
+                },
+                {
+                  index: 0,
+                  id: "call-1",
+                  function: { name: "search", arguments: '{"query":"doc"}' },
+                },
+              ],
+            },
+          },
+        ],
+      }),
+      sseData({
+        choices: [
+          {
+            delta: {
+              tool_calls: [
+                { index: 1, function: { arguments: '"https://example.com"]}' } },
+              ],
+            },
+          },
+        ],
+      }),
+      `data: [DONE]${SSE}`,
+    ])
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(makeRes({ body: stream })))
+
+    const result = await createOpenAICompatible(CFG).runTurn(
+      { messages: [{ role: "user", content: "doc" }] },
+      "K",
+      "m",
+      { tools: TEST_TOOLS },
+      {},
+      new AbortController().signal,
+    )
+
+    expect(result.toolCalls).toEqual([
+      { id: "call-1", name: "search", arguments: { query: "doc" } },
+      {
+        id: "call-2",
+        name: "fetch_content",
+        arguments: { urls: ["https://example.com"] },
+      },
+    ])
+  })
+
+  it("préserve les messages assistant/tool dans le corps OpenAI", async () => {
+    const stream = sseStream([sseData({ choices: [{ delta: { content: "Réponse" } }] })])
+    const fetchMock = vi.fn().mockResolvedValue(makeRes({ body: stream }))
+    vi.stubGlobal("fetch", fetchMock)
+
+    await createOpenAICompatible(CFG).runTurn(
+      {
+        messages: [
+          {
+            role: "assistant",
+            content: "",
+            toolCalls: [
+              { id: "call-1", name: "search", arguments: { query: "Tauri" } },
+            ],
+          },
+          { role: "tool", content: "Résultat externe", toolCallId: "call-1" },
+        ],
+      },
+      "K",
+      "m",
+      {},
+      {},
+      new AbortController().signal,
+    )
+
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body)
+    expect(body.messages).toEqual([
+      {
+        role: "assistant",
+        content: "",
+        tool_calls: [
+          {
+            id: "call-1",
+            type: "function",
+            function: { name: "search", arguments: '{"query":"Tauri"}' },
+          },
+        ],
+      },
+      { role: "tool", content: "Résultat externe", tool_call_id: "call-1" },
+    ])
+  })
+
+  it("retourne le texte direct et respecte [DONE]", async () => {
+    const stream = sseStream([
+      sseData({ choices: [{ delta: { content: "Bon" } }] }),
+      sseData({ choices: [{ delta: { content: "jour" } }] }),
+      `data: [DONE]${SSE}`,
+    ])
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(makeRes({ body: stream })))
+
+    const result = await createOpenAICompatible(CFG).runTurn(
+      { messages: [{ role: "user", content: "bonjour" }] },
+      "K",
+      "m",
+      {},
+      {},
+      new AbortController().signal,
+    )
+
+    expect(result.text).toBe("Bonjour")
+    expect(result.toolCalls).toEqual([])
+  })
+
+  it("rejette les arguments JSON invalides", async () => {
+    const stream = sseStream([
+      sseData({
+        choices: [
+          {
+            delta: {
+              tool_calls: [
+                { index: 0, id: "call-1", function: { name: "search", arguments: "{" } },
+              ],
+            },
+          },
+        ],
+      }),
+    ])
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(makeRes({ body: stream })))
+
+    await expect(
+      createOpenAICompatible(CFG).runTurn(
+        { messages: [{ role: "user", content: "doc" }] },
+        "K",
+        "m",
+        {},
+        {},
+        new AbortController().signal,
+      ),
+    ).rejects.toMatchObject({ kind: "unknown" })
+  })
+
+  it("normalise une erreur HTTP", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(makeRes({ ok: false, status: 401, text: "bad key" })),
+    )
+
+    await expect(
+      createOpenAICompatible(CFG).runTurn(
+        { messages: [{ role: "user", content: "doc" }] },
+        "BAD",
+        "m",
+        {},
+        {},
+        new AbortController().signal,
+      ),
+    ).rejects.toMatchObject({ kind: "auth" })
+  })
+
+  it("laisse remonter AbortError", async () => {
+    const controller = new AbortController()
+    const abortError = new DOMException("aborted", "AbortError")
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockImplementation((_url: string, init: RequestInit) => {
+        return new Promise<Response>((_resolve, reject) => {
+          init.signal?.addEventListener("abort", () => reject(abortError))
+        })
+      }),
+    )
+    const promise = createOpenAICompatible(CFG).runTurn(
+      { messages: [{ role: "user", content: "doc" }] },
+      "K",
+      "m",
+      {},
+      {},
+      controller.signal,
+    )
+
+    controller.abort()
+
+    await expect(promise).rejects.toMatchObject({ name: "AbortError" })
   })
 })
 

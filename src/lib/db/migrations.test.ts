@@ -1,5 +1,13 @@
 import { describe, it, expect } from "vitest"
-import { SCHEMA_V1, SCHEMA_V1_STATEMENTS, SCHEMA_V2_STATEMENTS, SCHEMA_V3_STATEMENTS, SCHEMA_V4_STATEMENTS, SCHEMA_VERSION } from "./migrations"
+import {
+  SCHEMA_V1,
+  SCHEMA_V1_STATEMENTS,
+  SCHEMA_V2_STATEMENTS,
+  SCHEMA_V3_STATEMENTS,
+  SCHEMA_V4_STATEMENTS,
+  SCHEMA_V5_STATEMENTS,
+  SCHEMA_VERSION,
+} from "./migrations"
 
 describe("SCHEMA_V1_STATEMENTS", () => {
   it("couvre 8 tables + 2 index en 10 statements non vides", () => {
@@ -12,7 +20,7 @@ describe("SCHEMA_V1_STATEMENTS", () => {
     expect(SCHEMA_V1).toBe(SCHEMA_V1_STATEMENTS.join(";\n"))
   })
   it("SCHEMA_VERSION correspond à la dernière migration", () => {
-    expect(SCHEMA_VERSION).toBe(4)
+    expect(SCHEMA_VERSION).toBe(5)
     expect(SCHEMA_V1).toContain("CREATE TABLE IF NOT EXISTS conversations")
     expect(SCHEMA_V1).toContain("idx_conversations_project")
   })
@@ -53,5 +61,13 @@ describe("SCHEMA_V4_STATEMENTS", () => {
     expect(joined).toContain("REFERENCES conversations(id) ON DELETE CASCADE")
     expect(joined).toContain("REFERENCES knowledge(id) ON DELETE CASCADE")
     expect(joined).toContain("PRIMARY KEY (conversation_id, knowledge_id)")
+  })
+})
+
+describe("SCHEMA_V5_STATEMENTS", () => {
+  it("ajoute les sources Web aux messages historiques avec un tableau vide par défaut", () => {
+    expect(SCHEMA_V5_STATEMENTS).toEqual([
+      "ALTER TABLE messages ADD COLUMN sources TEXT NOT NULL DEFAULT '[]'",
+    ])
   })
 })

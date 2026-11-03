@@ -23,6 +23,7 @@ describe("messages.listByConversation", () => {
     expect(sql).toContain("ORDER BY rowid ASC")
     expect(bind).toEqual(["c1"])
     expect(rows[0].id).toBe("m1")
+    expect(rows[0].sources).toBe("[]")
   })
 })
 
@@ -32,16 +33,18 @@ describe("messages.insert", () => {
     const id = await messages.insert({
       conversation_id: "c1", role: "assistant", content: "réponse",
       attachments: "[]", model_label: "OpenRouter › gpt-4o", latency_ms: 420, error: null,
+      sources: '[{"url":"https://example.com","title":"Exemple","origin":"search"}]',
     })
     expect(id).toMatch(/^[0-9a-f-]{36}$/)
     const [sql, bind] = mockExecute.mock.calls[0]
     expect(sql).toContain("INSERT INTO messages")
-    expect(bind).toHaveLength(8)
+    expect(bind).toHaveLength(9)
     expect(bind[0]).toBe(id)
     expect(bind[1]).toBe("c1")
     expect(bind[2]).toBe("assistant")
     expect(bind[5]).toBe("OpenRouter › gpt-4o")
     expect(bind[6]).toBe(420)
+    expect(bind[8]).toBe('[{"url":"https://example.com","title":"Exemple","origin":"search"}]')
   })
 })
 

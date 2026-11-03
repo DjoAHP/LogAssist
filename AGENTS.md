@@ -10,7 +10,8 @@ l'utilisateur (débutant actif, ex no-code) : expliquer le *pourquoi*, pas seule
 
 **LogAssist** est une application desktop de chatbot IA (Tauri v2) pour apprendre des
 logiciels : conversations persistées (SQLite), fournisseurs LLM configurables (OpenAI
-compatible, testé avec NVIDIA NIM), clé API stockée dans le Credential Manager Windows.
+compatible, testé avec NVIDIA NIM), accès Web MCP TinyFish et clés API stockées dans le
+Credential Manager Windows.
 
 | Couche      | Techno                                     |
 |-------------|--------------------------------------------|
@@ -19,6 +20,7 @@ compatible, testé avec NVIDIA NIM), clé API stockée dans le Credential Manage
 | État/logique| Hooks React (`src/hooks/`)                 |
 | Data        | SQLite via `tauri-plugin-sql` (`src/lib/db/`) |
 | IA          | Adaptateurs `IProvider` (`src/lib/ai/`)    |
+| Web / MCP   | TinyFish via `rmcp` côté Rust (`src-tauri/src/mcp/`) |
 | Secrets     | Credential Manager Windows (commandes Rust `src-tauri/src/commands/secrets.rs`) |
 
 ### Invariants à ne JAMAIS casser
@@ -37,6 +39,10 @@ compatible, testé avec NVIDIA NIM), clé API stockée dans le Credential Manage
    jamais ; `false` = échec AVANT persistence du message utilisateur ⇒ InputBar restaure
    le contenu. Ne pas renvoyer d'exception à la place.
 8. **Version sync** : `npm run sync:version` maintient `package.json`, `Cargo.toml` et `tauri.conf.json` alignés.
+9. **MCP fermé côté Rust** : endpoint TinyFish compilé en dur, seuls `search` et
+   `fetch_content` sont exposés. React ne fournit jamais d'endpoint MCP.
+10. **Données Web non fiables** : ne jamais persister le contenu brut TinyFish. Seules
+    les sources finales validées (`url`, `title`, `origin`) vivent dans `messages.sources`.
 
 ---
 
@@ -79,11 +85,14 @@ src/
 │   ├── db/            # repos SQL (migrations.ts, providers, messages, conversations…)
 │   ├── secrets/       # pont Credential Manager (invoke Rust)
 │   ├── prompts/       # system prompt composé + defaults
+│   ├── mcp/           # pont Tauri, intention Web et orchestrateur borné
 │   ├── i18n/fr.ts     # TOUTE chaîne UI (aucun littéral en dur dans les composants)
 │   └── logger.ts      # debug (no-op en prod) / error
 └── *.test.ts(x)       # vitest : lib sans DOM, composants avec @vitest-environment jsdom
 src-tauri/
 ├── src/commands/secrets.rs   # set/get/delete secret (keyring v4, backend Windows only)
+├── src/commands/mcp.rs       # config, appel et annulation MCP génériques
+├── src/mcp/                  # registre, validation, service et transport TinyFish
 ├── capabilities/default.json # permissions Tauri : sql, opener, http:default scope https://*
 └── tauri.conf.json           # CSP dev/prod séparées
 ```
@@ -94,6 +103,11 @@ src-tauri/
   flush final — ne pas réimplémenter côté consommateur.
 - **Abort** : un `AbortController` par stream ; l'interruption utilisateur persiste le
   contenu accumulé et marque `interrupted: true` (différent d'une erreur API).
+- **MCP TinyFish** : `runWebAgent` autorise deux tours d'outils et quatre appels MCP
+  maximum. Le modèle reçoit les résultats dans un bloc externe non fiable. Le repli
+  sans outils ne s'exécute qu'une fois et l'incompatibilité est mémorisée par session.
+- **Sources** : la migration V5 ajoute `messages.sources`. Les URL sont validées côté
+  Rust avant le retour vers React puis filtrées à nouveau avant rendu.
 
 ### Conventions
 
@@ -109,9 +123,11 @@ src-tauri/
 
 - La **base de données et le code frontend sont dans le périmètre de confiance webview** ;
   le Credential Manager est le seul stockage sensible. Ne pas contourner.
-- La capability `http:default` autorise `https://*` : **assumé** pour V1 (providers
-  configurables). Amélioration prévue : restreindre le scope + bouger l'appel HTTP
-  entièrement côté Rust (commande `chat_send`) pour ne plus exposer la clé au JS.
+- La capability `http:default` autorise `https://*` pour les fournisseurs LLM
+  configurables. Le trafic MCP TinyFish passe déjà entièrement côté Rust ; déplacer
+  aussi le trafic LLM reste une amélioration ultérieure.
+- Le secret TinyFish suit la convention `logassist/mcp/tinyfish`. Une clé candidate
+  est vérifiée en mémoire avant de remplacer la clé existante.
 - Ne jamais logger de secret, ne jamais persist `detail` d'erreur API contenant
   potentiellement un `Bearer` sans l'éduler (redaction) avant `messages.error`.
 - Ne pas ajouter `dangerouslySetInnerHTML`, `eval`, ou de rendu markdown sans échappement.
@@ -124,7 +140,7 @@ src-tauri/
 - `*.db`, `*.db-journal`, `node_modules`, `dist`, `src-tauri/target` sont ignorés —
   ne jamais committer la base SQLite.
 - Un commit = un sujet cohérent ; les tests doivent passer avant le commit.
-- Branche courante : `feat/m1-socle-chat`. Ne jamais forcer-push sur une branche partagée.
+- Branche principale GitHub : `feat/m1-socle-chat`. Ne jamais forcer-push sur une branche partagée.
 
 ---
 
@@ -134,8 +150,9 @@ Priorisés dans l'ordre du rapport d'audit :
 1. **Cluster robustesse** :
    ✅ Images d'historique `base64: ""` corrigé — garde `!a.base64` → chip texte, jamais `<img src="">` (ChatView.tsx).
    ✅ Clés React stables `m.id ?? local-${i}` (ChatView.tsx) — élargir la règle aux nouveaux `.map()`.
-   ⚠️ Race `onDone`/refetch (`App.tsx` recharge avant l'insert async) — à re-vérifier avant de commenter.
-2. **Cluster sécurité** : bouger le HTTP côté Rust + valider le format `secret_ref`,
+   ✅ Race `onDone`/refetch corrigée : les promesses de persistance sont attendues avant `busy=false`.
+2. **Cluster sécurité** : HTTP MCP déplacé côté Rust avec allowlist et validation URL ;
+   restent le HTTP LLM à déplacer, le format `secret_ref` générique à valider et la
    CSP `connect-src https:` à restreindre en prod.
 3. **Cluster UI** : focus clavier invisible (`--ring` absent), palette de tokens
    incomplète, auto-scroll forcé pendant le stream.
@@ -148,3 +165,11 @@ Priorisés dans l'ordre du rapport d'audit :
 Historique des livraisons : `docs/release-notes/` (détails par version : markdown,
 compteur tokens, arrière-plans, sync:version BOM…). Consulter la conversation d'audit
 pour le détail fichier/ligne avant de commenter.
+
+### Livraison v2.5.0
+
+- Intégration MCP TinyFish (`search`, `fetch_content`) avec transport `rmcp` côté Rust.
+- Configuration dédiée, test transactionnel de clé et stockage Credential Manager.
+- Orchestrateur Web automatique/forcé, repli sans outils, annulation et limites bornées.
+- Sources persistées et rendues comme liens React sûrs ; contenu Web brut non persisté.
+- Gates validées : 217 tests TypeScript, 21 tests Rust, Clippy et build Windows.

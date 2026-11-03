@@ -1,110 +1,117 @@
 # LogAssist
 
-![Capture d'écran de l'application](src/assets/capture_ecran_interface.png)
+![Interface principale de LogAssist](src/assets/capture_ecran_interface.png)
 
-Assistant IA de bureau (Windows) pour apprendre des logiciels par conversation persistée.
+<p align="center">
+  <img src="src/assets/screen_models_settings.png" width="32%" alt="Sélection et configuration des modèles" />
+  <img src="src/assets/screen_system_prompt.png" width="32%" alt="Configuration du system prompt" />
+  <img src="src/assets/screen_mcp_settings.png" width="32%" alt="Configuration MCP TinyFish" />
+</p>
 
-**Stack** : **Tauri 2 + React 19 + TypeScript + Vite**, Tailwind CSS, SQLite (`tauri-plugin-sql`), Credential Manager Windows.
+LogAssist est un assistant IA de bureau pour Windows conçu pour apprendre des logiciels. Il combine conversations persistées, fournisseurs LLM configurables et accès Web contrôlé via MCP TinyFish.
 
----
+## Fonctionnalités
 
-## Fonctionnalités principales
+- Conversations et sources persistées dans SQLite, avec export Markdown.
+- Fournisseurs OpenAI-compatible configurables, notamment OpenAI, OpenRouter et NVIDIA NIM.
+- Streaming SSE avec rendu Markdown, tableaux GFM, coloration syntaxique et copie des blocs de code.
+- System prompt modulaire et bases de connaissances Markdown par conversation.
+- Sélecteur de modèles avec recherche, ajout et activation directe.
+- Compteur de tokens et estimation du coût avec tiktoken WASM.
+- Thèmes sombre et clair, arrière-plans dédiés et fenêtre maximisée au lancement.
+- Accès Web MCP TinyFish limité à `search` et `fetch_content`.
+- Recherche automatique, lecture d'URL et forçage Web pour le prochain message.
+- Sources cliquables conservées avec les réponses, sans persister le contenu Web brut.
+- Clés API stockées dans le Credential Manager Windows, jamais dans SQLite ou `localStorage`.
 
-- **Conversations persistées** (SQLite) avec export Markdown
-- **Fournisseurs LLM configurables** (OpenAI-compatible : OpenRouter, OpenAI, Gemini, NVIDIA NIM…)
-- **Clé API stockée dans le Credential Manager Windows** (jamais en clair dans la DB/logs)
-- **System prompt modulaire** + base de connaissances (.md) par conversation
-- **Parcours des modèles** : modal unifié (recherche, ajout textuel, activation par clic)
-- **Rendu Markdown des réponses** (blocs de code + bouton copier, streaming fluide)
-- **Compteur de tokens et de coût** par message (tiktoken WASM)
-- **Arrière-plan personnalisé** sombre/clair selon le thème actif
-- **Dark / Light mode** (toggle header, défaut dark, persistance `localStorage`)
-- **Fenêtre maximisée au lancement** (Windows)
+## Prérequis
 
-Voir `docs/release-notes/` pour l'historique détaillé par version.
+- Windows 10 ou 11 avec Microsoft Edge WebView2.
+- Node.js et npm.
+- Rust stable avec la cible MSVC.
+- Microsoft C++ Build Tools pour compiler Tauri.
+- Une clé de fournisseur LLM OpenAI-compatible.
+- Une clé TinyFish pour activer l'accès Web MCP.
 
----
+## Installation
+
+Exécutez l'installation depuis PowerShell Windows. N'installez pas les dépendances natives depuis WSL.
+
+```powershell
+Set-Location C:\dev\LogAssist
+npm install
+```
+
+## Utilisation
+
+Lancez l'application Tauri en développement :
+
+```powershell
+Set-Location C:\dev\LogAssist
+npm run tauri dev
+```
+
+Dans LogAssist :
+
+1. Configurez un fournisseur et son modèle dans les réglages.
+2. Ouvrez **MCP et accès Web** depuis le header.
+3. Testez et enregistrez votre clé TinyFish.
+4. Activez l'accès Web.
+5. Demandez une recherche récente, fournissez une URL ou activez le bouton Web pour le prochain message.
+
+TinyFish reçoit la requête de recherche ou les URL à lire, avec les paramètres bornés nécessaires. Sa propre clé sert à authentifier l'appel côté Rust ; la clé du fournisseur LLM et l'historique complet de la conversation ne lui sont pas transmis.
 
 ## Développement
 
-```bash
-# Dépendances (depuis PowerShell pour binaires Windows natifs)
-npm install
-
-# Dev : Rust + Vite + fenêtre Tauri (HMR)
-npm run tauri dev
-
-# Build frontend seul (tsc + vitest + vite)
+```powershell
+# Vérification TypeScript, tests Vitest et build Vite
 npm run build
 
-# Build complet + installeur .exe/.msi (nécessite Rust toolchain Windows)
+# Tests frontend ciblés ou complets
+npm run test
+
+# Synchronisation package.json, Cargo.toml et tauri.conf.json
+npm run sync:version
+
+# Build complet avec installateurs Windows
 npm run tauri build
 ```
 
-> ⚠️ **Règle critique** : `npm install` et `tauri build` **depuis PowerShell Windows** (pas WSL). Les binaires natifs Windows (`@tauri-apps/cli-win32-x64-msvc`, `keyring`, etc.) ne s'installent correctement que sous Windows.
+Les installateurs sont générés dans :
 
----
-
-## Structure
-
-```
-src/                    # Frontend React/TypeScript
-├── components/         # UI (chat/, settings/, sidebar/)
-├── hooks/              # useChat (streaming + persist), useConversations
-├── lib/
-│   ├── ai/             # IProvider, openai-compat, sse.ts, errors.ts, factory
-│   ├── db/             # SQLite repos (migrations, providers, messages, conversations…)
-│   ├── secrets/        # Credential Manager (invoke Rust)
-│   ├── prompts/        # System prompt + knowledge base
-│   └── i18n/fr.ts      # Toutes les chaînes UI (0 littéral en dur)
-└── *.test.ts(x)        # Vitest (lib sans DOM, composants jsdom)
-
-src-tauri/              # Backend Tauri (Rust)
-├── src/commands/       # Commandes Tauri (secrets, etc.)
-├── capabilities/       # Permissions (sql, opener, http, dialog, fs)
-├── tauri.conf.json     # Config fenêtre, CSP, icônes, bundle
-├── icons/              # Icônes générées depuis logo3.png (script generate-icons.js)
-└── Cargo.toml
+```text
+src-tauri/target/release/bundle/msi/
+src-tauri/target/release/bundle/nsis/
 ```
 
----
-
-## Scripts utiles
-
-```bash
-npm run dev           # Vite seul (http://localhost:1420)
-npm run test          # npx vitest run
-npm run sync:version  # Sync version package.json / Cargo.toml / tauri.conf.json
-```
-
----
-
-## Build release (Windows)
+Vérifications Rust :
 
 ```powershell
-# Depuis PowerShell (pas WSL)
-cd C:\dev\LogAssist
-npm run tauri build
-# → src-tauri/target/release/bundle/msi/LogAssist_<version>_x64_en-US.msi
-# → src-tauri/target/release/bundle/nsis/LogAssist_<version>_x64-setup.exe
+Push-Location .\src-tauri
+cargo test
+cargo clippy --all-targets -- -D warnings
+cargo check
+Pop-Location
 ```
 
----
+La version 2.5.0 est couverte par 217 tests TypeScript et 21 tests Rust.
 
-## Tests
+## Sécurité
 
-```bash
-npm run test          # 163 tests (unitaires + composants jsdom)
-# gated dans npm run build
-```
+- Le registre MCP Rust verrouille l'endpoint TinyFish et la liste des outils autorisés.
+- Rust valide les arguments, les schémas et hôtes URL, les délais et les limites avant tout appel MCP.
+- Les résultats Web sont traités comme des données externes non fiables.
+- React échappe le contenu distant et n'utilise jamais `innerHTML` ou `dangerouslySetInnerHTML`.
+- Le Credential Manager Windows reste le seul stockage des clés API.
+- Toutes les requêtes SQL utilisent des paramètres liés.
 
----
+## Contribution
 
-## Règles critiques
+1. Créez une branche dédiée depuis la branche par défaut.
+2. Ajoutez les tests avant l'implémentation.
+3. Exécutez `npm run build` et les vérifications Rust.
+4. Ouvrez une Pull Request avec un résumé du comportement modifié.
 
-- **Zéro `console.log`** hors `src/lib/logger.ts` (garde-fou `console-log.guard.test.ts`)
-- **SQL 100 % paramétré** (`?` binds) — jamais de concaténation
-- **Aucun `innerHTML` / `dangerouslySetInnerHTML`** — contenu LLM échappé par React
-- **Clé API** : uniquement dans Credential Manager (`secretRefFor()`), jamais en DB/logs
-- **TDD** : test d'abord (rouge), puis implémentation (vert), puis refactor
-- **Commits conventionnels** : `feat:`, `fix:`, `chore:`
+## Licence
+
+Aucune licence de redistribution n'est actuellement déclarée dans ce dépôt.

@@ -125,3 +125,61 @@ describe("ChatView — rendu markdown des réponses assistant", () => {
     expect(pre?.textContent).toContain("def f(")
   })
 })
+
+describe("ChatView — accès Web", () => {
+  it.each([
+    ["searching", "Recherche sur le Web…"],
+    ["fetching", "Lecture de la page…"],
+  ] as const)("affiche le statut %s dans une bulle assistant vide", (webStatus, label) => {
+    render(<ChatView {...base} vm={[msg({ role: "assistant", content: "", webStatus })]} />)
+    expect(screen.getByRole("status").textContent).toContain(label)
+  })
+
+  it("ne remplace pas un texte déjà streamé par le statut", () => {
+    render(<ChatView {...base} vm={[msg({ role: "assistant", content: "Début", webStatus: "searching" })]} />)
+    expect(screen.getByText("Début")).toBeTruthy()
+    expect(screen.queryByText("Recherche sur le Web…")).toBeNull()
+  })
+
+  it("rend avertissement et sources dédupliquées comme liens sûrs", () => {
+    render(
+      <ChatView
+        {...base}
+        vm={[msg({
+          role: "assistant",
+          content: "Réponse",
+          webWarning: "Recherche incomplète",
+          sources: [
+            { url: "https://example.com", title: '<img src=x onerror="alert(1)">', origin: "search" },
+            { url: "https://example.com", title: "Doublon", origin: "search" },
+          ],
+        })]}
+      />,
+    )
+    expect(screen.getByText("Recherche incomplète")).toBeTruthy()
+    const links = screen.getAllByRole("link") as HTMLAnchorElement[]
+    expect(links).toHaveLength(1)
+    expect(links[0].href).toBe("https://example.com/")
+    expect(links[0].target).toBe("_blank")
+    expect(links[0].rel).toBe("noreferrer")
+    expect(document.querySelector("img[src='x']")).toBeNull()
+    expect(links[0].textContent).toContain("<img src=x")
+  })
+
+  it("refuse les protocoles de source non Web même dans un historique corrompu", () => {
+    render(
+      <ChatView
+        {...base}
+        vm={[msg({
+          role: "assistant",
+          content: "Réponse",
+          sources: [
+            { url: "javascript:alert(1)", title: "JS", origin: "search" },
+            { url: "file:///etc/passwd", title: "Fichier", origin: "fetch_content" },
+          ],
+        })]}
+      />,
+    )
+    expect(screen.queryByRole("link")).toBeNull()
+  })
+})

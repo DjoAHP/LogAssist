@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react"
-import { AlertTriangle, FileText, Maximize2, X } from "lucide-react"
+import { AlertTriangle, ExternalLink, FileText, Maximize2, Search, X } from "lucide-react"
 import { t } from "@/i18n/fr"
 import { logger } from "@/lib/logger"
 import { KIND_TO_KEY } from "@/lib/ai/errors"
@@ -172,6 +172,23 @@ function MessageBubble({
 }) {
   const isUser = m.role === "user"
   const attachments = m.attachments ?? []
+  const seenSourceUrls = new Set<string>()
+  const sources = (m.sources ?? []).filter((source) => {
+    try {
+      const protocol = new URL(source.url).protocol
+      if (protocol !== "http:" && protocol !== "https:") return false
+    } catch {
+      return false
+    }
+    if (seenSourceUrls.has(source.url)) return false
+    seenSourceUrls.add(source.url)
+    return true
+  })
+  const webStatusLabel = m.webStatus === "searching"
+    ? t.chat.webSearching
+    : m.webStatus === "fetching"
+      ? t.chat.webFetching
+      : undefined
 
   return (
     <div className={`flex ${isUser ? "justify-end" : "justify-start"}`}>
@@ -217,6 +234,11 @@ function MessageBubble({
           ) : (
             <MarkdownMessage content={m.content} />
           )
+        ) : !isUser && !m.apiError && !m.interrupted && webStatusLabel ? (
+          <span role="status" className="inline-flex items-center gap-2 text-xs text-muted-foreground">
+            <Search className="size-3.5 animate-pulse" />
+            {webStatusLabel}
+          </span>
         ) : !isUser && !m.apiError && !m.interrupted ? (
           // Attente du 1er token : anneau de réflexion au lieu du « … »
           <span role="status" aria-label={t.chat.thinking}>
@@ -238,6 +260,31 @@ function MessageBubble({
         )}
         {m.interrupted && (
           <span className="mt-1 inline-block text-xs text-muted-foreground">{t.chat.interrupted}</span>
+        )}
+        {m.webWarning && !isUser && (
+          <div role="note" className="mt-2 flex items-start gap-1.5 rounded-md border border-amber-500/25 bg-amber-500/10 px-2 py-1.5 text-xs text-amber-700 dark:text-amber-300">
+            <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
+            <span>{m.webWarning}</span>
+          </div>
+        )}
+        {sources.length > 0 && !isUser && (
+          <div className="mt-3 border-t border-border pt-2">
+            <p className="mb-1.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">{t.chat.sources}</p>
+            <div className="flex flex-wrap gap-1.5">
+              {sources.map((source) => (
+                <a
+                  key={source.url}
+                  href={source.url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex max-w-full items-center gap-1 rounded-md border border-border bg-background/60 px-2 py-1 text-xs text-[var(--brand-to)] hover:bg-foreground/5"
+                >
+                  <span className="truncate">{source.title || source.url}</span>
+                  <ExternalLink className="size-3 shrink-0" />
+                </a>
+              ))}
+            </div>
+          </div>
         )}
         {(m.modelLabel || m.latencyMs !== undefined) && !isUser && (
           <div className="mt-1 flex items-center gap-2 text-xs text-muted-foreground">
