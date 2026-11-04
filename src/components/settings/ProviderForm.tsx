@@ -1,5 +1,6 @@
 import { useState } from "react"
 import { t } from "@/i18n/fr"
+import { isLocalBaseUrl } from "@/lib/ai/local"
 import { providers, type ProviderRow } from "@/lib/db/providers"
 
 interface Props {
@@ -23,8 +24,15 @@ export function ProviderForm({ initial, onSaved, onCancel }: Props) {
 
   const submit = async () => {
     if (!name.trim()) { setError(t.settings.nameRequired); return }
-    const cleanedBaseUrl = baseUrl.trim().replace(/\/(models|chat\/completions|v1\/models)$/, "")
-    if (!cleanedBaseUrl.startsWith("https://")) { setError(t.settings.invalidUrl); return }
+    // Nettoyage : on ne retire que le suffixe final (/models ou /chat/completions)
+    // — retirer "/v1/models" entier ferait perdre le /v1 requis par LM Studio/Ollama.
+    const cleanedBaseUrl = baseUrl.trim().replace(/\/(chat\/completions|models)$/, "")
+    // Invariant sécurité : https distant OU boucle locale (LM Studio/Ollama).
+    // Un http:// externe reste refusé — la boucle locale est la seule exception.
+    if (!cleanedBaseUrl.startsWith("https://") && !isLocalBaseUrl(cleanedBaseUrl)) {
+      setError(t.settings.invalidUrl)
+      return
+    }
     setSaving(true)
     setError(null)
     try {

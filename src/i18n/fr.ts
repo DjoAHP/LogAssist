@@ -78,7 +78,7 @@ export const fr = {
     noProviders: "Aucun fournisseur — ajoutez-en un pour commencer.",
     noModels: "Aucun modèle — ajoutez l'identifiant du modèle chez ce fournisseur.",
     nameRequired: "Le nom est obligatoire.",
-    invalidUrl: "L'URL doit commencer par https://",
+    invalidUrl: "L'URL doit être en https:// ou une URL locale (http://localhost…)",
     saveFailed: "Échec de l'enregistrement",
     close: "Fermer",
     systemPrompt: "System prompt",
