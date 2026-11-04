@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "LogAssist",
-  "version": "2.5.0",
+  "version": "2.5.1",
   "identifier": "fr.djodev.logassist",
   "build": {
     "beforeDevCommand": "npm run sync:version && npm run dev",
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "LogAssist v2.5.0",
+        "title": "LogAssist v2.5.1",
         "width": 1200,
         "height": 800,
         "minWidth": 900,
