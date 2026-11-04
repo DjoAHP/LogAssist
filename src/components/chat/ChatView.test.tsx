@@ -29,6 +29,23 @@ const msg = (over: Partial<ChatMessageVM>): ChatMessageVM => ({
   ...over,
 })
 
+describe("ChatView — latence en secondes", () => {
+  it("14500 ms s'affiche « 14,5 s » (pas de « ms »)", () => {
+    render(
+      <ChatView {...base} vm={[msg({ role: "assistant", content: "réponse", latencyMs: 14500 })]} />,
+    )
+    expect(screen.getByText("14,5 s")).toBeTruthy()
+    expect(screen.queryByText(/ms$/)).toBeNull()
+  })
+
+  it("420 ms s'affiche « 0,4 s » (format français)", () => {
+    render(
+      <ChatView {...base} vm={[msg({ role: "assistant", content: "réponse", latencyMs: 420 })]} />,
+    )
+    expect(screen.getByText("0,4 s")).toBeTruthy()
+  })
+})
+
 describe("ChatView — pièces jointes texte", () => {
   it("une pièce jointe texte rend un chip fichier, pas un <img> cassé", () => {
     render(<ChatView {...base} vm={[msg({})]} />)

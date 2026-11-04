@@ -9,6 +9,12 @@ import { knowledge as knowledgeDb } from "@/lib/db/knowledge"
 import { conversationKnowledge } from "@/lib/db/conversationKnowledge"
 import { MarkdownMessage } from "./MarkdownMessage"
 
+// Latence en secondes (format français : virgule décimale) — les ms
+// brutes sont peu lisibles au-dessus de la seconde.
+function formatLatency(ms: number): string {
+  return `${(ms / 1000).toFixed(1).replace(".", ",")} s`
+}
+
 interface ModelSelectorProps {
   options: { rowId: string; label: string; isDefault: boolean; supportsImages: boolean }[]
   onSelect: (rowId: string) => void
@@ -289,7 +295,7 @@ function MessageBubble({
         {(m.modelLabel || m.latencyMs !== undefined) && !isUser && (
           <div className="mt-1 flex items-center gap-2 text-xs text-muted-foreground">
             {m.modelLabel && <span>{m.modelLabel}</span>}
-            {m.latencyMs !== undefined && <span>{m.latencyMs} ms</span>}
+            {m.latencyMs !== undefined && <span>{formatLatency(m.latencyMs)}</span>}
           </div>
         )}
 
