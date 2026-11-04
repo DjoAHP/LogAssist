@@ -82,6 +82,12 @@ export const fr = {
     saveFailed: "Échec de l'enregistrement",
     close: "Fermer",
     systemPrompt: "System prompt",
+    tabProviders: "Fournisseurs",
+    tabLocal: "Modèles local",
+    localAdd: "Ajouter",
+    localConfigured: "Déjà configuré",
+    localHint: "Le serveur local doit être lancé (LM Studio : Start Server ; Ollama : serve activé).",
+    saveInProgress: "Enregistrement…",
   },
   assistant: {
     title: "Assistant",

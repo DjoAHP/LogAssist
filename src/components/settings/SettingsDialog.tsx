@@ -8,6 +8,7 @@ import { KIND_TO_KEY } from "@/lib/ai/errors"
 import { providers, secretRefFor, type ProviderRow, type ModelRow } from "@/lib/db/providers"
 import { secrets } from "@/lib/secrets/service"
 import { ProviderForm } from "./ProviderForm"
+import { LocalModelsPanel } from "./LocalModelsPanel"
 import { ModelPickerModal } from "./ModelPickerModal"
 
 type TestStatus = { state: "idle" } | { state: "testing" } | { state: "ok" } | { state: "fail"; message: string }
@@ -30,6 +31,9 @@ export function SettingsDialog({ onClose, onChanged }: Props) {
   const [testStatus, setTestStatus] = useState<Record<string, TestStatus>>({})
   const [fetchStatus, setFetchStatus] = useState<Record<string, FetchStatus | undefined>>({})
   const [browsing, setBrowsing] = useState<ProviderRow | null>(null)
+  // Onglet par défaut = « Fournisseurs » : le comportement historique reste
+  // identique (tests existants inchangés) ; « Modèles local » est à côté.
+  const [tab, setTab] = useState<"providers" | "local">("providers")
 
   const refresh = useCallback(async () => {
     const list = await providers.list()
@@ -171,6 +175,8 @@ export function SettingsDialog({ onClose, onChanged }: Props) {
           </button>
         </header>
 
+        {editing === null && <TabBar tab={tab} setTab={setTab} />}
+
         {editing !== null ? (
           <ProviderForm
             initial={editing === "new" ? undefined : editing}
@@ -180,6 +186,8 @@ export function SettingsDialog({ onClose, onChanged }: Props) {
             }}
             onCancel={() => setEditing(null)}
           />
+        ) : tab === "local" ? (
+          <LocalModelsPanel rows={rows} onChanged={afterChange} />
         ) : (
           <>
             <button
@@ -292,6 +300,34 @@ export function SettingsDialog({ onClose, onChanged }: Props) {
           />
         )}
       </div>
+    </div>
+  )
+}
+
+// Deux onglets « Fournisseurs » / « Modèles local » — même style que les
+// listes de cartes (border-border, hint muted) pour rester cohérent.
+function TabBar({ tab, setTab }: { tab: "providers" | "local"; setTab: (t: "providers" | "local") => void }) {
+  const tabs = [
+    { id: "providers" as const, label: t.settings.tabProviders },
+    { id: "local" as const, label: t.settings.tabLocal },
+  ]
+  return (
+    <div className="mb-3 flex gap-1 rounded-md border border-border p-1">
+      {tabs.map((item) => (
+        <button
+          key={item.id}
+          data-tab={item.id}
+          aria-current={tab === item.id}
+          onClick={() => setTab(item.id)}
+          className={
+            tab === item.id
+              ? "flex-1 rounded-md bg-foreground/10 px-3 py-1.5 text-sm font-medium"
+              : "flex-1 rounded-md px-3 py-1.5 text-sm text-muted-foreground hover:bg-foreground/5"
+          }
+        >
+          {item.label}
+        </button>
+      ))}
     </div>
   )
 }
