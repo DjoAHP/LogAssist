@@ -93,6 +93,14 @@ describe("createOpenAICompatible — listRemoteModels", () => {
     const adapter = createOpenAICompatible(CFG)
     await expect(adapter.listRemoteModels("KEY-123")).resolves.toEqual([])
   })
+
+  it("baseUrl collée avec suffixe /v1/models : le /v1 est préservé dans l'appel GET", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(makeRes({ json: { data: [] } }))
+    vi.stubGlobal("fetch", fetchMock)
+    const adapter = createOpenAICompatible({ ...CFG, baseUrl: "https://exemple.ai/api/v1/models" })
+    await adapter.listRemoteModels("KEY-123")
+    expect(String(fetchMock.mock.calls[0][0]).includes("/api/v1/models")).toBe(true)
+  })
 })
 
 afterEach(() => {

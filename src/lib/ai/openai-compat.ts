@@ -1,6 +1,7 @@
 import { isTauri } from "@tauri-apps/api/core"
 import { fetch as tauriFetch } from "@tauri-apps/plugin-http"
 import { ApiError, normalizeHttpStatus, normalizeNetworkError } from "./errors"
+import { cleanApiBaseUrl } from "./url"
 import { logger } from "../logger"
 import { parseSseStream } from "./sse"
 import type {
@@ -48,8 +49,8 @@ function retryAfterMs(headers: Headers): number | undefined {
 }
 
 export function createOpenAICompatible(cfg: ProviderConfig): IProvider {
-  // Nettoie l'URL de base : retire trailing slashes ET chemins API connus (/models, /chat/completions, etc.)
-  const base = cfg.baseUrl.replace(/\/+$/, "").replace(/\/(models|chat\/completions|v1\/models)$/, "")
+  // Nettoie l'URL via le helper partagé avec le formulaire — invariant unique.
+  const base = cleanApiBaseUrl(cfg.baseUrl)
 
   function toOpenAiMessage(message: ChatMessage): Record<string, unknown> {
     const content = message.images?.length
