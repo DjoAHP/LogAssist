@@ -9,6 +9,8 @@ export const fr = {
     archive: "Archiver",
     pin: "Épingler",
     unpin: "Désépingler",
+    sectionPinned: "Épingler",
+    sectionChat: "Chat",
     delete: "Supprimer",
     deleteConfirm: "Confirmer la suppression ?",
     collapse: "Réduire la barre latérale",

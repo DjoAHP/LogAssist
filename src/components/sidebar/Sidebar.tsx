@@ -237,24 +237,17 @@ export function Sidebar({
       <div className="mx-2 my-2 border-t border-border/30" aria-hidden="true" />
 
 <nav className="flex-1 space-y-1 overflow-y-auto px-2">
-        {filtered.flatMap((c, index) => {
-          const isFirstUnpinned = c.pinned === 0 && filtered.findIndex(f => f.pinned === 0) === index
-          const showPinnedSeparator = isFirstUnpinned && filtered.some(f => f.pinned === 1)
-          
-          const elements = []
-          
-          if (showPinnedSeparator) {
-            elements.push(
-              <div 
-                key={`${c.id}-separator`}
-                className="mx-2 my-1 border-t border-border/50" 
-                aria-hidden="true" 
-                role="separator"
-              />
-            )
-          }
-          
-          elements.push(
+        {(() => {
+          // Sections étiquetées : Épingler puis Chat. Un titre masqué quand
+          // sa section est vide (filtrage, archive, conversations exclues).
+          const pinned = filtered.filter((c) => c.pinned === 1)
+          const chat = filtered.filter((c) => c.pinned === 0)
+          const sectionTitle = (key: string, label: string) => (
+            <div key={key} className="mx-1 border-b border-border/50 pb-1" role="separator">
+              <p className="text-[11px] tracking-wide text-muted-foreground select-none">{label}</p>
+            </div>
+          )
+          const renderRow = (c: ConversationRow) => (
             <div
               key={c.id}
               role="button"
@@ -287,25 +280,17 @@ export function Sidebar({
               ) : (
                 <>
                   <span className="truncate flex-1 min-w-0 pr-2">{c.title.trim() || t.sidebar.newConversation}</span>
-                  <div
-                    className={`flex items-center gap-1 transition-opacity ${
-                      confirmDeleteId === c.id || c.pinned === 1
-                        ? "opacity-100"
-                        : "opacity-0 group-hover:opacity-100"
-                    }`}
-                  >
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation()
-                        onTogglePin(c.id, c.pinned === 0)
-                      }}
-                      aria-label={c.pinned === 0 ? t.sidebar.pin : t.sidebar.unpin}
-                      aria-pressed={c.pinned === 0 ? "false" : "true"}
-                      className={`rounded p-1 hover:bg-foreground/10 ${c.pinned === 0 ? "" : "text-[#D64627]"}`}
-                      title={c.pinned === 0 ? t.sidebar.pin : t.sidebar.unpin}
+                  {/* Visibilité des icônes : conversation ÉPINGLÉE → seul
+                      Épingler reste visible au repos ; Renommer/Supprimer
+                      suivent le hover, comme pour les non-épinglées. L'état
+                      de confirmation de suppression force la visibilité.
+                      Ordre imposé : [Renommer][Supprimer][Épingler]. */}
+                  <div className="flex items-center gap-1">
+                    <div
+                      className={`flex items-center gap-1 transition-opacity ${
+                        confirmDeleteId === c.id ? "opacity-100" : "opacity-0 group-hover:opacity-100 focus-within:opacity-100"
+                      }`}
                     >
-                      {c.pinned === 0 ? <Pin className="size-3.5" /> : <PinOff className="size-3.5" />}
-                    </button>
                     <button
                       onClick={(e) => {
                         e.stopPropagation()
@@ -341,14 +326,45 @@ export function Sidebar({
                         <Trash2 className="size-3.5" />
                       </button>
                     )}
+                    </div>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        onTogglePin(c.id, c.pinned === 0)
+                      }}
+                      aria-label={c.pinned === 0 ? t.sidebar.pin : t.sidebar.unpin}
+                      aria-pressed={c.pinned === 0 ? "false" : "true"}
+                      className={`rounded p-1 hover:bg-foreground/10 focus-visible:bg-foreground/10 ${
+                        c.pinned === 1
+                          ? "opacity-100 text-[#D64627]"
+                          : "opacity-0 group-hover:opacity-100 focus-visible:opacity-100 transition-opacity"
+                      }`}
+                      title={c.pinned === 0 ? t.sidebar.pin : t.sidebar.unpin}
+                    >
+                      {c.pinned === 0 ? <Pin className="size-3.5" /> : <PinOff className="size-3.5" />}
+                    </button>
                   </div>
                 </>
               )}
             </div>
           )
-          
-          return elements
-        })}
+          return (
+            <>
+              {pinned.length > 0 && (
+                <>
+                  {sectionTitle("titre-epinglees", t.sidebar.sectionPinned)}
+                  {pinned.map(renderRow)}
+                </>
+              )}
+              {chat.length > 0 && (
+                <>
+                  {sectionTitle("titre-chat", t.sidebar.sectionChat)}
+                  {chat.map(renderRow)}
+                </>
+              )}
+            </>
+          )
+        })()}
       </nav>
 
       {/* Resize handle - positioned absolutely on right edge */}

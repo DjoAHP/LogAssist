@@ -56,6 +56,37 @@ describe("Sidebar — épinglage", () => {
   })
 })
 
+describe("Sidebar — titres de sections épinglé/chat", () => {
+  it("affiche « Épingler » au-dessus des épinglées puis « Chat » au-dessus des autres (ordre DOM)", () => {
+    setup()
+    const body = document.body.textContent ?? ""
+    expect(body.indexOf("Épingler")).toBeGreaterThan(-1)
+    expect(body.indexOf("Chat")).toBeGreaterThan(-1)
+    // Ordre : titre Épingler < conv épinglée < titre Chat < conv non épinglée
+    expect(body.indexOf("Épingler")).toBeLessThan(body.indexOf("Conv épinglée"))
+    expect(body.indexOf("Conv épinglée")).toBeLessThan(body.lastIndexOf("Chat"))
+    expect(body.lastIndexOf("Chat")).toBeLessThan(body.indexOf("Première conv"))
+  })
+
+  it("masque le titre d'une section vide (uniquement non épinglées)", () => {
+    setup([conversations[0]])
+    expect(screen.queryByText("Épingler")).toBeNull()
+    expect(screen.getByText("Chat")).toBeTruthy()
+  })
+
+  it("masque le titre Chat si tout est épinglé", () => {
+    setup([conversations[1]])
+    expect(screen.getByText("Épingler")).toBeTruthy()
+    expect(screen.queryByText("Chat")).toBeNull()
+  })
+
+  it("liste vide : aucune section", () => {
+    setup([])
+    expect(screen.queryByText("Épingler")).toBeNull()
+    expect(screen.queryByText("Chat")).toBeNull()
+  })
+})
+
 describe("Sidebar — suppression avec confirmation", () => {
   it("premier clic : n'appelle PAS onDelete, affiche l'état de confirmation", () => {
     const { onDelete } = setup()

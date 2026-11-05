@@ -16,7 +16,6 @@ import { InputBar } from "@/components/chat/InputBar"
 import { SettingsDialog } from "@/components/settings/SettingsDialog"
 import { AssistantDialog } from "@/components/settings/AssistantDialog"
 import { McpDialog } from "@/components/settings/McpDialog"
-import { appVersion } from "@/lib/appVersion"
 import { loadPromptSettings } from "@/lib/prompts/store"
 import { loadWebAccess } from "@/lib/mcp/settings"
 import type { WebAccessConfig } from "@/lib/mcp/types"
@@ -221,12 +220,7 @@ function App() {
               <img src={logoSrc} alt="" className="size-full object-contain" />
             </span>
             <div>
-              <h1 className="text-base font-semibold">
-                {t.app.title}
-                <span className="ml-1.5 align-baseline text-xs font-normal text-muted-foreground">
-                  v{appVersion}
-                </span>
-              </h1>
+              <h1 className="text-base font-semibold">{t.app.title}</h1>
               <p className="text-xs text-muted-foreground">{t.app.subtitle}</p>
             </div>
           </div>

@@ -225,7 +225,7 @@ describe("ChatView — bouton copier du message", () => {
     // Timers réels et attente de 1,6 s (> 1500 ms) : les fake timers de
     // vitest pend avec userEvent dans cette pile (vitest v5 + jsdom).
     const user = userEvent.setup()
-    const writeText = vi.spyOn(navigator.clipboard, "writeText").mockResolvedValue(undefined)
+    vi.spyOn(navigator.clipboard, "writeText").mockResolvedValue(undefined)
     render(<ChatView {...base} vm={[msg({ role: "assistant", content: "réponse" })]} />)
     await user.click(screen.getByRole("button", { name: "Copier le message" }))
     expect(screen.getByRole("button", { name: "Message copié" })).toBeTruthy()
@@ -265,7 +265,7 @@ describe("ChatView — bouton copier du message", () => {
 
   it("un second clic réinitialise le minuteur de fin de feedback", async () => {
     const user = userEvent.setup()
-    const writeText = vi.spyOn(navigator.clipboard, "writeText").mockResolvedValue(undefined)
+    vi.spyOn(navigator.clipboard, "writeText").mockResolvedValue(undefined)
     // Spies en pass-through : le setTimeout de 1500 ms est le nôtre (les
     // délais internes de userEvent sont à 0/50) ; on enregistre aussi les
     // clearTimeout pour vérifier la réinitialisation, sans asphyxier
@@ -291,7 +291,7 @@ describe("ChatView — bouton copier du message", () => {
       render(<ChatView {...base} vm={[msg({ role: "assistant", content: "réponse" })]} />)
       await user.click(screen.getByRole("button", { name: "Copier le message" }))
       expect(ourTimer).not.toBeNull()
-      const firstTimer = ourTimer as number
+      const firstTimer = ourTimer!
       // Le nom accessible a basculé pendant le feedback : le second clic
       // vise le bouton tel qu'il est rendu à ce moment-là.
       await user.click(screen.getByRole("button", { name: "Message copié" }))
@@ -307,7 +307,7 @@ describe("ChatView — bouton copier du message", () => {
 
   it("le minuteur est nettoyé au démontage (pas de setState fantôme)", async () => {
     const user = userEvent.setup()
-    const writeText = vi.spyOn(navigator.clipboard, "writeText").mockResolvedValue(undefined)
+    vi.spyOn(navigator.clipboard, "writeText").mockResolvedValue(undefined)
     const origSetTimeout = window.setTimeout.bind(window)
     const origClearTimeout = window.clearTimeout.bind(window)
     let ourTimer: number | null = null
@@ -333,7 +333,7 @@ describe("ChatView — bouton copier du message", () => {
       unmount()
       // Le cleanup useEffect doit avoir annulé le setTimeout — sinon
       // setCopied partirait sur un composant démonté à l'expiration.
-      expect(cleared.has(ourTimer as number)).toBe(true)
+      expect(cleared.has(ourTimer!)).toBe(true)
     } finally {
       setTimeoutSpy.mockRestore()
       clearTimeoutSpy.mockRestore()

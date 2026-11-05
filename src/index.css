@@ -3,6 +3,9 @@
 @tailwind utilities;
 
 :root {
+  /* Color-scheme : la scrollbar native (et tout widget système) suit le
+     thème — sans lui, la barre de scroll reste blanche en mode dark. */
+  color-scheme: light;
   --background: 0 0% 100%;
   --foreground: 240 10% 3.9%;
   --muted: 240 4.8% 95.9%;
@@ -12,12 +15,34 @@
 }
 
 .dark {
+  color-scheme: dark;
   --background: 240 10% 3.9%;
   --foreground: 0 0% 98%;
   --muted: 240 3.7% 15.9%;
   --muted-foreground: 240 5% 64.9%;
   --border: 240 3.7% 15.9%;
   --destructive: 0 72% 55%;
+}
+
+/* ---- Barres de défilement (WebView2/Chromium) ----
+   Dérivées des variables du thème pour un rendu cohérent light/dark ;
+   color-scheme ci-dessus couvre déjà les widgets natifs restants. */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: hsl(var(--muted-foreground) / 0.35);
+  border-radius: 9999px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: hsl(var(--muted-foreground) / 0.55);
+  background-clip: content-box;
 }
 
 @layer base {
