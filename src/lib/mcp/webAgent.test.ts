@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import { ApiError } from "@/lib/ai/errors"
 import type { IProvider } from "@/lib/ai/openai-compat"
-import type { ToolCall, TurnResult } from "@/lib/ai/types"
+import type { TokenUsage, ToolCall, TurnResult } from "@/lib/ai/types"
 import type { WebToolRequest, WebToolResult } from "@/lib/mcp/types"
 import {
   isToolsUnsupported,
@@ -11,8 +11,18 @@ import {
   type WebToolClient,
 } from "@/lib/mcp/webAgent"
 
-function turn(text: string, toolCalls: ToolCall[] = []): TurnResult {
-  return { text, toolCalls, firstTokenMs: 5, totalMs: 20 }
+function turn(
+  text: string,
+  toolCalls: ToolCall[] = [],
+  usage?: TokenUsage,
+): TurnResult {
+  return {
+    text,
+    toolCalls,
+    firstTokenMs: 5,
+    totalMs: 20,
+    ...(usage ? { usage } : {}),
+  }
 }
 
 function searchCall(id: string, query = "Tauri"): ToolCall {
@@ -52,6 +62,57 @@ beforeEach(() => {
 })
 
 describe("runWebAgent", () => {
+  it("additionne l'usage lorsque tous les tours le fournissent", async () => {
+    const { input, call } = createHarness([
+      turn("", [searchCall("call-1")], { inputTokens: 100, outputTokens: 10 }),
+      turn("Réponse sourcée", [], { inputTokens: 160, outputTokens: 40 }),
+    ])
+    call.mockResolvedValueOnce({ content: "Résultat", sources: [] })
+    const result = await runWebAgent(input)
+    expect(result.usage).toEqual({ inputTokens: 260, outputTokens: 50 })
+  })
+
+  it("omet l'usage agrégé si un tour ne le fournit pas", async () => {
+    const { input, call } = createHarness([
+      turn("", [searchCall("call-1")], { inputTokens: 100, outputTokens: 10 }),
+      turn("Réponse sourcée"),
+    ])
+    call.mockResolvedValueOnce({ content: "Résultat", sources: [] })
+    const result = await runWebAgent(input)
+    expect(result.usage).toBeUndefined()
+  })
+
+  it("omet l'usage agrégé si l'addition dépasse la limite des entiers sûrs", async () => {
+    const { input, call } = createHarness([
+      turn("", [searchCall("call-1")], {
+        inputTokens: Number.MAX_SAFE_INTEGER,
+        outputTokens: 10,
+      }),
+      turn("Réponse sourcée", [], { inputTokens: 1, outputTokens: 40 }),
+    ])
+    call.mockResolvedValueOnce({ content: "Résultat", sources: [] })
+
+    const result = await runWebAgent(input)
+
+    expect(result.usage).toBeUndefined()
+  })
+
+  it.each([
+    ["entrée négative", { inputTokens: -1, outputTokens: 0 }],
+    ["sortie décimale", { inputTokens: 0, outputTokens: 1.5 }],
+    ["entrée infinie", { inputTokens: Infinity, outputTokens: 0 }],
+    [
+      "sortie entière non sûre",
+      { inputTokens: 0, outputTokens: Number.MAX_SAFE_INTEGER + 1 },
+    ],
+  ])("omet un usage invalide provenant d'un adaptateur : %s", async (_label, usage) => {
+    const { input } = createHarness([turn("Réponse directe", [], usage)])
+
+    const result = await runWebAgent(input)
+
+    expect(result.usage).toBeUndefined()
+  })
+
   it("retourne directement une réponse sans appel MCP", async () => {
     const { input, runTurn, call } = createHarness([turn("Réponse directe")])
 

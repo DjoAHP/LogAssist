@@ -360,6 +360,77 @@ describe("createOpenAICompatible — stream", () => {
 })
 
 describe("createOpenAICompatible — runTurn", () => {
+  it("remonte l'usage du chunk final quand le fournisseur le fournit", async () => {
+    const stream = sseStream([
+      sseData({ choices: [{ delta: { content: "Bonjour" } }] }),
+      sseData({
+        choices: [],
+        usage: { prompt_tokens: 120, completion_tokens: 30, total_tokens: 150 },
+      }),
+      `data: [DONE]${SSE}`,
+    ])
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(makeRes({ body: stream })))
+    const result = await createOpenAICompatible(CFG).runTurn(
+      { messages: [{ role: "user", content: "Salut" }] },
+      "K",
+      "m",
+      {},
+      {},
+      new AbortController().signal,
+    )
+    expect(result.usage).toEqual({ inputTokens: 120, outputTokens: 30 })
+  })
+
+  it("ignore un événement JSON null sans interrompre le stream", async () => {
+    const stream = sseStream([
+      sseData({ choices: [{ delta: { content: "Bon" } }] }),
+      sseData(null),
+      sseData({ choices: [{ delta: { content: "jour" } }] }),
+      `data: [DONE]${SSE}`,
+    ])
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(makeRes({ body: stream })))
+
+    const result = await createOpenAICompatible(CFG).runTurn(
+      { messages: [{ role: "user", content: "Salut" }] },
+      "K",
+      "m",
+      {},
+      {},
+      new AbortController().signal,
+    )
+
+    expect(result.text).toBe("Bonjour")
+  })
+
+  it.each([
+    ["prompt_tokens négatif", '{"prompt_tokens":-1,"completion_tokens":1}'],
+    ["completion_tokens décimal", '{"prompt_tokens":1,"completion_tokens":1.5}'],
+    ["prompt_tokens infini", '{"prompt_tokens":1e400,"completion_tokens":1}'],
+    [
+      "prompt_tokens entier non sûr",
+      `{"prompt_tokens":${Number.MAX_SAFE_INTEGER + 1},"completion_tokens":1}`,
+    ],
+  ])("ignore un usage invalide : %s", async (_label, usageJson) => {
+    const stream = sseStream([
+      sseData({ choices: [{ delta: { content: "Réponse" } }] }),
+      `data: {"choices":[],"usage":${usageJson}}${SSE}`,
+      `data: [DONE]${SSE}`,
+    ])
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(makeRes({ body: stream })))
+
+    const result = await createOpenAICompatible(CFG).runTurn(
+      { messages: [{ role: "user", content: "Question" }] },
+      "K",
+      "m",
+      {},
+      {},
+      new AbortController().signal,
+    )
+
+    expect(result.text).toBe("Réponse")
+    expect(result.usage).toBeUndefined()
+  })
+
   it("transmet les outils et recompose les arguments JSON fragmentés", async () => {
     const stream = sseStream([
       sseData({

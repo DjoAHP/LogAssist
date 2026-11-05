@@ -15,7 +15,17 @@ export interface ChatMessage {
 
 export interface ChatRequest { messages: ChatMessage[]; timeoutMs?: number }
 
-export interface CompletionStats { text: string; firstTokenMs: number; totalMs: number }
+export interface TokenUsage {
+  inputTokens: number
+  outputTokens: number
+}
+
+export interface CompletionStats {
+  text: string
+  firstTokenMs: number
+  totalMs: number
+  usage?: TokenUsage
+}
 
 export interface ToolDefinition {
   type: "function"

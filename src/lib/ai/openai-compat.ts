@@ -9,6 +9,7 @@ import type {
   ChatRequest,
   ProviderConfig,
   StreamCallbacks,
+  TokenUsage,
   ToolCall,
   TurnCallbacks,
   TurnOptions,
@@ -46,6 +47,24 @@ function retryAfterMs(headers: Headers): number | undefined {
   if (!v) return undefined
   const n = Number(v)
   return Number.isFinite(n) ? Math.round(n * 1000) : undefined
+}
+
+function parseTokenUsage(value: unknown): TokenUsage | undefined {
+  if (typeof value !== "object" || value === null) return undefined
+  const usage = (value as {
+    usage?: { prompt_tokens?: unknown; completion_tokens?: unknown }
+  }).usage
+  const input = usage?.prompt_tokens
+  const output = usage?.completion_tokens
+  if (
+    !Number.isSafeInteger(input) ||
+    !Number.isSafeInteger(output) ||
+    (input as number) < 0 ||
+    (output as number) < 0
+  ) {
+    return undefined
+  }
+  return { inputTokens: input as number, outputTokens: output as number }
 }
 
 export function createOpenAICompatible(cfg: ProviderConfig): IProvider {
@@ -115,6 +134,7 @@ export function createOpenAICompatible(cfg: ProviderConfig): IProvider {
     const start = performance.now()
     let firstTokenMs = 0
     let text = ""
+    let usage: TokenUsage | undefined
     let reader: ReadableStreamDefaultReader<Uint8Array> | null = null
     const pendingCalls = new Map<number, { id: string; name: string; arguments: string }>()
 
@@ -134,6 +154,8 @@ export function createOpenAICompatible(cfg: ProviderConfig): IProvider {
         } catch {
           return
         }
+        const parsedUsage = parseTokenUsage(json)
+        if (parsedUsage) usage = parsedUsage
         const delta = (json as {
           choices?: {
             delta?: {
@@ -189,6 +211,7 @@ export function createOpenAICompatible(cfg: ProviderConfig): IProvider {
         toolCalls,
         firstTokenMs,
         totalMs: performance.now() - start,
+        ...(usage ? { usage } : {}),
       }
     } catch (error) {
       if (error instanceof ApiError || isAbortError(error)) throw error

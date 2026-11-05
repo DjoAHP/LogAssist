@@ -3,6 +3,7 @@ import type { IProvider } from "@/lib/ai/openai-compat"
 import type {
   ChatMessage,
   ChatRequest,
+  TokenUsage,
   ToolCall,
   ToolChoice,
   ToolDefinition,
@@ -89,6 +90,7 @@ export interface WebAgentResult {
   totalMs: number
   sources: WebSource[]
   warning?: string
+  usage?: TokenUsage
 }
 
 function abortError(signal: AbortSignal): unknown {
@@ -142,13 +144,20 @@ function toolMessage(toolCallId: string, content: string): ChatMessage {
   return { role: "tool", toolCallId, content }
 }
 
-function finalResult(result: TurnResult, sources: Map<string, WebSource>, started: number, warning?: string): WebAgentResult {
+function finalResult(
+  result: TurnResult,
+  sources: Map<string, WebSource>,
+  started: number,
+  warning?: string,
+  usage?: TokenUsage,
+): WebAgentResult {
   return {
     text: result.text,
     firstTokenMs: result.firstTokenMs,
     totalMs: performance.now() - started,
     sources: [...sources.values()],
     ...(warning ? { warning } : {}),
+    ...(usage ? { usage } : {}),
   }
 }
 
@@ -162,6 +171,32 @@ export function isToolsUnsupported(error: unknown): boolean {
 export async function runWebAgent(input: WebAgentInput): Promise<WebAgentResult> {
   const started = performance.now()
   const sources = new Map<string, WebSource>()
+  const reportedUsage: TokenUsage = { inputTokens: 0, outputTokens: 0 }
+  let allTurnsReportedUsage = true
+
+  const collectUsage = (result: TurnResult): void => {
+    if (!result.usage) {
+      allTurnsReportedUsage = false
+      return
+    }
+    if (
+      !Number.isSafeInteger(result.usage.inputTokens) ||
+      !Number.isSafeInteger(result.usage.outputTokens) ||
+      result.usage.inputTokens < 0 ||
+      result.usage.outputTokens < 0
+    ) {
+      allTurnsReportedUsage = false
+      return
+    }
+    const nextInput = reportedUsage.inputTokens + result.usage.inputTokens
+    const nextOutput = reportedUsage.outputTokens + result.usage.outputTokens
+    if (!Number.isSafeInteger(nextInput) || !Number.isSafeInteger(nextOutput)) {
+      allTurnsReportedUsage = false
+      return
+    }
+    reportedUsage.inputTokens = nextInput
+    reportedUsage.outputTokens = nextOutput
+  }
 
   const runWithoutTools = async (warning?: string): Promise<WebAgentResult> => {
     throwIfAborted(input.signal)
@@ -173,7 +208,14 @@ export async function runWebAgent(input: WebAgentInput): Promise<WebAgentResult>
       input.callbacks,
       input.signal,
     )
-    return finalResult(result, sources, started, warning)
+    collectUsage(result)
+    return finalResult(
+      result,
+      sources,
+      started,
+      warning,
+      allTurnsReportedUsage ? { ...reportedUsage } : undefined,
+    )
   }
 
   if (input.unsupportedTools.has(input.compatibilityKey)) {
@@ -200,9 +242,16 @@ export async function runWebAgent(input: WebAgentInput): Promise<WebAgentResult>
         input.callbacks,
         input.signal,
       )
+      collectUsage(result)
 
       if (result.toolCalls.length === 0) {
-        return finalResult(result, sources, started, warning)
+        return finalResult(
+          result,
+          sources,
+          started,
+          warning,
+          allTurnsReportedUsage ? { ...reportedUsage } : undefined,
+        )
       }
 
       messages.push({ role: "assistant", content: result.text, toolCalls: result.toolCalls })
@@ -254,7 +303,14 @@ export async function runWebAgent(input: WebAgentInput): Promise<WebAgentResult>
       input.callbacks,
       input.signal,
     )
-    return finalResult(final, sources, started, warning)
+    collectUsage(final)
+    return finalResult(
+      final,
+      sources,
+      started,
+      warning,
+      allTurnsReportedUsage ? { ...reportedUsage } : undefined,
+    )
   } catch (error) {
     if (!isToolsUnsupported(error)) throw error
     input.unsupportedTools.add(input.compatibilityKey)
