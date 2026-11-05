@@ -200,3 +200,49 @@ describe("ChatView — accès Web", () => {
     expect(screen.queryByRole("link")).toBeNull()
   })
 })
+
+describe("ChatView — bouton copier du message", () => {
+  it("la réponse assistant est copiée depuis le bouton du message", async () => {
+    // Ordre imposé (cf. test bloc de code) : setup d'abord, spy ensuite.
+    const user = userEvent.setup()
+    const writeText = vi.spyOn(navigator.clipboard, "writeText").mockResolvedValue(undefined)
+    render(
+      <ChatView {...base} vm={[msg({ role: "assistant", content: "## Titre\n\nparagraphe" })]} />,
+    )
+    await user.click(screen.getByRole("button", { name: "Copier le message" }))
+    expect(writeText).toHaveBeenCalledWith("## Titre\n\nparagraphe")
+  })
+
+  it("le message utilisateur est copié tel quel", async () => {
+    const user = userEvent.setup()
+    const writeText = vi.spyOn(navigator.clipboard, "writeText").mockResolvedValue(undefined)
+    render(<ChatView {...base} vm={[msg({ role: "user", content: "ma question ##pas un titre" })]} />)
+    await user.click(screen.getByRole("button", { name: "Copier le message" }))
+    expect(writeText).toHaveBeenCalledWith("ma question ##pas un titre")
+  })
+
+  it("le bouton passe en retour visuel « Message copié » puis revient", async () => {
+    // Timers réels et attente de 1,6 s (> 1500 ms) : les fake timers de
+    // vitest pend avec userEvent dans cette pile (vitest v5 + jsdom).
+    const user = userEvent.setup()
+    const writeText = vi.spyOn(navigator.clipboard, "writeText").mockResolvedValue(undefined)
+    render(<ChatView {...base} vm={[msg({ role: "assistant", content: "réponse" })]} />)
+    await user.click(screen.getByRole("button", { name: "Copier le message" }))
+    expect(screen.getByRole("button", { name: "Message copié" })).toBeTruthy()
+    await new Promise((r) => setTimeout(r, 1600))
+    expect(screen.getByRole("button", { name: "Copier le message" })).toBeTruthy()
+  })
+
+  it("un échec du presse-papiers ne casse pas l'UI", async () => {
+    const user = userEvent.setup()
+    vi.spyOn(navigator.clipboard, "writeText").mockRejectedValue(new Error("denied"))
+    render(<ChatView {...base} vm={[msg({ role: "assistant", content: "réponse" })]} />)
+    await user.click(screen.getByRole("button", { name: "Copier le message" }))
+    expect(screen.getByRole("button", { name: "Copier le message" })).toBeTruthy()
+  })
+
+  it("pas de bouton copier sur un message sans contenu", () => {
+    render(<ChatView {...base} vm={[msg({ role: "assistant", content: "" })]} />)
+    expect(screen.queryByRole("button", { name: "Copier le message" })).toBeNull()
+  })
+})

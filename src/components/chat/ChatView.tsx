@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react"
-import { AlertTriangle, ExternalLink, FileText, Maximize2, Search, X } from "lucide-react"
+import { AlertTriangle, Check, Copy, ExternalLink, FileText, Maximize2, Search, X } from "lucide-react"
 import { t } from "@/i18n/fr"
 import { logger } from "@/lib/logger"
 import { KIND_TO_KEY } from "@/lib/ai/errors"
@@ -178,6 +178,25 @@ function MessageBubble({
 }) {
   const isUser = m.role === "user"
   const attachments = m.attachments ?? []
+  // Bouton copier : mêmes morphologies et délais que CodeBlock (MarkdownMessage).
+  // Le texte copié est m.content — markdown SOURCE pour l'assistant, texte
+  // brut pour l'utilisateur ; jamais le HTML rendu.
+  const [copied, setCopied] = useState(false)
+  const copyTimer = useRef<number | undefined>(undefined)
+  // Nettoyage du timer : pas de setState sur composant démonté
+  // (changement de conversation pendant le feedback).
+  useEffect(() => () => window.clearTimeout(copyTimer.current), [])
+
+  const onCopyMessage = () => {
+    navigator.clipboard
+      .writeText(m.content)
+      .then(() => {
+        setCopied(true)
+        copyTimer.current = window.setTimeout(() => setCopied(false), 1500)
+      })
+      .catch((e: unknown) => logger.error(["[ChatView] copie du message impossible:", e]))
+  }
+
   const seenSourceUrls = new Set<string>()
   const sources = (m.sources ?? []).filter((source) => {
     try {
@@ -252,6 +271,23 @@ function MessageBubble({
           </span>
         ) : (
           <pre className="whitespace-pre-wrap font-sans text-sm">{m.content}</pre>
+        )}
+        {m.content && (
+          // Toujours visible (choix utilisateur) : pas de opacity-0/hover.
+          <div className={`mt-1 flex ${isUser ? "justify-end" : "justify-start"}`}>
+            <button
+              type="button"
+              onClick={onCopyMessage}
+              aria-label={copied ? t.chat.messageCopied : t.chat.copyMessage}
+              className="rounded-md p-1 text-muted-foreground hover:text-foreground focus-visible:text-foreground"
+            >
+              {copied ? (
+                <Check className="size-3.5 text-[var(--brand-to)]" aria-hidden="true" />
+              ) : (
+                <Copy className="size-3.5" aria-hidden="true" />
+              )}
+            </button>
+          </div>
         )}
         {m.apiError && (
           <div className="mt-1 flex items-start gap-1.5 text-destructive">

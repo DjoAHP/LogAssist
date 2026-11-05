@@ -21,6 +21,8 @@ export const fr = {
     stop: "Interrompre",
     copy: "Copier",
     copied: "Copié !",
+    copyMessage: "Copier le message",
+    messageCopied: "Message copié",
     regenerate: "Régénérer",
     noConversation: "Sélectionnez ou créez un chat",
     interrupted: "Interrompu",
