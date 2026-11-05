@@ -1,4 +1,4 @@
-export const SCHEMA_VERSION = 5
+export const SCHEMA_VERSION = 6
 
 // Chaque statement est un item distinct : audit-able, et exécution séquentielle
 // garantie (sqlx rejette le multi-statement dans un seul execute).
@@ -139,6 +139,14 @@ export const SCHEMA_V4_STATEMENTS: string[] = [
 // Le contenu brut récupéré via MCP reste en mémoire pendant le tour LLM.
 export const SCHEMA_V5_STATEMENTS: string[] = [
   `ALTER TABLE messages ADD COLUMN sources TEXT NOT NULL DEFAULT '[]'`,
+]
+
+export const SCHEMA_V6_STATEMENTS: string[] = [
+  "ALTER TABLE messages ADD COLUMN first_token_ms INTEGER",
+  "ALTER TABLE messages ADD COLUMN input_tokens INTEGER",
+  "ALTER TABLE messages ADD COLUMN output_tokens INTEGER",
+  "ALTER TABLE messages ADD COLUMN usage_source TEXT CHECK (usage_source IN ('provider','estimated'))",
+  "ALTER TABLE messages ADD COLUMN cost_microusd INTEGER",
 ]
 
 export const SCHEMA_V1 = SCHEMA_V1_STATEMENTS.join(";\n")

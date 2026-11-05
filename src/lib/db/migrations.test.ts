@@ -6,6 +6,7 @@ import {
   SCHEMA_V3_STATEMENTS,
   SCHEMA_V4_STATEMENTS,
   SCHEMA_V5_STATEMENTS,
+  SCHEMA_V6_STATEMENTS,
   SCHEMA_VERSION,
 } from "./migrations"
 
@@ -20,7 +21,7 @@ describe("SCHEMA_V1_STATEMENTS", () => {
     expect(SCHEMA_V1).toBe(SCHEMA_V1_STATEMENTS.join(";\n"))
   })
   it("SCHEMA_VERSION correspond à la dernière migration", () => {
-    expect(SCHEMA_VERSION).toBe(5)
+    expect(SCHEMA_VERSION).toBe(6)
     expect(SCHEMA_V1).toContain("CREATE TABLE IF NOT EXISTS conversations")
     expect(SCHEMA_V1).toContain("idx_conversations_project")
   })
@@ -68,6 +69,18 @@ describe("SCHEMA_V5_STATEMENTS", () => {
   it("ajoute les sources Web aux messages historiques avec un tableau vide par défaut", () => {
     expect(SCHEMA_V5_STATEMENTS).toEqual([
       "ALTER TABLE messages ADD COLUMN sources TEXT NOT NULL DEFAULT '[]'",
+    ])
+  })
+})
+
+describe("SCHEMA_V6_STATEMENTS", () => {
+  it("ajoute des métriques optionnelles aux réponses historiques", () => {
+    expect(SCHEMA_V6_STATEMENTS).toEqual([
+      "ALTER TABLE messages ADD COLUMN first_token_ms INTEGER",
+      "ALTER TABLE messages ADD COLUMN input_tokens INTEGER",
+      "ALTER TABLE messages ADD COLUMN output_tokens INTEGER",
+      "ALTER TABLE messages ADD COLUMN usage_source TEXT CHECK (usage_source IN ('provider','estimated'))",
+      "ALTER TABLE messages ADD COLUMN cost_microusd INTEGER",
     ])
   })
 })
