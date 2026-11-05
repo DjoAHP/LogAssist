@@ -1,0 +1,1784 @@
+# Chat Engine — Palier 1 Implementation Plan
+
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+
+**Goal:** Extraire l'exécution d'un tour hors de `useChat`, persister des métriques honnêtes par réponse et supprimer l'affichage cumulatif trompeur, sans modifier l'identité visuelle ni le comportement fonctionnel du chat.
+
+**Architecture:** Le palier introduit deux unités pures (`contextBuilder` et `turnRunner`) entre le hook React et les adaptateurs existants. Les adaptateurs remontent l'usage lorsqu'il est fourni ; sinon un estimateur local calcule les tokens une seule fois à la fin du tour. SQLite V6 persiste ces métriques optionnelles afin que `ChatView` affiche les données propres à chaque réponse.
+
+**Tech Stack:** React 19, TypeScript strict, Vitest 5, Testing Library, Tauri SQL/SQLite, `@dqbd/tiktoken`, adaptateurs OpenAI-compatible et MCP TinyFish existants.
+
+---
+
+## Périmètre strict du palier
+
+Ce plan implémente uniquement :
+
+- migration V6 pour les métriques par réponse ;
+- usage fournisseur optionnel et estimation locale ;
+- extraction de la construction actuelle du contexte, sans fenêtre glissante ni résumé ;
+- extraction de l'exécution directe/Web dans `TurnRunner` ;
+- intégration de `TurnRunner` dans `useChat` en préservant le contrat anti-perte ;
+- affichage des métriques du message concerné ;
+- suppression du calcul cumulatif effectué dans `ChatView`.
+
+Ce plan n'implémente pas encore :
+
+- budget de contexte, résumé ou `CapabilityRegistry` ;
+- nouvelle présentation hybride, nouveau composeur ou nouvel auto-scroll ;
+- retry, continuation ou régénération ;
+- changement du comportement éphémère des images ;
+- nouvelle famille de fournisseur.
+
+## Carte des fichiers
+
+### Nouveaux fichiers
+
+- `src/lib/chat/contextBuilder.ts` — transforme le prompt système, les lignes SQLite et les images courantes en `ChatMessage[]`.
+- `src/lib/chat/contextBuilder.test.ts` — verrouille la reproduction exacte du contexte actuel.
+- `src/lib/chat/turnRunner.ts` — choisit le chemin direct ou Web et retourne un résultat uniforme sans dépendre de React.
+- `src/lib/chat/turnRunner.test.ts` — couvre chemins direct, Web, annulation et propagation d'erreur.
+- `src/lib/token/estimate.ts` — compte une fois l'entrée et la sortie, choisit le tarif connu et produit un coût optionnel.
+- `src/lib/token/estimate.test.ts` — couvre estimation, usage fournisseur et coût inconnu.
+- `src/lib/token/format.ts` — formate tokens et coût stocké en microdollars.
+- `src/lib/token/format.test.ts` — verrouille les unités et arrondis affichés.
+- `src/lib/token/pricing.test.ts` — garantit qu'un modèle inconnu ne reçoit aucun faux tarif.
+- `src/lib/token/types.ts` — contrat partagé des métriques, sans dépendance vers React ou SQLite.
+
+### Fichiers modifiés
+
+- `src/lib/db/migrations.ts` et `src/lib/db/database.ts` — migration V6 additive.
+- `src/lib/db/migrations.test.ts` — contrat de la migration.
+- `src/lib/db/messages.ts` et `src/lib/db/messages.test.ts` — lecture/écriture des métriques optionnelles.
+- `src/lib/ai/types.ts` — type `TokenUsage` et usage optionnel dans les résultats.
+- `src/lib/ai/openai-compat.ts` et son test — lecture opportuniste du champ `usage` SSE/JSON.
+- `src/lib/mcp/webAgent.ts` et son test — agrégation de l'usage quand tous les tours le fournissent.
+- `src/hooks/useChat.ts` et son test — délégation au runner et persistance des métriques.
+- `src/components/chat/ChatView.tsx` et son test — métriques propres au message, sans comptage global.
+- `src/App.tsx` et `src/App.test.tsx` — retrait des props utilisées uniquement par l'ancien compteur global.
+- `src/lib/token/index.ts` et `src/lib/token/pricing.ts` — nouveaux exports et tarif nullable.
+- `src/i18n/fr.ts` — libellé d'estimation accessible.
+
+### Fichier supprimé
+
+- `src/lib/token/useTokenCount.ts` — hook cumulatif devenu inutile ; ses fonctions de formatage sont déplacées dans `format.ts`.
+
+---
+
+### Task 1: Enregistrer la référence avant refactorisation
+
+**Files:**
+- Inspect: `package.json`
+- Inspect: `src/hooks/useChat.test.tsx`
+- Inspect: `src/lib/ai/openai-compat.test.ts`
+
+- [ ] **Step 1: Vérifier la branche et l'absence de modifications fonctionnelles**
+
+Run:
+
+```bash
+git status --short --branch
+```
+
+Expected:
+
+```text
+## feat/chat-engine-modernization
+```
+
+- [ ] **Step 2: Exécuter les tests TypeScript de référence sous WSL**
+
+Run:
+
+```bash
+npm run test
+```
+
+Expected: tous les tests Vitest passent. Noter le nombre exact de tests dans le journal d'exécution du plan.
+
+- [ ] **Step 3: Vérifier le typecheck et le bundle Vite sans réinstaller les dépendances**
+
+Run:
+
+```bash
+npm run build
+```
+
+Expected: `tsc`, `vitest run` et `vite build` passent. Ne jamais lancer `npm install` depuis WSL.
+
+- [ ] **Step 4: Créer un commit uniquement si une note de référence suivie est ajoutée**
+
+Par défaut, aucune modification et aucun commit ne sont nécessaires pour cette tâche. Si un échec de référence apparaît, arrêter le plan : il doit être diagnostiqué séparément avant toute implémentation.
+
+---
+
+### Task 2: Ajouter la migration V6 des métriques par réponse
+
+**Files:**
+- Modify: `src/lib/db/migrations.ts:1-144`
+- Modify: `src/lib/db/database.ts:1-62`
+- Test: `src/lib/db/migrations.test.ts:1-73`
+
+- [ ] **Step 1: Écrire le test rouge de la migration V6**
+
+Ajouter `SCHEMA_V6_STATEMENTS` à l'import de `src/lib/db/migrations.test.ts`, passer l'attente de version à `6`, puis ajouter :
+
+```ts
+describe("SCHEMA_V6_STATEMENTS", () => {
+  it("ajoute des métriques optionnelles aux réponses historiques", () => {
+    expect(SCHEMA_V6_STATEMENTS).toEqual([
+      "ALTER TABLE messages ADD COLUMN first_token_ms INTEGER",
+      "ALTER TABLE messages ADD COLUMN input_tokens INTEGER",
+      "ALTER TABLE messages ADD COLUMN output_tokens INTEGER",
+      "ALTER TABLE messages ADD COLUMN usage_source TEXT CHECK (usage_source IN ('provider','estimated'))",
+      "ALTER TABLE messages ADD COLUMN cost_microusd INTEGER",
+    ])
+  })
+})
+```
+
+- [ ] **Step 2: Lancer le test pour confirmer l'échec**
+
+Run:
+
+```bash
+npx vitest run src/lib/db/migrations.test.ts
+```
+
+Expected: FAIL car `SCHEMA_V6_STATEMENTS` n'existe pas et `SCHEMA_VERSION` vaut encore `5`.
+
+- [ ] **Step 3: Implémenter la migration V6**
+
+Dans `src/lib/db/migrations.ts`, remplacer la version et ajouter après V5 :
+
+```ts
+export const SCHEMA_VERSION = 6
+
+export const SCHEMA_V6_STATEMENTS: string[] = [
+  "ALTER TABLE messages ADD COLUMN first_token_ms INTEGER",
+  "ALTER TABLE messages ADD COLUMN input_tokens INTEGER",
+  "ALTER TABLE messages ADD COLUMN output_tokens INTEGER",
+  "ALTER TABLE messages ADD COLUMN usage_source TEXT CHECK (usage_source IN ('provider','estimated'))",
+  "ALTER TABLE messages ADD COLUMN cost_microusd INTEGER",
+]
+```
+
+Dans `src/lib/db/database.ts`, importer `SCHEMA_V6_STATEMENTS` puis ajouter après le bloc V5 :
+
+```ts
+if (fromVersion < 6) {
+  for (const statement of SCHEMA_V6_STATEMENTS) {
+    await db.execute(statement)
+  }
+}
+```
+
+- [ ] **Step 4: Relancer le test de migration**
+
+Run:
+
+```bash
+npx vitest run src/lib/db/migrations.test.ts
+```
+
+Expected: PASS.
+
+- [ ] **Step 5: Committer la migration seule**
+
+```bash
+git add src/lib/db/migrations.ts src/lib/db/database.ts src/lib/db/migrations.test.ts
+git commit -m "feat: ajoute les métriques de message en base"
+```
+
+---
+
+### Task 3: Étendre le repository `messages`
+
+**Files:**
+- Create: `src/lib/token/types.ts`
+- Modify: `src/lib/db/messages.ts:3-50`
+- Test: `src/lib/db/messages.test.ts:16-63`
+
+- [ ] **Step 1: Écrire les attentes rouges de lecture et d'insertion**
+
+Dans le premier mock de `messages.test.ts`, fournir les colonnes V6 à `null`. Dans le test d'insertion, fournir les valeurs suivantes et attendre quatorze binds :
+
+```ts
+first_token_ms: 180,
+input_tokens: 240,
+output_tokens: 80,
+usage_source: "provider",
+cost_microusd: 420,
+```
+
+Ajouter les assertions :
+
+```ts
+expect(bind).toHaveLength(14)
+expect(bind.slice(9)).toEqual([180, 240, 80, "provider", 420])
+```
+
+Ajouter un second test d'insertion qui omet toutes les métriques :
+
+```ts
+it("insère NULL pour les métriques absentes", async () => {
+  mockExecute.mockResolvedValueOnce({ rowsAffected: 1 })
+  await messages.insert({
+    conversation_id: "c1",
+    role: "user",
+    content: "question",
+    attachments: "[]",
+    model_label: null,
+    latency_ms: null,
+    error: null,
+  })
+  const bind = mockExecute.mock.calls[0][1]
+  expect(bind.slice(9)).toEqual([null, null, null, null, null])
+})
+```
+
+- [ ] **Step 2: Vérifier que les tests échouent**
+
+Run:
+
+```bash
+npx vitest run src/lib/db/messages.test.ts
+```
+
+Expected: FAIL avec neuf binds au lieu de quatorze.
+
+- [ ] **Step 3: Étendre les types et l'INSERT**
+
+Créer d'abord `src/lib/token/types.ts` :
+
+```ts
+export type UsageSource = "provider" | "estimated"
+
+export interface TurnMetrics {
+  inputTokens: number
+  outputTokens: number
+  usageSource: UsageSource
+  costMicrousd: number | null
+}
+```
+
+Puis importer `UsageSource` et remplacer les types en tête de `src/lib/db/messages.ts` par :
+
+```ts
+import type { UsageSource } from "@/lib/token/types"
+
+export interface MessageRow {
+  id: string
+  conversation_id: string
+  role: "user" | "assistant"
+  content: string
+  attachments: string
+  model_label: string | null
+  latency_ms: number | null
+  error: string | null
+  sources: string
+  first_token_ms: number | null
+  input_tokens: number | null
+  output_tokens: number | null
+  usage_source: UsageSource | null
+  cost_microusd: number | null
+}
+
+type MetricColumns = Pick<
+  MessageRow,
+  "first_token_ms" | "input_tokens" | "output_tokens" | "usage_source" | "cost_microusd"
+>
+
+type MessageInsert = Omit<MessageRow, "id" | "sources" | keyof MetricColumns> &
+  Partial<MetricColumns> & { sources?: string }
+```
+
+Remplacer la requête et ses binds dans `insert` par :
+
+```ts
+await execute(
+  "INSERT INTO messages (id, conversation_id, role, content, attachments, model_label, latency_ms, error, sources, first_token_ms, input_tokens, output_tokens, usage_source, cost_microusd) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+  [
+    id,
+    row.conversation_id,
+    row.role,
+    row.content,
+    row.attachments,
+    row.model_label,
+    row.latency_ms,
+    row.error,
+    row.sources ?? "[]",
+    row.first_token_ms ?? null,
+    row.input_tokens ?? null,
+    row.output_tokens ?? null,
+    row.usage_source ?? null,
+    row.cost_microusd ?? null,
+  ],
+)
+```
+
+Dans `listByConversation`, normaliser les anciennes valeurs simulées :
+
+```ts
+return rows.map((row) => ({
+  ...row,
+  sources: row.sources ?? "[]",
+  first_token_ms: row.first_token_ms ?? null,
+  input_tokens: row.input_tokens ?? null,
+  output_tokens: row.output_tokens ?? null,
+  usage_source: row.usage_source ?? null,
+  cost_microusd: row.cost_microusd ?? null,
+}))
+```
+
+- [ ] **Step 4: Relancer les tests du repository**
+
+Run:
+
+```bash
+npx vitest run src/lib/db/messages.test.ts
+```
+
+Expected: PASS.
+
+- [ ] **Step 5: Committer le repository**
+
+```bash
+git add src/lib/token/types.ts src/lib/db/messages.ts src/lib/db/messages.test.ts
+git commit -m "feat: persiste les métriques par réponse"
+```
+
+---
+
+### Task 4: Remonter l'usage fourni par les APIs
+
+**Files:**
+- Modify: `src/lib/ai/types.ts:8-57`
+- Modify: `src/lib/ai/openai-compat.ts:107-199`
+- Test: `src/lib/ai/openai-compat.test.ts`
+- Modify: `src/lib/mcp/webAgent.ts:86-263`
+- Test: `src/lib/mcp/webAgent.test.ts`
+
+- [ ] **Step 1: Écrire le test rouge du champ SSE `usage`**
+
+Dans le bloc `runTurn` de `openai-compat.test.ts`, ajouter :
+
+```ts
+it("remonte l'usage du chunk final quand le fournisseur le fournit", async () => {
+  const stream = sseStream([
+    sseData({ choices: [{ delta: { content: "Bonjour" } }] }),
+    sseData({
+      choices: [{ delta: {} }],
+      usage: { prompt_tokens: 120, completion_tokens: 30, total_tokens: 150 },
+    }),
+    `data: [DONE]${SSE}`,
+  ])
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(makeRes({ body: stream })))
+  const result = await createOpenAICompatible(CFG).runTurn(
+    { messages: [{ role: "user", content: "Salut" }] },
+    "K",
+    "m",
+    {},
+    {},
+    new AbortController().signal,
+  )
+  expect(result.usage).toEqual({ inputTokens: 120, outputTokens: 30 })
+})
+```
+
+- [ ] **Step 2: Confirmer l'échec**
+
+Run:
+
+```bash
+npx vitest run src/lib/ai/openai-compat.test.ts
+```
+
+Expected: FAIL car `usage` est absent du résultat.
+
+- [ ] **Step 3: Ajouter le type d'usage**
+
+Dans `src/lib/ai/types.ts`, ajouter puis étendre `CompletionStats` :
+
+```ts
+export interface TokenUsage {
+  inputTokens: number
+  outputTokens: number
+}
+
+export interface CompletionStats {
+  text: string
+  firstTokenMs: number
+  totalMs: number
+  usage?: TokenUsage
+}
+```
+
+- [ ] **Step 4: Lire opportunément l'usage dans `runTurn`**
+
+Dans `openai-compat.ts`, importer `TokenUsage`, déclarer avant le `try` :
+
+```ts
+let usage: TokenUsage | undefined
+```
+
+Après le `JSON.parse`, avant la lecture de `delta`, ajouter :
+
+```ts
+const reportedUsage = (json as {
+  usage?: { prompt_tokens?: number; completion_tokens?: number }
+}).usage
+if (
+  typeof reportedUsage?.prompt_tokens === "number" &&
+  typeof reportedUsage.completion_tokens === "number"
+) {
+  usage = {
+    inputTokens: reportedUsage.prompt_tokens,
+    outputTokens: reportedUsage.completion_tokens,
+  }
+}
+```
+
+Ajouter `...(usage ? { usage } : {})` au résultat de `runTurn` :
+
+```ts
+return {
+  text,
+  toolCalls,
+  firstTokenMs,
+  totalMs: performance.now() - start,
+  ...(usage ? { usage } : {}),
+}
+```
+
+Ne pas envoyer automatiquement `stream_options`: certains fournisseurs OpenAI-like le refusent. Le palier lit seulement l'usage déjà présent.
+
+- [ ] **Step 5: Relancer le test adaptateur**
+
+Run:
+
+```bash
+npx vitest run src/lib/ai/openai-compat.test.ts
+```
+
+Expected: PASS, y compris les tests historiques de streaming et outils.
+
+- [ ] **Step 6: Écrire le test rouge d'agrégation Web**
+
+Dans `webAgent.test.ts`, importer `TokenUsage` puis remplacer le helper `turn` par :
+
+```ts
+function turn(
+  text: string,
+  toolCalls: ToolCall[] = [],
+  usage?: TokenUsage,
+): TurnResult {
+  return {
+    text,
+    toolCalls,
+    firstTokenMs: 5,
+    totalMs: 20,
+    ...(usage ? { usage } : {}),
+  }
+}
+```
+
+Ajouter les deux tests :
+
+```ts
+it("additionne l'usage lorsque tous les tours le fournissent", async () => {
+  const { input, call } = createHarness([
+    turn("", [searchCall("call-1")], { inputTokens: 100, outputTokens: 10 }),
+    turn("Réponse sourcée", [], { inputTokens: 160, outputTokens: 40 }),
+  ])
+  call.mockResolvedValueOnce({ content: "Résultat", sources: [] })
+
+  const result = await runWebAgent(input)
+
+  expect(result.usage).toEqual({ inputTokens: 260, outputTokens: 50 })
+})
+
+it("omet l'usage agrégé si un tour ne le fournit pas", async () => {
+  const { input, call } = createHarness([
+    turn("", [searchCall("call-1")], { inputTokens: 100, outputTokens: 10 }),
+    turn("Réponse sourcée"),
+  ])
+  call.mockResolvedValueOnce({ content: "Résultat", sources: [] })
+
+  const result = await runWebAgent(input)
+
+  expect(result.usage).toBeUndefined()
+})
+```
+
+- [ ] **Step 7: Implémenter l'agrégation complète ou l'absence d'usage**
+
+Dans `webAgent.ts`, importer `TokenUsage` et ajouter dans `runWebAgent` :
+
+```ts
+const reportedUsage: TokenUsage = { inputTokens: 0, outputTokens: 0 }
+let allTurnsReportedUsage = true
+
+const collectUsage = (result: TurnResult): void => {
+  if (!result.usage) {
+    allTurnsReportedUsage = false
+    return
+  }
+  reportedUsage.inputTokens += result.usage.inputTokens
+  reportedUsage.outputTokens += result.usage.outputTokens
+}
+```
+
+Appeler `collectUsage(result)` immédiatement après chaque `provider.runTurn`, y compris dans `runWithoutTools` et le tour final. Étendre `WebAgentResult` :
+
+```ts
+usage?: TokenUsage
+```
+
+Remplacer `finalResult` par :
+
+```ts
+function finalResult(
+  result: TurnResult,
+  sources: Map<string, WebSource>,
+  started: number,
+  warning?: string,
+  usage?: TokenUsage,
+): WebAgentResult {
+  return {
+    text: result.text,
+    firstTokenMs: result.firstTokenMs,
+    totalMs: performance.now() - started,
+    sources: [...sources.values()],
+    ...(warning ? { warning } : {}),
+    ...(usage ? { usage } : {}),
+  }
+}
+```
+
+Après chaque `runTurn`, exécuter :
+
+```ts
+collectUsage(result)
+```
+
+Puis utiliser cette forme pour chaque retour final :
+
+```ts
+return finalResult(
+  result,
+  sources,
+  started,
+  warning,
+  allTurnsReportedUsage ? { ...reportedUsage } : undefined,
+)
+```
+
+- [ ] **Step 8: Exécuter les deux suites**
+
+Run:
+
+```bash
+npx vitest run src/lib/ai/openai-compat.test.ts src/lib/mcp/webAgent.test.ts
+```
+
+Expected: PASS.
+
+- [ ] **Step 9: Committer le contrat d'usage**
+
+```bash
+git add src/lib/ai/types.ts src/lib/ai/openai-compat.ts src/lib/ai/openai-compat.test.ts src/lib/mcp/webAgent.ts src/lib/mcp/webAgent.test.ts
+git commit -m "feat: remonte l usage des tours fournisseur"
+```
+
+---
+
+### Task 5: Produire des métriques honnêtes et un coût nullable
+
+**Files:**
+- Create: `src/lib/token/estimate.ts`
+- Create: `src/lib/token/estimate.test.ts`
+- Create: `src/lib/token/format.ts`
+- Create: `src/lib/token/format.test.ts`
+- Create: `src/lib/token/pricing.test.ts`
+- Modify: `src/lib/token/pricing.ts:20-99`
+- Modify: `src/lib/token/index.ts:1-2`
+
+- [ ] **Step 1: Écrire les tests rouges du tarif nullable**
+
+Créer `src/lib/token/pricing.test.ts` :
+
+```ts
+import { describe, expect, it } from "vitest"
+import { getModelPricing, getTiktokenModel } from "./pricing"
+
+describe("pricing", () => {
+  it("normalise le nom du fournisseur", () => {
+    expect(getModelPricing("OpenRouter", "openai/gpt-4o-mini")).toMatchObject({
+      input: 0.15,
+      output: 0.6,
+    })
+  })
+
+  it("ne fabrique aucun tarif pour un modèle inconnu", () => {
+    expect(getModelPricing("Serveur privé", "modele-inconnu")).toBeNull()
+  })
+
+  it("conserve un encodeur générique pour un modèle inconnu", () => {
+    expect(getTiktokenModel("Serveur privé", "modele-inconnu")).toBe("cl100k_base")
+  })
+})
+```
+
+- [ ] **Step 2: Confirmer l'échec sur le faux tarif générique**
+
+Run:
+
+```bash
+npx vitest run src/lib/token/pricing.test.ts
+```
+
+Expected: FAIL car `getModelPricing` retourne actuellement le tarif `default`.
+
+- [ ] **Step 3: Rendre le tarif nullable**
+
+Dans `pricing.ts`, ajouter :
+
+```ts
+function normalizeProvider(provider: string): string {
+  return provider.trim().toLowerCase()
+}
+```
+
+Remplacer les deux fonctions exportées par :
+
+```ts
+export function getModelPricing(provider: string, modelId: string): ModelPricing | null {
+  const providerPricing = MODEL_PRICING[normalizeProvider(provider)]
+  return providerPricing?.[modelId] ?? null
+}
+
+export function getTiktokenModel(provider: string, modelId: string): TiktokenModel {
+  return getModelPricing(provider, modelId)?.tiktokenModel ?? ("cl100k_base" as TiktokenModel)
+}
+```
+
+Le bloc `default` peut rester pour compatibilité de données, mais aucune fonction ne doit l'utiliser comme tarif réel.
+
+- [ ] **Step 4: Relancer les tests de pricing**
+
+Run:
+
+```bash
+npx vitest run src/lib/token/pricing.test.ts
+```
+
+Expected: PASS.
+
+- [ ] **Step 5: Écrire les tests rouges de l'estimateur**
+
+Créer `src/lib/token/estimate.test.ts` :
+
+```ts
+import { describe, expect, it } from "vitest"
+import { estimateTurnMetrics, metricsFromProviderUsage } from "./estimate"
+
+const messages = [
+  { role: "system" as const, content: "Tu aides." },
+  { role: "user" as const, content: "Bonjour" },
+]
+
+describe("turn metrics", () => {
+  it("marque le comptage local comme estimé", () => {
+    const metrics = estimateTurnMetrics(messages, "Réponse", "Serveur privé", "modele-inconnu")
+    expect(metrics.inputTokens).toBeGreaterThan(0)
+    expect(metrics.outputTokens).toBeGreaterThan(0)
+    expect(metrics.usageSource).toBe("estimated")
+    expect(metrics.costMicrousd).toBeNull()
+  })
+
+  it("utilise l'usage fournisseur et calcule le coût seulement si le tarif est connu", () => {
+    const metrics = metricsFromProviderUsage(
+      { inputTokens: 1_000, outputTokens: 500 },
+      "OpenRouter",
+      "openai/gpt-4o-mini",
+    )
+    expect(metrics).toEqual({
+      inputTokens: 1_000,
+      outputTokens: 500,
+      usageSource: "provider",
+      costMicrousd: 450_000,
+    })
+  })
+})
+```
+
+- [ ] **Step 6: Vérifier l'échec avant création de l'estimateur**
+
+Run:
+
+```bash
+npx vitest run src/lib/token/estimate.test.ts
+```
+
+Expected: FAIL car `estimate.ts` n'existe pas.
+
+- [ ] **Step 7: Implémenter l'estimateur avec libération de l'encodeur**
+
+Créer `src/lib/token/estimate.ts` :
+
+```ts
+import { encoding_for_model, get_encoding, type Tiktoken } from "@dqbd/tiktoken"
+import type { ChatMessage, TokenUsage } from "@/lib/ai/types"
+import type { TurnMetrics } from "./types"
+import { getModelPricing, getTiktokenModel } from "./pricing"
+
+function createEncoder(provider: string, modelId: string): Tiktoken {
+  const model = getTiktokenModel(provider, modelId)
+  try {
+    return encoding_for_model(model)
+  } catch {
+    return get_encoding("cl100k_base")
+  }
+}
+
+function calculateCostMicrousd(
+  usage: TokenUsage,
+  provider: string,
+  modelId: string,
+): number | null {
+  const pricing = getModelPricing(provider, modelId)
+  if (!pricing) return null
+  const usd =
+    (usage.inputTokens / 1_000) * pricing.input +
+    (usage.outputTokens / 1_000) * pricing.output
+  return Math.round(usd * 1_000_000)
+}
+
+export function metricsFromProviderUsage(
+  usage: TokenUsage,
+  provider: string,
+  modelId: string,
+): TurnMetrics {
+  return {
+    ...usage,
+    usageSource: "provider",
+    costMicrousd: calculateCostMicrousd(usage, provider, modelId),
+  }
+}
+
+export function estimateTurnMetrics(
+  messages: ChatMessage[],
+  output: string,
+  provider: string,
+  modelId: string,
+): TurnMetrics {
+  const encoder = createEncoder(provider, modelId)
+  try {
+    const inputTokens = messages.reduce(
+      (total, message) => total + encoder.encode(message.content).length,
+      0,
+    )
+    const outputTokens = encoder.encode(output).length
+    const usage = { inputTokens, outputTokens }
+    return {
+      ...usage,
+      usageSource: "estimated",
+      costMicrousd: calculateCostMicrousd(usage, provider, modelId),
+    }
+  } finally {
+    encoder.free()
+  }
+}
+```
+
+- [ ] **Step 8: Créer les formateurs sans hook React**
+
+Créer `src/lib/token/format.ts` :
+
+```ts
+export function formatCostMicrousd(costMicrousd: number): string {
+  const cost = costMicrousd / 1_000_000
+  if (cost < 0.0001) return "< $0.0001"
+  if (cost < 0.01) return `$${cost.toFixed(4)}`
+  if (cost < 1) return `$${cost.toFixed(3)}`
+  return `$${cost.toFixed(2)}`
+}
+
+export function formatTokens(tokens: number): string {
+  if (tokens >= 1_000_000) return `${(tokens / 1_000_000).toFixed(1)}M`
+  if (tokens >= 1_000) return `${(tokens / 1_000).toFixed(1)}k`
+  return String(tokens)
+}
+```
+
+Créer `src/lib/token/format.test.ts` :
+
+```ts
+import { describe, expect, it } from "vitest"
+import { formatCostMicrousd, formatTokens } from "./format"
+
+describe("token formatters", () => {
+  it("convertit les microdollars en dollars avant formatage", () => {
+    expect(formatCostMicrousd(450)).toBe("$0.0005")
+    expect(formatCostMicrousd(450_000)).toBe("$0.450")
+  })
+
+  it("compacte les volumes de tokens", () => {
+    expect(formatTokens(1_200)).toBe("1.2k")
+    expect(formatTokens(120)).toBe("120")
+  })
+})
+```
+
+Remplacer `src/lib/token/index.ts` par :
+
+```ts
+export * from "./estimate"
+export * from "./format"
+export * from "./pricing"
+export * from "./types"
+```
+
+- [ ] **Step 9: Exécuter les tests token**
+
+Run:
+
+```bash
+npx vitest run src/lib/token/pricing.test.ts src/lib/token/estimate.test.ts src/lib/token/format.test.ts
+```
+
+Expected: PASS.
+
+- [ ] **Step 10: Committer l'estimation honnête**
+
+```bash
+git add src/lib/token/estimate.ts src/lib/token/estimate.test.ts src/lib/token/format.ts src/lib/token/format.test.ts src/lib/token/pricing.ts src/lib/token/pricing.test.ts src/lib/token/types.ts src/lib/token/index.ts
+git commit -m "fix: rend les métriques de coût honnêtes"
+```
+
+---
+
+### Task 6: Extraire la construction actuelle du contexte
+
+**Files:**
+- Create: `src/lib/chat/contextBuilder.ts`
+- Create: `src/lib/chat/contextBuilder.test.ts`
+- Modify later: `src/hooks/useChat.ts`
+
+- [ ] **Step 1: Écrire les tests rouges du builder pur**
+
+Créer `src/lib/chat/contextBuilder.test.ts` :
+
+```ts
+import { describe, expect, it } from "vitest"
+import { buildChatMessages } from "./contextBuilder"
+
+describe("buildChatMessages", () => {
+  it("place le système avant l'historique et attache les images au dernier user", () => {
+    const result = buildChatMessages({
+      system: "SYSTEM",
+      history: [
+        { role: "user", content: "Question" },
+        { role: "assistant", content: "Réponse" },
+        { role: "user", content: "Capture" },
+      ],
+      currentImages: [{ base64: "AAAA", mimeType: "image/png" }],
+    })
+    expect(result).toEqual([
+      { role: "system", content: "SYSTEM" },
+      { role: "user", content: "Question" },
+      { role: "assistant", content: "Réponse" },
+      {
+        role: "user",
+        content: "Capture",
+        images: [{ base64: "AAAA", mimeType: "image/png" }],
+      },
+    ])
+  })
+
+  it("omet le système vide et ne mute pas l'historique source", () => {
+    const history = [{ role: "user" as const, content: "Question" }]
+    const result = buildChatMessages({ system: "  ", history, currentImages: [] })
+    expect(result).toEqual([{ role: "user", content: "Question" }])
+    expect(history[0]).toEqual({ role: "user", content: "Question" })
+  })
+})
+```
+
+- [ ] **Step 2: Confirmer l'échec du module absent**
+
+Run:
+
+```bash
+npx vitest run src/lib/chat/contextBuilder.test.ts
+```
+
+Expected: FAIL car `contextBuilder.ts` n'existe pas.
+
+- [ ] **Step 3: Implémenter le builder sans politique de troncature**
+
+Créer `src/lib/chat/contextBuilder.ts` :
+
+```ts
+import type { ChatMessage } from "@/lib/ai/types"
+
+interface HistoryMessage {
+  role: "user" | "assistant"
+  content: string
+}
+
+interface BuildChatMessagesInput {
+  system: string
+  history: HistoryMessage[]
+  currentImages: NonNullable<ChatMessage["images"]>
+}
+
+export function buildChatMessages(input: BuildChatMessagesInput): ChatMessage[] {
+  const messages: ChatMessage[] = [
+    ...(input.system.trim()
+      ? [{ role: "system" as const, content: input.system }]
+      : []),
+    ...input.history.map((message) => ({ ...message })),
+  ]
+  if (input.currentImages.length === 0) return messages
+
+  for (let index = messages.length - 1; index >= 0; index--) {
+    const message = messages[index]
+    if (message.role !== "user") continue
+    messages[index] = { ...message, images: [...input.currentImages] }
+    break
+  }
+  return messages
+}
+```
+
+- [ ] **Step 4: Relancer les tests du builder**
+
+Run:
+
+```bash
+npx vitest run src/lib/chat/contextBuilder.test.ts
+```
+
+Expected: PASS.
+
+- [ ] **Step 5: Committer l'unité pure**
+
+```bash
+git add src/lib/chat/contextBuilder.ts src/lib/chat/contextBuilder.test.ts
+git commit -m "refactor: extrait la construction du contexte chat"
+```
+
+---
+
+### Task 7: Extraire `TurnRunner`
+
+**Files:**
+- Create: `src/lib/chat/turnRunner.ts`
+- Create: `src/lib/chat/turnRunner.test.ts`
+- Uses: `src/lib/mcp/webAgent.ts`
+- Uses: `src/lib/ai/openai-compat.ts`
+
+- [ ] **Step 1: Écrire les tests rouges des chemins direct et Web**
+
+Créer `src/lib/chat/turnRunner.test.ts` :
+
+```ts
+import { describe, expect, it, vi } from "vitest"
+import { runAssistantTurn } from "./turnRunner"
+
+const request = { messages: [{ role: "user" as const, content: "Question" }] }
+const signal = new AbortController().signal
+
+describe("runAssistantTurn", () => {
+  it("retourne un résultat uniforme pour un tour direct", async () => {
+    const provider = {
+      runTurn: vi.fn().mockResolvedValue({
+        text: "Réponse",
+        toolCalls: [],
+        firstTokenMs: 12,
+        totalMs: 40,
+        usage: { inputTokens: 10, outputTokens: 4 },
+      }),
+    }
+    const result = await runAssistantTurn({
+      provider: provider as never,
+      request,
+      apiKey: "secret",
+      modelId: "model",
+      callbacks: {},
+      signal,
+    })
+    expect(result).toMatchObject({
+      text: "Réponse",
+      sources: [],
+      firstTokenMs: 12,
+      usage: { inputTokens: 10, outputTokens: 4 },
+    })
+    expect(provider.runTurn).toHaveBeenCalledWith(
+      request,
+      "secret",
+      "model",
+      {},
+      {},
+      signal,
+    )
+  })
+
+  it("délègue le chemin Web au runner injecté", async () => {
+    const runWeb = vi.fn().mockResolvedValue({
+      text: "Réponse Web",
+      sources: [{ url: "https://example.com", origin: "search" }],
+      firstTokenMs: 15,
+      totalMs: 90,
+    })
+    const webInput = { enabled: true } as never
+    const result = await runAssistantTurn({
+      provider: {} as never,
+      request,
+      apiKey: "secret",
+      modelId: "model",
+      callbacks: {},
+      signal,
+      web: webInput,
+      runWeb,
+    })
+    expect(runWeb).toHaveBeenCalledWith(webInput)
+    expect(result.text).toBe("Réponse Web")
+  })
+
+  it("laisse remonter une erreur ou une annulation", async () => {
+    const abort = new DOMException("aborted", "AbortError")
+    const provider = { runTurn: vi.fn().mockRejectedValue(abort) }
+    await expect(runAssistantTurn({
+      provider: provider as never,
+      request,
+      apiKey: "secret",
+      modelId: "model",
+      callbacks: {},
+      signal,
+    })).rejects.toBe(abort)
+  })
+})
+```
+
+- [ ] **Step 2: Confirmer l'échec du module absent**
+
+Run:
+
+```bash
+npx vitest run src/lib/chat/turnRunner.test.ts
+```
+
+Expected: FAIL car `turnRunner.ts` n'existe pas.
+
+- [ ] **Step 3: Implémenter le runner sans persistance ni état React**
+
+Créer `src/lib/chat/turnRunner.ts` :
+
+```ts
+import type { IProvider } from "@/lib/ai/openai-compat"
+import type { ChatRequest, TokenUsage, TurnCallbacks } from "@/lib/ai/types"
+import { runWebAgent, type WebAgentInput, type WebAgentResult } from "@/lib/mcp/webAgent"
+import type { WebSource } from "@/lib/mcp/types"
+
+export interface AssistantTurnResult {
+  text: string
+  firstTokenMs: number
+  totalMs: number
+  sources: WebSource[]
+  warning?: string
+  usage?: TokenUsage
+}
+
+interface RunAssistantTurnInput {
+  provider: IProvider
+  request: ChatRequest
+  apiKey: string
+  modelId: string
+  callbacks: TurnCallbacks
+  signal: AbortSignal
+  web?: WebAgentInput
+  runWeb?: (input: WebAgentInput) => Promise<WebAgentResult>
+}
+
+export async function runAssistantTurn(
+  input: RunAssistantTurnInput,
+): Promise<AssistantTurnResult> {
+  if (input.web) {
+    const result = await (input.runWeb ?? runWebAgent)(input.web)
+    return result
+  }
+  const result = await input.provider.runTurn(
+    input.request,
+    input.apiKey,
+    input.modelId,
+    {},
+    input.callbacks,
+    input.signal,
+  )
+  return {
+    text: result.text,
+    firstTokenMs: result.firstTokenMs,
+    totalMs: result.totalMs,
+    sources: [],
+    ...(result.usage ? { usage: result.usage } : {}),
+  }
+}
+```
+
+- [ ] **Step 4: Relancer les tests du runner**
+
+Run:
+
+```bash
+npx vitest run src/lib/chat/turnRunner.test.ts
+```
+
+Expected: PASS.
+
+- [ ] **Step 5: Committer le runner isolé**
+
+```bash
+git add src/lib/chat/turnRunner.ts src/lib/chat/turnRunner.test.ts
+git commit -m "refactor: extrait l execution d un tour chat"
+```
+
+---
+
+### Task 8: Intégrer le builder et le runner dans `useChat`
+
+**Files:**
+- Modify: `src/hooks/useChat.ts:1-416`
+- Modify: `src/hooks/useChat.test.tsx:8-386`
+- Uses: `src/lib/chat/contextBuilder.ts`
+- Uses: `src/lib/chat/turnRunner.ts`
+- Uses: `src/lib/token/estimate.ts`
+
+- [ ] **Step 1: Adapter les mocks et écrire les assertions rouges**
+
+Dans `useChat.test.tsx`, remplacer `streamMock` par :
+
+```ts
+const runTurnMock = vi.hoisted(() => vi.fn())
+const estimateTurnMetricsMock = vi.hoisted(() => vi.fn(() => ({
+  inputTokens: 7,
+  outputTokens: 3,
+  usageSource: "estimated" as const,
+  costMicrousd: null,
+})))
+const metricsFromProviderUsageMock = vi.hoisted(() => vi.fn(() => ({
+  inputTokens: 40,
+  outputTokens: 10,
+  usageSource: "provider" as const,
+  costMicrousd: 12,
+})))
+```
+
+Ajouter le mock suivant avec les autres `vi.mock` :
+
+```ts
+vi.mock("@/lib/token", () => ({
+  estimateTurnMetrics: estimateTurnMetricsMock,
+  metricsFromProviderUsage: metricsFromProviderUsageMock,
+}))
+```
+
+Dans le mock de factory :
+
+```ts
+createProvider: () => ({
+  runTurn: runTurnMock,
+  stream: vi.fn(),
+  complete: vi.fn(),
+  testConnection: vi.fn(),
+}),
+```
+
+Dans `beforeEach` :
+
+```ts
+runTurnMock.mockResolvedValue({
+  text: "Réponse",
+  toolCalls: [],
+  firstTokenMs: 25,
+  totalMs: 100,
+  usage: { inputTokens: 40, outputTokens: 10 },
+})
+```
+
+Remplacer les attentes `streamMock` par `runTurnMock`. Ajouter au test de succès :
+
+```ts
+expect(messagesDb.insert).toHaveBeenCalledWith(expect.objectContaining({
+  role: "assistant",
+  first_token_ms: 25,
+  input_tokens: 40,
+  output_tokens: 10,
+  usage_source: "provider",
+  cost_microusd: 12,
+}))
+```
+
+Ajouter le test complet sans `usage` :
+
+```ts
+it("estime les métriques quand le fournisseur ne fournit pas usage", async () => {
+  runTurnMock.mockResolvedValueOnce({
+    text: "Réponse sans usage",
+    toolCalls: [],
+    firstTokenMs: 25,
+    totalMs: 100,
+  })
+  const { result } = renderHook(() => useChat(modelSelection))
+
+  await act(async () => expect(await result.current.send("conv-1", "Salut")).toBe(true))
+
+  expect(estimateTurnMetricsMock).toHaveBeenCalled()
+  expect(messagesDb.insert).toHaveBeenCalledWith(expect.objectContaining({
+    usage_source: "estimated",
+    input_tokens: 7,
+    output_tokens: 3,
+    cost_microusd: null,
+  }))
+})
+```
+
+Supprimer les deux tests qui appellent manuellement les anciens callbacks `onDone` et `onError`. Les remplacer par ces contrats au niveau du runner :
+
+```ts
+it("attend l'insert assistant avant de libérer busy", async () => {
+  let finishInsert: (() => void) | undefined
+  vi.mocked(messagesDb.insert)
+    .mockResolvedValueOnce("user-1")
+    .mockImplementationOnce(() => new Promise<string>((resolve) => {
+      finishInsert = () => resolve("assistant-1")
+    }))
+  const { result } = renderHook(() => useChat(modelSelection))
+
+  let sendPromise: Promise<boolean>
+  act(() => {
+    sendPromise = result.current.send("conv-1", "Salut")
+  })
+  await vi.waitFor(() => expect(finishInsert).toBeDefined())
+  expect(result.current.busy).toBe(true)
+
+  finishInsert?.()
+  await act(async () => expect(await sendPromise!).toBe(true))
+  expect(result.current.busy).toBe(false)
+})
+
+it("persiste une erreur rejetée par runTurn après l'insert user", async () => {
+  runTurnMock.mockRejectedValueOnce({ kind: "network", message: "fail" })
+  const { result } = renderHook(() => useChat(modelSelection))
+  await act(async () => expect(await result.current.send("conv-1", "Salut")).toBe(true))
+  expect(messagesDb.insert).toHaveBeenCalledWith(expect.objectContaining({
+    role: "assistant",
+    error: JSON.stringify({ kind: "network", message: "fail" }),
+  }))
+})
+```
+
+- [ ] **Step 2: Vérifier l'échec avant intégration**
+
+Run:
+
+```bash
+npx vitest run src/hooks/useChat.test.tsx
+```
+
+Expected: FAIL car `useChat` appelle encore `stream()` et ne persiste pas les métriques.
+
+- [ ] **Step 3: Importer les nouvelles unités**
+
+Ajouter en tête de `useChat.ts` :
+
+```ts
+import { buildChatMessages } from "@/lib/chat/contextBuilder"
+import { runAssistantTurn, type AssistantTurnResult } from "@/lib/chat/turnRunner"
+import { estimateTurnMetrics, metricsFromProviderUsage } from "@/lib/token"
+```
+
+Retirer l'import direct de `runWebAgent`.
+
+- [ ] **Step 4: Remplacer la construction manuelle de `apiMessages`**
+
+Après le chargement de `history`, remplacer la construction et la mutation du dernier message par :
+
+```ts
+const apiMessages = buildChatMessages({
+  system,
+  history: history.map((message) => ({
+    role: message.role,
+    content: message.content,
+  })),
+  currentImages: apiImages,
+})
+```
+
+- [ ] **Step 5: Étendre `persistDone` avec les métriques**
+
+Remplacer la fonction complète par :
+
+```ts
+const persistDone = (
+  result: AssistantTurnResult,
+  metrics: ReturnType<typeof estimateTurnMetrics>,
+) => {
+  const finalContent = result.text || accRef.current
+  return (async () => {
+    const id = await messagesDb.insert({
+      conversation_id: conversationId,
+      role: "assistant",
+      content: finalContent,
+      attachments: "[]",
+      model_label: label,
+      latency_ms: Math.round(result.totalMs),
+      error: null,
+      sources: JSON.stringify(result.sources),
+      first_token_ms: Math.round(result.firstTokenMs),
+      input_tokens: metrics.inputTokens,
+      output_tokens: metrics.outputTokens,
+      usage_source: metrics.usageSource,
+      cost_microusd: metrics.costMicrousd,
+    })
+    upsertLast({
+      id,
+      content: finalContent,
+      latencyMs: Math.round(result.totalMs),
+      firstTokenMs: Math.round(result.firstTokenMs),
+      inputTokens: metrics.inputTokens,
+      outputTokens: metrics.outputTokens,
+      usageSource: metrics.usageSource,
+      costMicrousd: metrics.costMicrousd ?? undefined,
+      sources: result.sources,
+      webWarning: result.warning,
+      webStatus: undefined,
+    })
+  })().catch(logger.error)
+}
+```
+
+- [ ] **Step 6: Unifier l'exécution directe et Web**
+
+Remplacer les deux branches d'exécution par :
+
+```ts
+try {
+  const web = webAccess.enabled && webAccess.configured
+    ? {
+        provider: apiProvider,
+        webClient: {
+          call: async (requestId: string, request: Parameters<typeof tinyfish.call>[1]) => {
+            mcpRequestRef.current = requestId
+            try {
+              return await tinyfish.call(requestId, request)
+            } finally {
+              if (mcpRequestRef.current === requestId) mcpRequestRef.current = null
+            }
+          },
+        },
+        request: { messages: apiMessages },
+        apiKey,
+        modelId,
+        toolChoice: resolveWebChoice(fullContent, options.forceWeb ?? false),
+        callbacks: turnCallbacks,
+        signal: controller.signal,
+        requestId: assistantId,
+        compatibilityKey: `${provider.id}/${modelId}`,
+        unsupportedTools: unsupportedToolsRef.current,
+        onStatus: (webStatus: WebStatus | undefined) => upsertLast({ webStatus }),
+      }
+    : undefined
+
+  const result = await runAssistantTurn({
+    provider: apiProvider,
+    request: { messages: apiMessages },
+    apiKey,
+    modelId,
+    callbacks: turnCallbacks,
+    signal: controller.signal,
+    ...(web ? { web } : {}),
+  })
+  if (controller.signal.aborted) throw controller.signal.reason
+  accRef.current = result.text
+  setWebToolsUnsupported(
+    unsupportedToolsRef.current.has(`${provider.id}/${modelId}`),
+  )
+  const metrics = result.usage
+    ? metricsFromProviderUsage(result.usage, provider.name, modelId)
+    : estimateTurnMetrics(apiMessages, result.text, provider.name, modelId)
+  await persistDone(result, metrics)
+} catch (error) {
+  await persistError(error)
+}
+```
+
+Laisser l'outer `try/catch/finally` et son contrat `return userPersisted` inchangés.
+
+- [ ] **Step 7: Étendre le VM et son mapping**
+
+Ajouter à `ChatMessageVM` :
+
+```ts
+firstTokenMs?: number
+inputTokens?: number
+outputTokens?: number
+usageSource?: "provider" | "estimated"
+costMicrousd?: number
+```
+
+Dans `mapRow`, ajouter :
+
+```ts
+firstTokenMs: r.first_token_ms ?? undefined,
+inputTokens: r.input_tokens ?? undefined,
+outputTokens: r.output_tokens ?? undefined,
+usageSource: r.usage_source ?? undefined,
+costMicrousd: r.cost_microusd ?? undefined,
+```
+
+Mettre à jour tous les fixtures `MessageRow` du test avec les cinq colonnes V6 à `null`, ou fournir un helper commun local au test.
+
+- [ ] **Step 8: Relancer les tests du hook et des unités extraites**
+
+Run:
+
+```bash
+npx vitest run src/hooks/useChat.test.tsx src/lib/chat/contextBuilder.test.ts src/lib/chat/turnRunner.test.ts
+```
+
+Expected: PASS. Les tests anti-perte, Web, interruption et persistance doivent rester verts.
+
+- [ ] **Step 9: Vérifier le typecheck avant commit**
+
+Run:
+
+```bash
+npx tsc --noEmit
+```
+
+Expected: PASS.
+
+- [ ] **Step 10: Committer l'intégration du runner**
+
+```bash
+git add src/hooks/useChat.ts src/hooks/useChat.test.tsx
+git commit -m "refactor: delegue les tours au moteur de chat"
+```
+
+---
+
+### Task 9: Afficher les métriques propres à chaque réponse
+
+**Files:**
+- Modify: `src/components/chat/ChatView.tsx:1-367`
+- Modify: `src/components/chat/ChatView.test.tsx:15-342`
+- Modify: `src/App.tsx:1-300`
+- Modify: `src/App.test.tsx`
+- Modify: `src/i18n/fr.ts:20-47`
+- Modify: `src/lib/token/index.ts`
+- Delete: `src/lib/token/useTokenCount.ts`
+
+- [ ] **Step 1: Écrire les tests rouges des métriques par message**
+
+Dans `ChatView.test.tsx`, remplacer le test qui active `activeModel` par les trois tests suivants :
+
+```ts
+it("affiche uniquement les métriques du message assistant concerné", () => {
+  render(<ChatView {...base} vm={[
+    msg({
+      role: "assistant",
+      content: "réponse A",
+      inputTokens: 1_000,
+      outputTokens: 200,
+      usageSource: "provider",
+      costMicrousd: 450,
+    }),
+    msg({ role: "assistant", content: "réponse B" }),
+  ]} />)
+  expect(screen.getByText("1.2k tokens")).toBeTruthy()
+  expect(screen.getByText("$0.0005")).toBeTruthy()
+  expect(screen.getAllByText(/tokens/)).toHaveLength(1)
+})
+
+it("marque visuellement une estimation", () => {
+  render(<ChatView {...base} vm={[msg({
+    role: "assistant",
+    content: "réponse",
+    inputTokens: 100,
+    outputTokens: 20,
+    usageSource: "estimated",
+  })]} />)
+  expect(screen.getByText("≈ 120 tokens")).toBeTruthy()
+})
+
+it("n'affiche aucun faux coût quand il est inconnu", () => {
+  render(<ChatView {...base} vm={[msg({
+    role: "assistant",
+    content: "réponse",
+    inputTokens: 100,
+    outputTokens: 20,
+    usageSource: "estimated",
+  })]} />)
+  expect(screen.queryByText(/\$/)).toBeNull()
+})
+```
+
+Retirer `systemPrompt`, `activeModel` et `conversationId` de l'objet `base` si ces props ne servent plus après le refactor.
+
+- [ ] **Step 2: Confirmer l'échec de l'ancien compteur cumulatif**
+
+Run:
+
+```bash
+npx vitest run src/components/chat/ChatView.test.tsx
+```
+
+Expected: FAIL car `ChatView` ignore encore les métriques du VM et compte toute la conversation.
+
+- [ ] **Step 3: Retirer le comptage global de `ChatView`**
+
+Supprimer les imports suivants de `ChatView.tsx` :
+
+```ts
+useTokenCount
+knowledgeDb
+conversationKnowledge
+```
+
+Importer à la place :
+
+```ts
+import { formatCostMicrousd, formatTokens } from "@/lib/token"
+```
+
+Retirer des props `activeModel`, `systemPrompt` et `conversationId`, puis supprimer l'état `knowledgeContent` et l'appel `useTokenCount`.
+
+- [ ] **Step 4: Calculer la ligne locale à la bulle**
+
+Dans `MessageBubble`, calculer :
+
+```ts
+const totalTokens = m.inputTokens !== undefined && m.outputTokens !== undefined
+  ? m.inputTokens + m.outputTokens
+  : undefined
+const tokenLabel = totalTokens === undefined
+  ? undefined
+  : `${m.usageSource === "estimated" ? "≈ " : ""}${formatTokens(totalTokens)} ${t.chat.tokens}`
+```
+
+Remplacer la rangée cumulative par :
+
+```tsx
+{!isUser && m.content && (
+  <div className="mt-1 flex items-center gap-2 text-xs text-muted-foreground">
+    {m.modelLabel && <span>{m.modelLabel}</span>}
+    {m.firstTokenMs !== undefined && <span>{formatLatency(m.firstTokenMs)} {t.chat.firstToken}</span>}
+    {m.latencyMs !== undefined && <span>{formatLatency(m.latencyMs)}</span>}
+    {tokenLabel && <span title={m.usageSource === "estimated" ? t.chat.estimatedUsage : undefined}>{tokenLabel}</span>}
+    {m.costMicrousd !== undefined && <span>{formatCostMicrousd(m.costMicrousd)}</span>}
+    {m.inputTokens !== undefined && m.outputTokens !== undefined && (
+      <span className="text-[10px] opacity-60">
+        ({t.chat.inputShort}: {formatTokens(m.inputTokens)} / {t.chat.outputShort}: {formatTokens(m.outputTokens)})
+      </span>
+    )}
+    <button
+      type="button"
+      onClick={onCopyMessage}
+      aria-label={copied ? t.chat.messageCopied : t.chat.copyMessage}
+      className="ml-auto rounded-md p-1 text-muted-foreground hover:text-foreground focus-visible:text-foreground"
+    >
+      {copied ? (
+        <Check className="size-3.5 text-[var(--brand-to)]" aria-hidden="true" />
+      ) : (
+        <Copy className="size-3.5" aria-hidden="true" />
+      )}
+    </button>
+  </div>
+)}
+```
+
+Pour un assistant sans contenu, conserver l'absence de bouton. Limiter explicitement la rangée de copie autonome au rôle utilisateur :
+
+```tsx
+{m.content && isUser && (
+  <div className="mt-1 flex justify-end">
+    <button
+      type="button"
+      onClick={onCopyMessage}
+      aria-label={copied ? t.chat.messageCopied : t.chat.copyMessage}
+      className="rounded-md p-1 text-muted-foreground hover:text-foreground focus-visible:text-foreground"
+    >
+      {copied ? (
+        <Check className="size-3.5 text-[var(--brand-to)]" aria-hidden="true" />
+      ) : (
+        <Copy className="size-3.5" aria-hidden="true" />
+      )}
+    </button>
+  </div>
+)}
+```
+
+Supprimer l'ancienne rangée modèle/latence afin de ne pas afficher les données deux fois.
+
+- [ ] **Step 5: Ajouter la chaîne i18n**
+
+Dans `src/i18n/fr.ts`, ajouter à `chat` :
+
+```ts
+estimatedUsage: "Estimation locale des tokens",
+tokens: "tokens",
+firstToken: "premier token",
+inputShort: "in",
+outputShort: "out",
+```
+
+- [ ] **Step 6: Simplifier `App` sans modifier son rendu**
+
+Dans `App.tsx` :
+
+- supprimer l'import `loadPromptSettings` ;
+- supprimer l'état `systemPrompt` et son effet de chargement ;
+- ne plus passer `activeModel`, `systemPrompt` et `conversationId` à `ChatView`.
+
+Le prompt réellement envoyé reste chargé dans `useChat` à chaque envoi ; ce retrait supprime seulement une seconde lecture devenue inutile pour l'ancien compteur.
+
+- [ ] **Step 7: Supprimer le hook cumulatif**
+
+Supprimer `src/lib/token/useTokenCount.ts`. Vérifier que `src/lib/token/index.ts` n'exporte plus ce fichier et que `grep` ne trouve aucun import :
+
+Run:
+
+```bash
+rg "useTokenCount|countTokens\(" src
+```
+
+Expected: aucune occurrence hors historique Git.
+
+- [ ] **Step 8: Exécuter les tests composants et App**
+
+Run:
+
+```bash
+npx vitest run src/components/chat/ChatView.test.tsx src/App.test.tsx
+```
+
+Expected: PASS. Le nombre de boutons Copier reste exactement celui attendu par les tests existants.
+
+- [ ] **Step 9: Committer la correction d'affichage**
+
+```bash
+git add src/components/chat/ChatView.tsx src/components/chat/ChatView.test.tsx src/App.tsx src/App.test.tsx src/i18n/fr.ts src/lib/token/index.ts src/lib/token/format.ts
+git rm src/lib/token/useTokenCount.ts
+git commit -m "fix: affiche les métriques propres a chaque réponse"
+```
+
+---
+
+### Task 10: Vérifier le palier 1 et préparer la revue
+
+**Files:**
+- Verify: all files changed by Tasks 2-9
+- Inspect: `src/console-log.guard.test.ts`
+- Inspect: `src/brand-color.guard.test.ts`
+
+- [ ] **Step 1: Exécuter les suites ciblées du palier**
+
+Run:
+
+```bash
+npx vitest run src/lib/db/migrations.test.ts src/lib/db/messages.test.ts src/lib/ai/openai-compat.test.ts src/lib/mcp/webAgent.test.ts src/lib/token/pricing.test.ts src/lib/token/estimate.test.ts src/lib/token/format.test.ts src/lib/chat/contextBuilder.test.ts src/lib/chat/turnRunner.test.ts src/hooks/useChat.test.tsx src/components/chat/ChatView.test.tsx src/App.test.tsx
+```
+
+Expected: PASS.
+
+- [ ] **Step 2: Exécuter tous les tests TypeScript**
+
+Run:
+
+```bash
+npm run test
+```
+
+Expected: tous les tests passent, y compris i18n, `console.log`, couleurs et sécurité Markdown.
+
+- [ ] **Step 3: Exécuter le build frontend complet sous WSL**
+
+Run:
+
+```bash
+npm run build
+```
+
+Expected: `tsc`, Vitest et Vite passent sans avertissement bloquant.
+
+- [ ] **Step 4: Vérifier les changements interdits**
+
+Run:
+
+```bash
+git diff feat/m1-socle-chat...HEAD -- src-tauri src/assets src/index.css tailwind.config.js
+```
+
+Expected: aucun changement. Le palier 1 ne modifie ni Rust, ni assets, ni palette, ni CSS global.
+
+- [ ] **Step 5: Vérifier qu'aucun binaire d'image ou secret n'a été ajouté**
+
+Run:
+
+```bash
+git diff feat/m1-socle-chat...HEAD -- src | rg "BLOB|base64.*INSERT|Authorization|Bearer|console\.log"
+```
+
+Expected: aucune nouvelle persistance d'image, aucun secret journalisé et aucun `console.log`.
+
+- [ ] **Step 6: Vérifier l'historique de commits du palier**
+
+Run:
+
+```bash
+git log --oneline feat/m1-socle-chat..HEAD
+```
+
+Expected: le commit de spécification suivi de commits cohérents et indépendants pour migration, repository, usage, estimation, contexte, runner, hook et UI.
+
+- [ ] **Step 7: Effectuer la validation Windows sans lancer d'installation depuis WSL**
+
+Depuis PowerShell Windows dans `C:\dev\LogAssist` :
+
+```powershell
+Set-Location C:\dev\LogAssist
+npm run build
+npm run tauri dev
+```
+
+Vérifications manuelles :
+
+1. envoyer un message texte sans Web ;
+2. envoyer un message avec Web activé ;
+3. interrompre un flux ;
+4. changer rapidement de conversation ;
+5. confirmer qu'une ancienne conversation V5 s'ouvre ;
+6. vérifier qu'une réponse affiche uniquement ses propres tokens ;
+7. vérifier qu'un modèle inconnu n'affiche aucun faux coût ;
+8. fermer et rouvrir LogAssist pour confirmer le comportement image inchangé.
+
+- [ ] **Step 8: Traiter toute anomalie finale comme une tâche TDD distincte**
+
+Si la validation révèle une anomalie, ne pas produire de commit générique. Ajouter au présent plan une sous-tâche nommée avec les chemins exacts, le test rouge, la commande d'échec, le correctif minimal, la commande de réussite et le commit associé. Ne pas commencer le palier 2 tant que cette sous-tâche et toutes les gates ne sont pas validées.
+
+---
+
+## Définition de terminé du palier 1
+
+- `useChat` ne choisit plus directement entre `provider.stream` et `runWebAgent`.
+- La construction du contexte actuel vit dans une fonction pure, sans encore le tronquer.
+- Chaque réponse assistant peut persister TTFT, durée, tokens, provenance et coût optionnel.
+- Un fournisseur qui rapporte l'usage est prioritaire ; sinon l'estimation locale est marquée comme telle.
+- Un modèle ou tarif inconnu n'affiche aucun faux coût.
+- `ChatView` ne charge plus les connaissances et ne recompte plus toute la conversation sous chaque bulle.
+- Le contrat anti-perte, l'interruption, le Web MCP, les sources et les images éphémères restent inchangés.
+- Aucun changement de palette, de shell ou d'identité visuelle n'est inclus.
+- Toutes les gates WSL et la validation Windows passent.
