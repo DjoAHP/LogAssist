@@ -233,11 +233,15 @@ describe("useChat.send — contract anti-perte", () => {
         id: "a1", conversation_id: "conv-1", role: "assistant", content: "A",
         attachments: "[]", model_label: null, latency_ms: null, error: null,
         sources: JSON.stringify([{ url: "https://example.com", origin: "search" }]),
+        first_token_ms: null, input_tokens: null, output_tokens: null,
+        usage_source: null, cost_microusd: null,
       },
       {
         id: "a2", conversation_id: "conv-1", role: "assistant", content: "B",
         attachments: "[]", model_label: null, latency_ms: null, error: null,
         sources: "{cassé",
+        first_token_ms: null, input_tokens: null, output_tokens: null,
+        usage_source: null, cost_microusd: null,
       },
     ])
     const { result } = renderHook(() => useChat(modelSelection))

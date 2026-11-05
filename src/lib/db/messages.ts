@@ -1,3 +1,5 @@
+import type { UsageSource } from "@/lib/token/types"
+
 import { execute, select } from "./database"
 
 export interface MessageRow {
@@ -10,9 +12,20 @@ export interface MessageRow {
   latency_ms: number | null
   error: string | null
   sources: string
+  first_token_ms: number | null
+  input_tokens: number | null
+  output_tokens: number | null
+  usage_source: UsageSource | null
+  cost_microusd: number | null
 }
 
-type MessageInsert = Omit<MessageRow, "id" | "sources"> & { sources?: string }
+type MetricColumns = Pick<
+  MessageRow,
+  "first_token_ms" | "input_tokens" | "output_tokens" | "usage_source" | "cost_microusd"
+>
+
+type MessageInsert = Omit<MessageRow, "id" | "sources" | keyof MetricColumns> &
+  Partial<MetricColumns> & { sources?: string }
 
 export const messages = {
   // rowid = ordre d'insertion physique : garantie l'ordre chronologique sans colonne dédiée.
@@ -21,12 +34,20 @@ export const messages = {
       "SELECT * FROM messages WHERE conversation_id = ? ORDER BY rowid ASC",
       [conversationId],
     )
-    return rows.map((row) => ({ ...row, sources: row.sources ?? "[]" }))
+    return rows.map((row) => ({
+      ...row,
+      sources: row.sources ?? "[]",
+      first_token_ms: row.first_token_ms ?? null,
+      input_tokens: row.input_tokens ?? null,
+      output_tokens: row.output_tokens ?? null,
+      usage_source: row.usage_source ?? null,
+      cost_microusd: row.cost_microusd ?? null,
+    }))
   },
   async insert(row: MessageInsert): Promise<string> {
     const id = crypto.randomUUID()
     await execute(
-      "INSERT INTO messages (id, conversation_id, role, content, attachments, model_label, latency_ms, error, sources) VALUES (?,?,?,?,?,?,?,?,?)",
+      "INSERT INTO messages (id, conversation_id, role, content, attachments, model_label, latency_ms, error, sources, first_token_ms, input_tokens, output_tokens, usage_source, cost_microusd) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
       [
         id,
         row.conversation_id,
@@ -37,6 +58,11 @@ export const messages = {
         row.latency_ms,
         row.error,
         row.sources ?? "[]",
+        row.first_token_ms ?? null,
+        row.input_tokens ?? null,
+        row.output_tokens ?? null,
+        row.usage_source ?? null,
+        row.cost_microusd ?? null,
       ],
     )
     return id
