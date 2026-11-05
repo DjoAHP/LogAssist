@@ -276,8 +276,9 @@ function MessageBubble({
           <pre className="whitespace-pre-wrap font-sans text-sm">{m.content}</pre>
         )}
         {m.content && (
-          // Toujours visible (choix utilisateur) : pas de opacity-0/hover.
-          <div className={`mt-1 flex ${isUser ? "justify-end" : "justify-start"}`}>
+          // Toujours visible (choix utilisateur), aligne à droite pour les
+          // deux rôles : l'icône vit en bas à droite de la bulle.
+          <div className="mt-1 flex justify-end">
             <button
               type="button"
               onClick={onCopyMessage}
