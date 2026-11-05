@@ -68,8 +68,18 @@ export function McpDialog({ onClose, onChanged }: Props) {
   }
 
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center bg-black/55 p-4" role="presentation">
-      <section role="dialog" aria-modal="true" aria-labelledby="mcp-title" className="w-full max-w-lg rounded-xl border border-border bg-background shadow-2xl">
+    <div
+      className="fixed inset-0 z-50 grid place-items-center bg-black/55 p-4"
+      role="presentation"
+      onClick={onClose}
+    >
+      <section
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="mcp-title"
+        className="w-full max-w-lg rounded-xl border border-border bg-background shadow-2xl"
+        onClick={(event) => event.stopPropagation()}
+      >
         <header className="flex items-start justify-between border-b border-border px-5 py-4">
           <div>
             <h2 id="mcp-title" className="text-base font-semibold">{t.mcp.title}</h2>

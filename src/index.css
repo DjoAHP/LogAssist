@@ -151,8 +151,9 @@
 
 /* Bicolore LogAssist : dégradé de marque sur l'anneau de pagination */
 :root {
-  --brand-from: #d64627;
+  --brand-from: #9fbfd6;
   --brand-to: #27c8d6;
+  --brand-foreground: #000000;
 }
 
 /* Logo du header : l'image seule, sans fond (dégradé retiré à la demande) */

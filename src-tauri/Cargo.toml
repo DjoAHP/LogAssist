@@ -1,6 +1,6 @@
 [package]
 name = "logassist"
-version = "2.5.1"
+version = "2.5.2"
 description = "LogAssist — assistant IA pour apprendre des logiciels"
 authors = ["DjoAHP"]
 edition = "2024"

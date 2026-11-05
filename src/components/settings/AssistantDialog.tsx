@@ -196,7 +196,7 @@ export function AssistantDialog({ onClose, conversationId }: Props) {
         <div className="mb-4 flex items-center gap-2">
           <button
             onClick={() => void savePrompt().catch(logger.error)}
-            className="rounded-md bg-brand-from px-3 py-1.5 text-sm text-white hover:opacity-90"
+            className="rounded-md bg-brand-from px-3 py-1.5 text-sm text-brand-foreground hover:opacity-90"
           >
             {t.assistant.savePrompt}
           </button>
@@ -359,7 +359,7 @@ export function AssistantDialog({ onClose, conversationId }: Props) {
                 <button
                   disabled={form.name.trim() === ""}
                   onClick={saveKnowledge}
-                  className="rounded-md bg-brand-from px-3 py-1.5 text-sm text-white hover:opacity-90 disabled:opacity-50"
+                  className="rounded-md bg-brand-from px-3 py-1.5 text-sm text-brand-foreground hover:opacity-90 disabled:opacity-50"
                 >
                   {t.assistant.saveKnowledge}
                 </button>
@@ -419,7 +419,7 @@ export function AssistantDialog({ onClose, conversationId }: Props) {
                 </button>
                 <button
                   onClick={saveOverrides}
-                  className="rounded-md bg-brand-from px-3 py-1.5 text-sm text-white hover:opacity-90"
+                  className="rounded-md bg-brand-from px-3 py-1.5 text-sm text-brand-foreground hover:opacity-90"
                 >
                   {t.assistant.saveOverrides}
                 </button>

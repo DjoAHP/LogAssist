@@ -34,6 +34,17 @@ export function ChevronIcon(props: IconProps) {
   )
 }
 
+export function EpinglerIcon(props: IconProps) {
+  return (
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" {...props}>
+      {/* Source Illustrator : src/icons/svg/epingler.svg */}
+      <path d="M20.75,9.75c0,4.83-3.93,8.75-8.75,8.75S3.25,14.58,3.25,9.75,7.17,1,12,1s8.75,3.93,8.75,8.75ZM5.73,9.75c0,3.46,2.81,6.27,6.27,6.27s6.27-2.81,6.27-6.27-2.81-6.27-6.27-6.27-6.27,2.81-6.27,6.27Z" />
+      <path d="M7.84,18.88l4.09,4.09s.1.04.14,0l4.09-4.09h0c-2.71.87-5.59.66-8.32,0h0Z" />
+      <circle cx="12" cy="9.75" r="1.85" />
+    </svg>
+  )
+}
+
 export function ReglageIcon(props: IconProps) {
   return (
     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" {...props}>

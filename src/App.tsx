@@ -232,7 +232,7 @@ function App() {
             onClick={toggleDark}
             className="rounded-md p-1.5 hover:bg-foreground/5 transition-colors"
           >
-            {isDark ? <Moon className="size-4" /> : <Sun className="size-4" />}
+            {isDark ? <Moon className="size-[22px]" /> : <Sun className="size-[22px]" />}
           </button>
           {/* Séparateur discret */}
            <div className="w-px h-5 bg-border mx-1" aria-hidden="true" />

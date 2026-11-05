@@ -15,6 +15,7 @@ export default {
         brand: {
           from: "var(--brand-from)",
           to: "var(--brand-to)",
+          foreground: "var(--brand-foreground)",
         },
       },
     },

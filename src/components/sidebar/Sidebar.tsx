@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react"
-import { Plus, Search, Trash2, Edit2, GripVertical, Pin, PinOff, X } from "lucide-react"
-import { ChevronIcon } from "@/icons"
+import { Plus, Search, Trash2, Edit2, GripVertical, X } from "lucide-react"
+import { ChevronIcon, EpinglerIcon } from "@/icons"
 import { t } from "@/i18n/fr"
 import type { ConversationRow } from "@/lib/db/conversations"
 
@@ -336,12 +336,12 @@ export function Sidebar({
                       aria-pressed={c.pinned === 0 ? "false" : "true"}
                       className={`rounded p-1 hover:bg-foreground/10 focus-visible:bg-foreground/10 ${
                         c.pinned === 1
-                          ? "opacity-100 text-[#D64627]"
+                          ? "opacity-100 text-brand-from"
                           : "opacity-0 group-hover:opacity-100 focus-visible:opacity-100 transition-opacity"
                       }`}
                       title={c.pinned === 0 ? t.sidebar.pin : t.sidebar.unpin}
                     >
-                      {c.pinned === 0 ? <Pin className="size-3.5" /> : <PinOff className="size-3.5" />}
+                      <EpinglerIcon className="size-3.5" />
                     </button>
                   </div>
                 </>

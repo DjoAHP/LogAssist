@@ -112,8 +112,11 @@ src-tauri/
 ### Conventions
 
 - Commentaires en français, qui tracent les *invariants* (gates, séquencement), pas le code.
-- Couleurs de marque : **#D64627** (orange) et **#27C8D6** (cyan) — variables
+- Couleurs de marque : **#9FBFD6** (bleu gris) et **#27C8D6** (cyan) — variables
   `--brand-from`/`--brand-to` dans `src/index.css`. À utiliser pour tout accent UI.
+  Ne pas réintroduire d'orange dans les nouveaux éléments d'interface.
+  Tout bouton `bg-brand-from` doit aussi utiliser `text-brand-foreground`
+  (`#000000`) afin de garantir un texte noir sur cet accent clair.
 - Tests : nommer le comportement, pas l'implémentation ; TDD (test d'abord, vu rouge,
   puis code minimal). jsdom via commentaire `// @vitest-environment jsdom` par fichier.
 

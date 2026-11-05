@@ -26,6 +26,21 @@ afterEach(() => {
 })
 
 describe("McpDialog", () => {
+  it("ferme la modale quand on clique sur l'overlay", () => {
+    const onClose = vi.fn()
+    render(<McpDialog onClose={onClose} onChanged={vi.fn()} />)
+    const dialog = screen.getByRole("dialog")
+    fireEvent.click(dialog.parentElement!)
+    expect(onClose).toHaveBeenCalledTimes(1)
+  })
+
+  it("ne ferme pas la modale quand on clique dans son contenu", () => {
+    const onClose = vi.fn()
+    render(<McpDialog onClose={onClose} onChanged={vi.fn()} />)
+    fireEvent.click(screen.getByRole("dialog"))
+    expect(onClose).not.toHaveBeenCalled()
+  })
+
   it("affiche TinyFish non configuré sans clé préremplie", async () => {
     render(<McpDialog onClose={vi.fn()} onChanged={vi.fn()} />)
     expect(await screen.findByText("Non configuré")).toBeTruthy()
