@@ -191,6 +191,9 @@ function MessageBubble({
     navigator.clipboard
       .writeText(m.content)
       .then(() => {
+        // Second clic rapproché : annule le timer du premier — le feedback
+        // reste plein 1,5 s après le DERNIER clic, jamais expiré en avance.
+        if (copyTimer.current !== undefined) window.clearTimeout(copyTimer.current)
         setCopied(true)
         copyTimer.current = window.setTimeout(() => setCopied(false), 1500)
       })

@@ -245,4 +245,81 @@ describe("ChatView — bouton copier du message", () => {
     render(<ChatView {...base} vm={[msg({ role: "assistant", content: "" })]} />)
     expect(screen.queryByRole("button", { name: "Copier le message" })).toBeNull()
   })
+
+  it("un second clic réinitialise le minuteur de fin de feedback", async () => {
+    const user = userEvent.setup()
+    const writeText = vi.spyOn(navigator.clipboard, "writeText").mockResolvedValue(undefined)
+    // Spies en pass-through : le setTimeout de 1500 ms est le nôtre (les
+    // délais internes de userEvent sont à 0/50) ; on enregistre aussi les
+    // clearTimeout pour vérifier la réinitialisation, sans asphyxier
+    // userEvent (les appels restent délégués aux timers réels).
+    const origSetTimeout = window.setTimeout.bind(window)
+    const origClearTimeout = window.clearTimeout.bind(window)
+    let ourTimer: number | null = null
+    const cleared = new Set<number>()
+    const setTimeoutSpy = vi
+      .spyOn(window, "setTimeout")
+      .mockImplementation(((cb: TimerHandler, ms?: number) => {
+        const id = origSetTimeout(cb, ms) as unknown as number
+        if (ms === 1500) ourTimer = id
+        return id
+      }) as unknown as typeof window.setTimeout)
+    const clearTimeoutSpy = vi
+      .spyOn(window, "clearTimeout")
+      .mockImplementation(((id?: number) => {
+        if (id !== undefined && id !== null) cleared.add(id)
+        return origClearTimeout(id as unknown as Parameters<typeof origClearTimeout>[0])
+      }) as unknown as typeof window.clearTimeout)
+    try {
+      render(<ChatView {...base} vm={[msg({ role: "assistant", content: "réponse" })]} />)
+      await user.click(screen.getByRole("button", { name: "Copier le message" }))
+      expect(ourTimer).not.toBeNull()
+      const firstTimer = ourTimer as number
+      // Le nom accessible a basculé pendant le feedback : le second clic
+      // vise le bouton tel qu'il est rendu à ce moment-là.
+      await user.click(screen.getByRole("button", { name: "Message copié" }))
+      // Le setTimeout du second clic écrase ourTimer : c'est le PREMIER
+      // id qui doit être nettoyé au second clic.
+      ourTimer = firstTimer
+      expect(cleared.has(ourTimer)).toBe(true)
+    } finally {
+      setTimeoutSpy.mockRestore()
+      clearTimeoutSpy.mockRestore()
+    }
+  })
+
+  it("le minuteur est nettoyé au démontage (pas de setState fantôme)", async () => {
+    const user = userEvent.setup()
+    const writeText = vi.spyOn(navigator.clipboard, "writeText").mockResolvedValue(undefined)
+    const origSetTimeout = window.setTimeout.bind(window)
+    const origClearTimeout = window.clearTimeout.bind(window)
+    let ourTimer: number | null = null
+    const cleared = new Set<number>()
+    const setTimeoutSpy = vi
+      .spyOn(window, "setTimeout")
+      .mockImplementation(((cb: TimerHandler, ms?: number) => {
+        const id = origSetTimeout(cb, ms) as unknown as number
+        if (ms === 1500) ourTimer = id
+        return id
+      }) as unknown as typeof window.setTimeout)
+    const clearTimeoutSpy = vi
+      .spyOn(window, "clearTimeout")
+      .mockImplementation(((id?: number) => {
+        if (id !== undefined && id !== null) cleared.add(id)
+        return origClearTimeout(id as unknown as Parameters<typeof origClearTimeout>[0])
+      }) as unknown as typeof window.clearTimeout)
+    try {
+      const { unmount } = render(<ChatView {...base} vm={[msg({ role: "assistant", content: "réponse" })]} />)
+      await user.click(screen.getByRole("button", { name: "Copier le message" }))
+      expect(screen.getByRole("button", { name: "Message copié" })).toBeTruthy()
+      expect(ourTimer).not.toBeNull()
+      unmount()
+      // Le cleanup useEffect doit avoir annulé le setTimeout — sinon
+      // setCopied partirait sur un composant démonté à l'expiration.
+      expect(cleared.has(ourTimer as number)).toBe(true)
+    } finally {
+      setTimeoutSpy.mockRestore()
+      clearTimeoutSpy.mockRestore()
+    }
+  })
 })
