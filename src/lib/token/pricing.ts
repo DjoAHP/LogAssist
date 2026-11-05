@@ -2,14 +2,14 @@ import { TiktokenModel } from "@dqbd/tiktoken"
 
 /**
  * Configuration du pricing par provider et modèle.
- * Prix en USD par 1 000 tokens (input / output).
+ * Prix en USD par 1 000 000 tokens (input / output).
  * Sources : tarifs publics OpenAI, Anthropic, Google, OpenRouter (approx.).
  * À maintenir à jour selon les changements de tarifs.
  */
 
 export interface ModelPricing {
-  input: number   // $ per 1k tokens
-  output: number  // $ per 1k tokens
+  input: number   // USD par million de tokens d'entrée
+  output: number  // USD par million de tokens de sortie
   tiktokenModel?: TiktokenModel  // modèle tiktoken pour encodage exact
 }
 
@@ -69,31 +69,32 @@ export const MODEL_PRICING: Record<string, ProviderPricing> = {
   },
 }
 
+function normalizeProvider(provider: string): string {
+  return provider.trim().toLowerCase()
+}
+
 /**
- * Récupère le pricing pour un modèle donné.
- * Essaie dans l'ordre : provider explicite → openrouter → default.
+ * Récupère uniquement un tarif explicitement associé au fournisseur et au modèle.
  */
-export function getModelPricing(providerId: string, modelId: string): ModelPricing {
-  // 1. Essayer le provider exact
-  const providerPricing = MODEL_PRICING[providerId]
-  if (providerPricing && providerPricing[modelId]) {
-    return providerPricing[modelId]
-  }
+export function getModelPricing(provider: string, modelId: string): ModelPricing | null {
+  const normalizedProvider = normalizeProvider(provider)
+  if (normalizedProvider === "openrouter" || normalizedProvider === "default") return null
 
-  // 2. Essayer OpenRouter (souvent utilisé comme passerelle)
-  const orPricing = MODEL_PRICING.openrouter[modelId]
-  if (orPricing) {
-    return orPricing
-  }
-
-  // 3. Fallback default
-  return MODEL_PRICING.default.default
+  const providerPricing = MODEL_PRICING[normalizedProvider]
+  return providerPricing?.[modelId] ?? null
 }
 
 /**
  * Retourne le modèle tiktoken à utiliser pour l'encodage.
  */
-export function getTiktokenModel(providerId: string, modelId: string): TiktokenModel {
-  const pricing = getModelPricing(providerId, modelId)
-  return pricing.tiktokenModel ?? ("cl100k_base" as TiktokenModel)
+export function getTiktokenModel(provider: string, modelId: string): TiktokenModel {
+  const providerPricing = MODEL_PRICING[normalizeProvider(provider)]?.[modelId]
+  if (providerPricing?.tiktokenModel) return providerPricing.tiktokenModel
+
+  for (const pricing of Object.values(MODEL_PRICING)) {
+    const knownModel = pricing[modelId]
+    if (knownModel?.tiktokenModel) return knownModel.tiktokenModel
+  }
+
+  return "cl100k_base" as TiktokenModel
 }

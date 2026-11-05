@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react"
 import { encoding_for_model, get_encoding, Tiktoken } from "@dqbd/tiktoken"
-import { getModelPricing, getTiktokenModel } from "./pricing"
+import { getModelPricing, getTiktokenModel, MODEL_PRICING } from "./pricing"
 
 interface TokenCountResult {
   inputTokens: number
@@ -54,9 +54,12 @@ export function useTokenCount(
     }
   }, [tiktokenModel, wasmReady])
 
+  useEffect(() => () => encoder?.free(), [encoder])
+
   // Pricing
+  // Pont de compatibilité de l'ancien compteur cumulatif, supprimé avec ce hook à la tâche UI.
   const pricing = useMemo(
-    () => getModelPricing(providerId, modelId),
+    () => getModelPricing(providerId, modelId) ?? MODEL_PRICING.default.default,
     [providerId, modelId]
   )
 
@@ -92,8 +95,8 @@ export function useTokenCount(
 
   // Calcul coût
   const { inputCost, outputCost, estimatedCost } = useMemo(() => {
-    const inputCost = (inputTokens / 1000) * pricing.input
-    const outputCost = (outputTokens / 1000) * pricing.output
+    const inputCost = (inputTokens / 1_000_000) * pricing.input
+    const outputCost = (outputTokens / 1_000_000) * pricing.output
     return {
       inputCost,
       outputCost,
@@ -117,14 +120,18 @@ export function useTokenCount(
 export function countTokens(text: string, model: string = "gpt-4o"): number {
   try {
     const enc = encoding_for_model(model as any)
-    const count = enc.encode(text).length
-    enc.free()
-    return count
+    try {
+      return enc.encode(text).length
+    } finally {
+      enc.free()
+    }
   } catch {
     const enc = get_encoding("cl100k_base")
-    const count = enc.encode(text).length
-    enc.free()
-    return count
+    try {
+      return enc.encode(text).length
+    } finally {
+      enc.free()
+    }
   }
 }
 
@@ -136,13 +143,4 @@ export function formatCost(cost: number): string {
   if (cost < 0.01) return `$${cost.toFixed(4)}`
   if (cost < 1) return `$${cost.toFixed(3)}`
   return `$${cost.toFixed(2)}`
-}
-
-/**
- * Formate un nombre de tokens pour affichage
- */
-export function formatTokens(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
-  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`
-  return String(n)
 }

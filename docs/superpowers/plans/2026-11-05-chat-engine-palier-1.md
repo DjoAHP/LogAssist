@@ -614,10 +614,14 @@ import { getModelPricing, getTiktokenModel } from "./pricing"
 
 describe("pricing", () => {
   it("normalise le nom du fournisseur", () => {
-    expect(getModelPricing("OpenRouter", "openai/gpt-4o-mini")).toMatchObject({
+    expect(getModelPricing(" OpenAI ", "gpt-4o-mini")).toMatchObject({
       input: 0.15,
       output: 0.6,
     })
+  })
+
+  it("masque les tarifs OpenRouter approximatifs", () => {
+    expect(getModelPricing("OpenRouter", "openai/gpt-4o-mini")).toBeNull()
   })
 
   it("ne fabrique aucun tarif pour un modèle inconnu", () => {
@@ -626,6 +630,10 @@ describe("pricing", () => {
 
   it("conserve un encodeur générique pour un modèle inconnu", () => {
     expect(getTiktokenModel("Serveur privé", "modele-inconnu")).toBe("cl100k_base")
+  })
+
+  it("résout le tokenizer indépendamment du tarif fournisseur", () => {
+    expect(getTiktokenModel("Serveur privé", "gpt-4o-mini")).toBe("gpt-4o-mini")
   })
 })
 ```
@@ -654,16 +662,30 @@ Remplacer les deux fonctions exportées par :
 
 ```ts
 export function getModelPricing(provider: string, modelId: string): ModelPricing | null {
-  const providerPricing = MODEL_PRICING[normalizeProvider(provider)]
+  const normalizedProvider = normalizeProvider(provider)
+  if (normalizedProvider === "openrouter") return null
+
+  const providerPricing = MODEL_PRICING[normalizedProvider]
   return providerPricing?.[modelId] ?? null
 }
 
 export function getTiktokenModel(provider: string, modelId: string): TiktokenModel {
-  return getModelPricing(provider, modelId)?.tiktokenModel ?? ("cl100k_base" as TiktokenModel)
+  const providerPricing = MODEL_PRICING[normalizeProvider(provider)]?.[modelId]
+  if (providerPricing?.tiktokenModel) return providerPricing.tiktokenModel
+
+  for (const pricing of Object.values(MODEL_PRICING)) {
+    const knownModel = pricing[modelId]
+    if (knownModel?.tiktokenModel) return knownModel.tiktokenModel
+  }
+
+  return "cl100k_base" as TiktokenModel
 }
 ```
 
-Le bloc `default` peut rester pour compatibilité de données, mais aucune fonction ne doit l'utiliser comme tarif réel.
+Les valeurs `input` et `output` sont des prix en USD par **million** de tokens. Le bloc
+`default` peut rester pour compatibilité de l'ancien compteur, mais aucune nouvelle
+fonction ne doit l'utiliser comme tarif réel. Les tarifs OpenRouter approximatifs restent
+masqués, tandis que leur registre peut aider à résoudre un tokenizer.
 
 - [ ] **Step 4: Relancer les tests de pricing**
 
@@ -700,14 +722,14 @@ describe("turn metrics", () => {
   it("utilise l'usage fournisseur et calcule le coût seulement si le tarif est connu", () => {
     const metrics = metricsFromProviderUsage(
       { inputTokens: 1_000, outputTokens: 500 },
-      "OpenRouter",
-      "openai/gpt-4o-mini",
+      "OpenAI",
+      "gpt-4o-mini",
     )
     expect(metrics).toEqual({
       inputTokens: 1_000,
       outputTokens: 500,
       usageSource: "provider",
-      costMicrousd: 450_000,
+      costMicrousd: 450,
     })
   })
 })
@@ -742,6 +764,17 @@ function createEncoder(provider: string, modelId: string): Tiktoken {
   }
 }
 
+function isValidTokenUsage(usage: unknown): usage is TokenUsage {
+  if (typeof usage !== "object" || usage === null) return false
+  const { inputTokens, outputTokens } = usage as Partial<TokenUsage>
+  return typeof inputTokens === "number" &&
+    Number.isSafeInteger(inputTokens) &&
+    inputTokens >= 0 &&
+    typeof outputTokens === "number" &&
+    Number.isSafeInteger(outputTokens) &&
+    outputTokens >= 0
+}
+
 function calculateCostMicrousd(
   usage: TokenUsage,
   provider: string,
@@ -749,17 +782,20 @@ function calculateCostMicrousd(
 ): number | null {
   const pricing = getModelPricing(provider, modelId)
   if (!pricing) return null
-  const usd =
-    (usage.inputTokens / 1_000) * pricing.input +
-    (usage.outputTokens / 1_000) * pricing.output
-  return Math.round(usd * 1_000_000)
+  const microUsd =
+    usage.inputTokens * pricing.input +
+    usage.outputTokens * pricing.output
+  if (!Number.isFinite(microUsd) || microUsd < 0) return null
+  const roundedMicroUsd = Math.round(microUsd)
+  return Number.isSafeInteger(roundedMicroUsd) ? roundedMicroUsd : null
 }
 
 export function metricsFromProviderUsage(
   usage: TokenUsage,
   provider: string,
   modelId: string,
-): TurnMetrics {
+): TurnMetrics | null {
+  if (!isValidTokenUsage(usage)) return null
   return {
     ...usage,
     usageSource: "provider",
@@ -791,6 +827,10 @@ export function estimateTurnMetrics(
   }
 }
 ```
+
+`metricsFromProviderUsage` valide à l'exécution deux entiers sûrs positifs ou nuls.
+Lors de son intégration, prévoir un fallback vers `estimateTurnMetrics` si elle retourne
+`null`, afin qu'un usage fournisseur invalide n'empêche pas la métrique locale.
 
 - [ ] **Step 8: Créer les formateurs sans hook React**
 
