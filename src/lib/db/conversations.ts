@@ -16,7 +16,7 @@ function now(): string {
 }
 
 export const conversations = {
-  async create(title = "Nouvelle conversation"): Promise<ConversationRow> {
+  async create(title = "Nouveau chat"): Promise<ConversationRow> {
     const row: ConversationRow = { id: crypto.randomUUID(), project_id: null, title, archived: 0, pinned: 0, created_at: now(), updated_at: now() }
     await execute(
       "INSERT INTO conversations (id, project_id, title, archived, pinned, created_at, updated_at) VALUES (?,?,?,0,0,?,?)",

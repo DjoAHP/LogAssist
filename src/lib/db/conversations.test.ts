@@ -21,6 +21,12 @@ describe("conversations.create", () => {
     expect(sql).toContain("INSERT INTO conversations")
     expect(bind[0]).toBe(row.id)
   })
+
+  it("sans titre : la row s'appelle « Nouveau chat » (comme le bouton)", async () => {
+    mockDb.execute.mockResolvedValueOnce({ rowsAffected: 1 })
+    const row = await conversations.create()
+    expect(row.title).toBe("Nouveau chat")
+  })
 })
 
 describe("conversations.list", () => {
