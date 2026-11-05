@@ -246,6 +246,23 @@ describe("ChatView — bouton copier du message", () => {
     expect(screen.queryByRole("button", { name: "Copier le message" })).toBeNull()
   })
 
+  it("l'icône copier vit dans la rangée des tokens (dernière ligne de la bulle)", () => {
+    // useTokenCount est 100 % local (tiktoken WASM) : activer le modèle
+    // fait rendre la rangée « X tokens · coût » — le bouton doit y être
+    // poussé à droite (ml-auto) plutôt que dans sa rangée séparée.
+    render(
+      <ChatView
+        {...base}
+        activeModel={{ provider: "test", modelId: "gpt-4o", modelLabel: "Test" }}
+        vm={[msg({ role: "assistant", content: "réponse" })]}
+      />,
+    )
+    const bouton = screen.getByRole("button", { name: "Copier le message" })
+    const rangée = bouton.parentElement?.textContent ?? ""
+    expect(rangée).toContain("tokens")
+    expect(screen.getAllByRole("button", { name: /Copier/ }).length).toBe(1)
+  })
+
   it("un second clic réinitialise le minuteur de fin de feedback", async () => {
     const user = userEvent.setup()
     const writeText = vi.spyOn(navigator.clipboard, "writeText").mockResolvedValue(undefined)

@@ -275,9 +275,9 @@ function MessageBubble({
         ) : (
           <pre className="whitespace-pre-wrap font-sans text-sm">{m.content}</pre>
         )}
-        {m.content && (
-          // Toujours visible (choix utilisateur), aligne à droite pour les
-          // deux rôles : l'icône vit en bas à droite de la bulle.
+        {m.content && !(activeModel && !isUser) && (
+          // Icône copier autonome (rôle user, ou assistant sans rangée token) :
+          // toujours visible (choix utilisateur), en fin de bulle à droite.
           <div className="mt-1 flex justify-end">
             <button
               type="button"
@@ -339,13 +339,26 @@ function MessageBubble({
           </div>
         )}
 
-{/* Token count + cost pour les messages assistant (si modèle actif) */}
+{/* Token count + cost pour les messages assistant (si modèle actif) — l'icône
+    copier vit dans cette même rangée, poussée à droite (code bas de bulle). */}
         {!isUser && activeModel && m.content && (
           <div className="mt-1 flex items-center gap-2 text-xs text-muted-foreground">
             <span>{formatTokens(tokenInfo.totalTokens)} tokens</span>
             <span>·</span>
             <span>{formatCost(tokenInfo.estimatedCost)}</span>
             <span className="text-[10px] opacity-60">(in: {formatTokens(tokenInfo.inputTokens)} / out: {formatTokens(tokenInfo.outputTokens)})</span>
+            <button
+              type="button"
+              onClick={onCopyMessage}
+              aria-label={copied ? t.chat.messageCopied : t.chat.copyMessage}
+              className="ml-auto rounded-md p-1 text-muted-foreground hover:text-foreground focus-visible:text-foreground"
+            >
+              {copied ? (
+                <Check className="size-3.5 text-[var(--brand-to)]" aria-hidden="true" />
+              ) : (
+                <Copy className="size-3.5" aria-hidden="true" />
+              )}
+            </button>
           </div>
         )}
       </div>
