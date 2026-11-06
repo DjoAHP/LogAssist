@@ -42,3 +42,6 @@ src-tauri/gen/
 
 # Brouillon local de session
 note.text
+
+# Dossiers divers
+assets

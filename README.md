@@ -1,3 +1,5 @@
+![Démo animée du projet](assets/gifs/test.gif)
+
 # LogAssist
 
 ![Interface principale de LogAssist](src/assets/capture_ecran_interface.png)
