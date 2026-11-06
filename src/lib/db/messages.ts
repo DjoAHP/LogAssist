@@ -27,6 +27,20 @@ type MetricColumns = Pick<
 type MessageInsert = Omit<MessageRow, "id" | "sources" | keyof MetricColumns> &
   Partial<MetricColumns> & { sources?: string }
 
+export type AssistantUpdate = Pick<
+  MessageRow,
+  | "content"
+  | "model_label"
+  | "latency_ms"
+  | "error"
+  | "sources"
+  | "first_token_ms"
+  | "input_tokens"
+  | "output_tokens"
+  | "usage_source"
+  | "cost_microusd"
+>
+
 export const messages = {
   // rowid = ordre d'insertion physique : garantie l'ordre chronologique sans colonne dédiée.
   async listByConversation(conversationId: string): Promise<MessageRow[]> {
@@ -66,6 +80,24 @@ export const messages = {
       ],
     )
     return id
+  },
+  async updateAssistant(id: string, row: AssistantUpdate): Promise<void> {
+    await execute(
+      "UPDATE messages SET content = ?, model_label = ?, latency_ms = ?, error = ?, sources = ?, first_token_ms = ?, input_tokens = ?, output_tokens = ?, usage_source = ?, cost_microusd = ? WHERE id = ? AND role = 'assistant'",
+      [
+        row.content,
+        row.model_label,
+        row.latency_ms,
+        row.error,
+        row.sources,
+        row.first_token_ms,
+        row.input_tokens,
+        row.output_tokens,
+        row.usage_source,
+        row.cost_microusd,
+        id,
+      ],
+    )
   },
   async updateError(id: string, error: string | null): Promise<void> {
     await execute("UPDATE messages SET error = ? WHERE id = ?", [error, id])

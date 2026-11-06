@@ -93,6 +93,43 @@ describe("messages.insert", () => {
   })
 })
 
+describe("messages.updateAssistant", () => {
+  it("remplace atomiquement le contenu et les métriques d'une réponse assistant", async () => {
+    mockExecute.mockResolvedValueOnce({ rowsAffected: 1 })
+
+    await messages.updateAssistant("assistant-1", {
+      content: "Nouvelle réponse",
+      model_label: "OpenAI › modèle",
+      latency_ms: 200,
+      error: null,
+      sources: "[]",
+      first_token_ms: 20,
+      input_tokens: 100,
+      output_tokens: 30,
+      usage_source: "provider",
+      cost_microusd: 12,
+    })
+
+    const [sql, bind] = mockExecute.mock.calls[0]
+    expect(sql).toBe(
+      "UPDATE messages SET content = ?, model_label = ?, latency_ms = ?, error = ?, sources = ?, first_token_ms = ?, input_tokens = ?, output_tokens = ?, usage_source = ?, cost_microusd = ? WHERE id = ? AND role = 'assistant'",
+    )
+    expect(bind).toEqual([
+      "Nouvelle réponse",
+      "OpenAI › modèle",
+      200,
+      null,
+      "[]",
+      20,
+      100,
+      30,
+      "provider",
+      12,
+      "assistant-1",
+    ])
+  })
+})
+
 describe("messages.updateError / removeByConversation", () => {
   it("émet les SQL ciblés attendus", async () => {
     mockExecute.mockResolvedValue({ rowsAffected: 1 })
