@@ -15,9 +15,9 @@ describe("turn metrics", () => {
     expect(metrics.costMicrousd).toBeNull()
   })
 
-  it("utilise l'usage fournisseur et calcule le coût seulement si le tarif est connu", () => {
+  it("calcule le coût mini sans remise quand aucun token d'entrée n'est caché", () => {
     const metrics = metricsFromProviderUsage(
-      { inputTokens: 1_000, outputTokens: 500 },
+      { inputTokens: 1_000, outputTokens: 500, cachedInputTokens: 0 },
       "OpenAI",
       "gpt-4o-mini",
     )
@@ -27,6 +27,80 @@ describe("turn metrics", () => {
       usageSource: "provider",
       costMicrousd: 450,
     })
+  })
+
+  it("applique le tarif réduit aux tokens d'entrée cachés", () => {
+    expect(metricsFromProviderUsage(
+      { inputTokens: 1_000, outputTokens: 500, cachedInputTokens: 400 },
+      "OpenAI",
+      "gpt-4o-mini",
+    )).toEqual({
+      inputTokens: 1_000,
+      outputTokens: 500,
+      usageSource: "provider",
+      costMicrousd: 420,
+    })
+  })
+
+  it("conserve l'usage fournisseur mais omet le coût si le cache est absent", () => {
+    expect(metricsFromProviderUsage(
+      { inputTokens: 1_000, outputTokens: 500 },
+      "OpenAI",
+      "gpt-4o-mini",
+    )).toEqual({
+      inputTokens: 1_000,
+      outputTokens: 500,
+      usageSource: "provider",
+      costMicrousd: null,
+    })
+  })
+
+  it("conserve l'usage fournisseur mais omet le coût si le cache dépasse l'entrée", () => {
+    expect(metricsFromProviderUsage(
+      { inputTokens: 1_000, outputTokens: 500, cachedInputTokens: 1_001 },
+      "OpenAI",
+      "gpt-4o-mini",
+    )).toEqual({
+      inputTokens: 1_000,
+      outputTokens: 500,
+      usageSource: "provider",
+      costMicrousd: null,
+    })
+  })
+
+  it("omet le coût si le modèle n'a aucun tarif d'entrée cachée vérifié", () => {
+    expect(metricsFromProviderUsage(
+      { inputTokens: 1_000, outputTokens: 500, cachedInputTokens: 0 },
+      "OpenAI",
+      "gpt-4-turbo",
+    )).toEqual({
+      inputTokens: 1_000,
+      outputTokens: 500,
+      usageSource: "provider",
+      costMicrousd: null,
+    })
+  })
+
+  it("utilise les tarifs corrigés de GPT-4o avec l'entrée cachée", () => {
+    expect(metricsFromProviderUsage(
+      { inputTokens: 1_000, outputTokens: 500, cachedInputTokens: 400 },
+      "OpenAI",
+      "gpt-4o",
+    )).toEqual({
+      inputTokens: 1_000,
+      outputTokens: 500,
+      usageSource: "provider",
+      costMicrousd: 7_000,
+    })
+  })
+
+  it("ne chiffre jamais une estimation locale même pour un endpoint officiel", () => {
+    const metrics = estimateTurnMetrics(messages, "Réponse", "OpenAI", "gpt-4o-mini")
+
+    expect(metrics.inputTokens).toBeGreaterThan(0)
+    expect(metrics.outputTokens).toBeGreaterThan(0)
+    expect(metrics.usageSource).toBe("estimated")
+    expect(metrics.costMicrousd).toBeNull()
   })
 
   it.each([
@@ -44,7 +118,11 @@ describe("turn metrics", () => {
 
   it("conserve les compteurs valides quand leur coût ne peut pas être représenté sûrement", () => {
     expect(metricsFromProviderUsage(
-      { inputTokens: 0, outputTokens: Number.MAX_SAFE_INTEGER },
+      {
+        inputTokens: 0,
+        outputTokens: Number.MAX_SAFE_INTEGER,
+        cachedInputTokens: 0,
+      },
       "OpenAI",
       "gpt-4",
     )).toEqual({

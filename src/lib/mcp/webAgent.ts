@@ -174,6 +174,8 @@ export async function runWebAgent(input: WebAgentInput): Promise<WebAgentResult>
   const sources = new Map<string, WebSource>()
   const reportedUsage: TokenUsage = { inputTokens: 0, outputTokens: 0 }
   let allTurnsReportedUsage = true
+  let allTurnsReportedCachedInput = true
+  let reportedCachedInputTokens = 0
 
   const collectUsage = (result: TurnResult): void => {
     if (!result.usage) {
@@ -197,7 +199,33 @@ export async function runWebAgent(input: WebAgentInput): Promise<WebAgentResult>
     }
     reportedUsage.inputTokens = nextInput
     reportedUsage.outputTokens = nextOutput
+
+    const cachedInput = result.usage.cachedInputTokens
+    if (
+      cachedInput === undefined ||
+      !Number.isSafeInteger(cachedInput) ||
+      cachedInput < 0 ||
+      cachedInput > result.usage.inputTokens
+    ) {
+      allTurnsReportedCachedInput = false
+      return
+    }
+    const nextCachedInput = reportedCachedInputTokens + cachedInput
+    if (!Number.isSafeInteger(nextCachedInput)) {
+      allTurnsReportedCachedInput = false
+      return
+    }
+    reportedCachedInputTokens = nextCachedInput
   }
+
+  const aggregatedUsage = (): TokenUsage | undefined => allTurnsReportedUsage
+    ? {
+        ...reportedUsage,
+        ...(allTurnsReportedCachedInput
+          ? { cachedInputTokens: reportedCachedInputTokens }
+          : {}),
+      }
+    : undefined
 
   const runWithoutTools = async (warning?: string): Promise<WebAgentResult> => {
     throwIfAborted(input.signal)
@@ -217,7 +245,7 @@ export async function runWebAgent(input: WebAgentInput): Promise<WebAgentResult>
       started,
       (turnStarted - started) + result.firstTokenMs,
       warning,
-      allTurnsReportedUsage ? { ...reportedUsage } : undefined,
+      aggregatedUsage(),
     )
   }
 
@@ -255,7 +283,7 @@ export async function runWebAgent(input: WebAgentInput): Promise<WebAgentResult>
           started,
           (turnStarted - started) + result.firstTokenMs,
           warning,
-          allTurnsReportedUsage ? { ...reportedUsage } : undefined,
+          aggregatedUsage(),
         )
       }
 
@@ -316,7 +344,7 @@ export async function runWebAgent(input: WebAgentInput): Promise<WebAgentResult>
       started,
       (turnStarted - started) + final.firstTokenMs,
       warning,
-      allTurnsReportedUsage ? { ...reportedUsage } : undefined,
+      aggregatedUsage(),
     )
   } catch (error) {
     if (!isToolsUnsupported(error)) throw error

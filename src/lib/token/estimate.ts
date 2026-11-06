@@ -30,10 +30,22 @@ function calculateCostMicrousd(
   modelId: string,
 ): number | null {
   const pricing = getModelPricing(provider, modelId)
-  if (!pricing) return null
+  const cachedInputTokens = usage.cachedInputTokens
+  if (
+    !pricing ||
+    cachedInputTokens === undefined ||
+    !Number.isSafeInteger(cachedInputTokens) ||
+    cachedInputTokens < 0 ||
+    cachedInputTokens > usage.inputTokens ||
+    pricing.cachedInput === undefined
+  ) {
+    return null
+  }
 
+  const ordinaryInputTokens = usage.inputTokens - cachedInputTokens
   const microUsd =
-    usage.inputTokens * pricing.input +
+    ordinaryInputTokens * pricing.input +
+    cachedInputTokens * pricing.cachedInput +
     usage.outputTokens * pricing.output
   if (!Number.isFinite(microUsd) || microUsd < 0) return null
 
@@ -49,7 +61,8 @@ export function metricsFromProviderUsage(
   if (!isValidTokenUsage(usage)) return null
 
   return {
-    ...usage,
+    inputTokens: usage.inputTokens,
+    outputTokens: usage.outputTokens,
     usageSource: "provider",
     costMicrousd: calculateCostMicrousd(usage, provider, modelId),
   }
@@ -68,12 +81,12 @@ export function estimateTurnMetrics(
       0,
     )
     const outputTokens = encoder.encode(output).length
-    const usage = { inputTokens, outputTokens }
-
     return {
-      ...usage,
+      inputTokens,
+      outputTokens,
       usageSource: "estimated",
-      costMicrousd: calculateCostMicrousd(usage, provider, modelId),
+      // Un comptage local ne permet pas de connaître la part réellement cachée.
+      costMicrousd: null,
     }
   } finally {
     encoder.free()

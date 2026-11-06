@@ -1,4 +1,4 @@
-export const SCHEMA_VERSION = 7
+export const SCHEMA_VERSION = 8
 
 // Chaque statement est un item distinct : audit-able, et exécution séquentielle
 // garantie (sqlx rejette le multi-statement dans un seul execute).
@@ -150,7 +150,14 @@ export const SCHEMA_V6_STATEMENTS: string[] = [
 ]
 
 export const SCHEMA_V7_STATEMENTS: string[] = [
-  `UPDATE messages SET error = CASE WHEN error = '{"interrupted":true}' THEN '{"interrupted":true}' ELSE NULL END WHERE error IS NOT NULL`,
+  `UPDATE messages SET error = CASE WHEN error = '{"interrupted":true}' THEN '{"interrupted":true}' ELSE '{"kind":"unknown","message":""}' END WHERE error IS NOT NULL`,
+]
+
+// Migration V8 : réparation de développement pour une DB ayant exécuté
+// l'ancienne V7. L'UPDATE est idempotent ; il privilégie un état d'erreur
+// visible au risque de classer comme erreur une rare réponse réellement vide.
+export const SCHEMA_V8_STATEMENTS: string[] = [
+  `UPDATE messages SET error = '{"kind":"unknown","message":""}' WHERE role = 'assistant' AND content = '' AND error IS NULL`,
 ]
 
 export const SCHEMA_V1 = SCHEMA_V1_STATEMENTS.join(";\n")

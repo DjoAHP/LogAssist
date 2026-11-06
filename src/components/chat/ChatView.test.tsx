@@ -287,6 +287,19 @@ describe("ChatView — accès Web", () => {
   })
 })
 
+describe("ChatView — erreurs historiques", () => {
+  it("affiche l'erreur générique d'un assistant vide sans spinner de réflexion", () => {
+    render(<ChatView {...base} vm={[msg({
+      role: "assistant",
+      content: "",
+      apiError: { kind: "unknown", message: "" },
+    })]} />)
+
+    expect(screen.queryByRole("status", { name: "Le modèle réfléchit…" })).toBeNull()
+    expect(screen.getByText("Erreur inattendue du fournisseur")).toBeTruthy()
+  })
+})
+
 describe("ChatView — bouton copier du message", () => {
   it("la réponse assistant est copiée depuis le bouton du message", async () => {
     // Ordre imposé (cf. test bloc de code) : setup d'abord, spy ensuite.

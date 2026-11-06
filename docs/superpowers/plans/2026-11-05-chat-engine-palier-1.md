@@ -4,7 +4,7 @@
 
 **Goal:** Extraire l'exécution d'un tour hors de `useChat`, persister des métriques honnêtes par réponse et supprimer l'affichage cumulatif trompeur, sans modifier l'identité visuelle ni le comportement fonctionnel du chat.
 
-**Architecture:** Le palier introduit deux unités pures (`contextBuilder` et `turnRunner`) entre le hook React et les adaptateurs existants. Les adaptateurs remontent l'usage lorsqu'il est fourni ; sinon un estimateur local calcule les tokens une seule fois à la fin du tour. SQLite V6 persiste ces métriques optionnelles afin que `ChatView` affiche les données propres à chaque réponse ; SQLite V7 nettoie les anciens diagnostics fournisseur non vérifiables.
+**Architecture:** Le palier introduit deux unités pures (`contextBuilder` et `turnRunner`) entre le hook React et les adaptateurs existants. Les adaptateurs remontent l'usage lorsqu'il est fourni ; sinon un estimateur local calcule les tokens une seule fois à la fin du tour. SQLite V6 persiste ces métriques optionnelles afin que `ChatView` affiche les données propres à chaque réponse ; SQLite V7 nettoie les anciens diagnostics fournisseur non vérifiables et V8 répare le cas de développement où l'ancienne V7 aurait laissé un assistant vide sans erreur.
 
 **Tech Stack:** React 19, TypeScript strict, Vitest 5, Testing Library, Tauri SQL/SQLite, `@dqbd/tiktoken`, adaptateurs OpenAI-compatible et MCP TinyFish existants.
 
@@ -16,6 +16,7 @@ Ce plan implémente uniquement :
 
 - migration V6 pour les métriques par réponse ;
 - migration V7 pour le nettoyage des erreurs legacy ;
+- migration V8 idempotente pour réparer les assistants vides passés à `error = NULL` par l'ancienne V7 de développement ;
 - usage fournisseur optionnel et estimation locale ;
 - extraction de la construction actuelle du contexte, sans fenêtre glissante ni résumé ;
 - extraction de l'exécution directe/Web dans `TurnRunner` ;
@@ -48,11 +49,11 @@ Ce plan n'implémente pas encore :
 
 ### Fichiers modifiés
 
-- `src/lib/db/migrations.ts` et `src/lib/db/database.ts` — migration V6 des métriques et migration V7 de nettoyage conservateur des erreurs legacy.
+- `src/lib/db/migrations.ts` et `src/lib/db/database.ts` — migrations V6 des métriques, V7 de nettoyage conservateur et V8 de réparation UX.
 - `src/lib/db/migrations.test.ts` — contrat de la migration.
 - `src/lib/db/messages.ts` et `src/lib/db/messages.test.ts` — lecture/écriture des métriques optionnelles.
 - `src/lib/ai/types.ts` — type `TokenUsage` et usage optionnel dans les résultats.
-- `src/lib/ai/openai-compat.ts` et son test — lecture opportuniste du champ `usage` SSE/JSON.
+- `src/lib/ai/openai-compat.ts` et son test — demande d'usage réservée à l'endpoint OpenAI officiel, puis lecture opportuniste du champ `usage` SSE/JSON.
 - `src/lib/mcp/webAgent.ts` et son test — agrégation de l'usage quand tous les tours le fournissent.
 - `src/hooks/useChat.ts` et son test — délégation au runner et persistance des métriques.
 - `src/components/chat/ChatView.tsx` et son test — métriques propres au message, sans comptage global.
@@ -113,17 +114,17 @@ Par défaut, aucune modification et aucun commit ne sont nécessaires pour cette
 
 ---
 
-### Task 2: Ajouter les métriques V6 et le nettoyage legacy V7
+### Task 2: Ajouter les métriques V6, le nettoyage V7 et la réparation V8
 
 **Files:**
 - Modify: `src/lib/db/migrations.ts:1-144`
 - Modify: `src/lib/db/database.ts:1-62`
 - Test: `src/lib/db/migrations.test.ts:1-73`
 
-- [ ] **Step 1: Écrire les tests rouges des migrations V6 et V7**
+- [ ] **Step 1: Écrire les tests rouges des migrations V6, V7 et V8**
 
-Ajouter `SCHEMA_V6_STATEMENTS` et `SCHEMA_V7_STATEMENTS` à l'import de
-`src/lib/db/migrations.test.ts`, passer l'attente de version à `7`, puis verrouiller
+Ajouter `SCHEMA_V6_STATEMENTS`, `SCHEMA_V7_STATEMENTS` et `SCHEMA_V8_STATEMENTS` à l'import de
+`src/lib/db/migrations.test.ts`, passer l'attente de version à `8`, puis verrouiller
 les statements et leur ordre d'exécution :
 
 ```ts
@@ -142,14 +143,23 @@ describe("SCHEMA_V6_STATEMENTS", () => {
 describe("SCHEMA_V7_STATEMENTS", () => {
   it("nettoie les erreurs legacy", () => {
     expect(SCHEMA_V7_STATEMENTS).toEqual([
-      `UPDATE messages SET error = CASE WHEN error = '{"interrupted":true}' THEN '{"interrupted":true}' ELSE NULL END WHERE error IS NOT NULL`,
+      `UPDATE messages SET error = CASE WHEN error = '{"interrupted":true}' THEN '{"interrupted":true}' ELSE '{"kind":"unknown","message":""}' END WHERE error IS NOT NULL`,
+    ])
+  })
+})
+
+describe("SCHEMA_V8_STATEMENTS", () => {
+  it("répare les assistants vides sans erreur", () => {
+    expect(SCHEMA_V8_STATEMENTS).toEqual([
+      `UPDATE messages SET error = '{"kind":"unknown","message":""}' WHERE role = 'assistant' AND content = '' AND error IS NULL`,
     ])
   })
 })
 ```
 
-Le test comportemental de `executeSchema` doit aussi prouver qu'une base V6 exécute
-uniquement V7, tandis qu'une base V5 exécute les cinq statements V6 puis V7.
+Le test comportemental de `executeSchema` doit aussi prouver qu'une base V7 exécute
+uniquement V8, qu'une base V6 exécute V7 puis V8 et qu'une base V5 exécute les cinq
+statements V6, puis V7 et V8.
 
 - [ ] **Step 2: Lancer le test pour confirmer l'échec**
 
@@ -159,15 +169,15 @@ Run:
 npx vitest run src/lib/db/migrations.test.ts
 ```
 
-Expected: FAIL car le nettoyage est encore rattaché à V6, `SCHEMA_V7_STATEMENTS`
-n'existe pas et `SCHEMA_VERSION` vaut encore `6`.
+Expected: FAIL tant que `SCHEMA_V8_STATEMENTS` n'existe pas, qu'une base V7
+n'exécute aucune réparation et que `SCHEMA_VERSION` vaut encore `7`.
 
-- [ ] **Step 3: Implémenter les migrations V6 et V7**
+- [ ] **Step 3: Implémenter les migrations V6, V7 et V8**
 
 Dans `src/lib/db/migrations.ts`, remplacer la version et ajouter après V5 :
 
 ```ts
-export const SCHEMA_VERSION = 7
+export const SCHEMA_VERSION = 8
 
 export const SCHEMA_V6_STATEMENTS: string[] = [
   "ALTER TABLE messages ADD COLUMN first_token_ms INTEGER",
@@ -178,16 +188,30 @@ export const SCHEMA_V6_STATEMENTS: string[] = [
 ]
 
 export const SCHEMA_V7_STATEMENTS: string[] = [
-  `UPDATE messages SET error = CASE WHEN error = '{"interrupted":true}' THEN '{"interrupted":true}' ELSE NULL END WHERE error IS NOT NULL`,
+  `UPDATE messages SET error = CASE WHEN error = '{"interrupted":true}' THEN '{"interrupted":true}' ELSE '{"kind":"unknown","message":""}' END WHERE error IS NOT NULL`,
+]
+
+export const SCHEMA_V8_STATEMENTS: string[] = [
+  `UPDATE messages SET error = '{"kind":"unknown","message":""}' WHERE role = 'assistant' AND content = '' AND error IS NULL`,
 ]
 ```
 
 Le statement V7 assume explicitement la perte des anciens diagnostics fournisseur, JSON
 ou non JSON, car leur absence de clé exacte empêche de garantir leur innocuité. Le
-payload canonique `{"interrupted":true}` généré par l'application est le seul conservé ;
-les contenus, sources et autres colonnes des messages ne sont pas modifiés.
+payload canonique `{"interrupted":true}` généré par l'application reste intact ; toute
+autre erreur devient le marqueur non sensible `{"kind":"unknown","message":""}` afin
+qu'une réponse vide ou partielle ne soit jamais présentée comme un succès. Les contenus,
+sources et autres colonnes des messages ne sont pas modifiés.
 
-Dans `src/lib/db/database.ts`, importer les deux listes puis exécuter V7 après V6 :
+V7 corrigée n'a jamais été distribuée ni fusionnée, mais V8 rend le développement
+robuste si une base locale a déjà exécuté son ancienne forme qui mettait `error` à
+`NULL`. Cette réparation idempotente ne peut pas retrouver les erreurs partielles dont
+l'information a été effacée. Elle couvre seulement le cas UX critique
+assistant vide/spinner permanent. Une rare réponse assistant réellement vide peut donc
+être classée comme erreur générique : ce choix conservateur est préférable à une attente
+infinie affichée à l'utilisateur.
+
+Dans `src/lib/db/database.ts`, importer les trois listes puis exécuter V7 après V6 et V8 après V7 :
 
 ```ts
 if (fromVersion < 6) {
@@ -197,6 +221,11 @@ if (fromVersion < 6) {
 }
 if (fromVersion < 7) {
   for (const statement of SCHEMA_V7_STATEMENTS) {
+    await db.execute(statement)
+  }
+}
+if (fromVersion < 8) {
+  for (const statement of SCHEMA_V8_STATEMENTS) {
     await db.execute(statement)
   }
 }
@@ -436,6 +465,7 @@ Dans `src/lib/ai/types.ts`, ajouter puis étendre `CompletionStats` :
 export interface TokenUsage {
   inputTokens: number
   outputTokens: number
+  cachedInputTokens?: number
 }
 
 export interface CompletionStats {
@@ -483,7 +513,11 @@ return {
 }
 ```
 
-Ne pas envoyer automatiquement `stream_options`: certains fournisseurs OpenAI-like le refusent. Le palier lit seulement l'usage déjà présent.
+Déterminer une seule fois si la base nettoyée est l'origine officielle stricte OpenAI
+(`https:`, hostname exact `api.openai.com`, port vide, aucun username/password). Pour
+une requête streamée vers cette origine uniquement, envoyer
+`stream_options: { include_usage: true }`. Ne jamais envoyer ce champ à OpenRouter,
+localhost ou un endpoint custom, ni lors de `complete()` où `stream` vaut `false`.
 
 - [ ] **Step 5: Relancer le test adaptateur**
 
@@ -757,9 +791,9 @@ describe("turn metrics", () => {
     expect(metrics.costMicrousd).toBeNull()
   })
 
-  it("utilise l'usage fournisseur et calcule le coût seulement si le tarif est connu", () => {
+  it("utilise l'usage fournisseur complet pour calculer un coût", () => {
     const metrics = metricsFromProviderUsage(
-      { inputTokens: 1_000, outputTokens: 500 },
+      { inputTokens: 1_000, outputTokens: 500, cachedInputTokens: 0 },
       "OpenAI",
       "gpt-4o-mini",
     )
@@ -819,9 +853,18 @@ function calculateCostMicrousd(
   modelId: string,
 ): number | null {
   const pricing = getModelPricing(provider, modelId)
-  if (!pricing) return null
+  const cachedInputTokens = usage.cachedInputTokens
+  if (
+    !pricing ||
+    cachedInputTokens === undefined ||
+    cachedInputTokens < 0 ||
+    cachedInputTokens > usage.inputTokens ||
+    pricing.cachedInput === undefined
+  ) return null
+  const ordinaryInputTokens = usage.inputTokens - cachedInputTokens
   const microUsd =
-    usage.inputTokens * pricing.input +
+    ordinaryInputTokens * pricing.input +
+    cachedInputTokens * pricing.cachedInput +
     usage.outputTokens * pricing.output
   if (!Number.isFinite(microUsd) || microUsd < 0) return null
   const roundedMicroUsd = Math.round(microUsd)
@@ -858,7 +901,8 @@ export function estimateTurnMetrics(
     return {
       ...usage,
       usageSource: "estimated",
-      costMicrousd: calculateCostMicrousd(usage, provider, modelId),
+      // Une estimation locale ne connaît jamais la part réellement cachée.
+      costMicrousd: null,
     }
   } finally {
     encoder.free()
@@ -866,7 +910,9 @@ export function estimateTurnMetrics(
 }
 ```
 
-`metricsFromProviderUsage` valide à l'exécution deux entiers sûrs positifs ou nuls.
+`metricsFromProviderUsage` valide à l'exécution les compteurs obligatoires comme deux
+entiers sûrs positifs ou nuls. Un compteur caché absent ou invalide conserve les tokens
+fournisseur, mais rend le coût `null`.
 Lors de son intégration, prévoir un fallback vers `estimateTurnMetrics` si elle retourne
 `null`, afin qu'un usage fournisseur invalide n'empêche pas la métrique locale.
 
@@ -1590,6 +1636,10 @@ n'est reconnue que pour une origine stricte : protocole `https:`, hostname exact
 `api.openai.com`, aucun port non standard et aucune information d'authentification dans
 l'URL. Une identité vide autorise toujours le comptage via le tokenizer résolu par
 `modelId`, mais impose un coût `null` tant que l'endpoint officiel n'est pas prouvé.
+Même avec cette identité, le coût fournisseur reste `null` sans compteur
+`cachedInputTokens` valide et sans tarif `cachedInput` officiellement vérifié. Une
+estimation locale conserve toujours un coût `null`, car elle ne connaît jamais la part
+réellement servie depuis le cache.
 
 Après l'insert user, créer immédiatement le placeholder assistant, `upsertLast`
 et `persistError`, avant le prompt, les connaissances, l'historique, le provider
@@ -1601,8 +1651,9 @@ payloads historiques avec `kind`, `mapRow` conserve uniquement un kind validé p
 fournisseur legacy arbitraire ne peut pas être reconnue sans sa valeur exacte. Les
 kinds runtime sont validés par le même helper avant la VM et la persistance ; toute
 valeur inconnue devient `unknown`. La migration V7 nettoie ponctuellement `messages.error`
-en supprimant tous les anciens diagnostics, au prix assumé de leur perte, et conserve
-uniquement le payload d'interruption canonique `{"interrupted":true}`.
+en supprimant tous les anciens diagnostics, au prix assumé de leur perte. Elle conserve
+le payload d'interruption canonique `{"interrupted":true}` et remplace toute autre valeur
+non nulle par `{"kind":"unknown","message":""}` pour préserver un état d'échec visible.
 
 Après lecture du Credential Manager, la clé du tour est conservée uniquement dans
 `activeApiKey` et fournie à `redactSensitiveDetail(value, [activeApiKey])` pour masquer
@@ -1651,8 +1702,8 @@ Complément issu de la revue globale :
 
 Enfin, `load()` réapplique uniquement les warnings Web en mémoire dont l'id
 persistant correspond exactement à une row rechargée ; aucun warning n'est
-transféré vers un autre message et aucune migration supplémentaire n'est ajoutée
-au-delà du nettoyage V7 décrit ci-dessus.
+transféré vers un autre message. Le schéma final V8 ajoute après le nettoyage V7
+la réparation idempotente des assistants vides sans erreur décrite ci-dessus.
 
 Une bulle dont l'insert final puis l'insert d'erreur ont tous deux échoué reste
 marquée `persistenceFailed` avec son `conversationId` pendant la session. Au
@@ -2022,6 +2073,40 @@ Vérifications manuelles :
 
 Si la validation révèle une anomalie, ne pas produire de commit générique. Ajouter au présent plan une sous-tâche nommée avec les chemins exacts, le test rouge, la commande d'échec, le correctif minimal, la commande de réussite et le commit associé. Ne pas commencer le palier 2 tant que cette sous-tâche et toutes les gates ne sont pas validées.
 
+### Complément de revue finale — erreurs V7 et coûts cache-aware
+
+- V7 conserve l'interruption canonique et remplace chaque autre erreur non nulle par le
+  marqueur générique non sensible `{"kind":"unknown","message":""}`. Un assistant vide
+  rechargé reste ainsi en erreur et ne réaffiche pas le spinner de réflexion.
+- Le schéma final vaut `8`. V8 répare idempotemment les assistants vides sans erreur
+  d'une éventuelle base de développement passée par l'ancienne V7. V7 corrigée n'ayant
+  pas été distribuée, V8 ne prétend pas restaurer des erreurs partielles effacées ; elle
+  traite uniquement le cas critique du spinner permanent.
+- `TokenUsage.cachedInputTokens` lit opportunément
+  `usage.prompt_tokens_details.cached_tokens`. Le champ n'est conservé que s'il s'agit
+  d'un entier sûr compris entre zéro et `prompt_tokens` ; un champ absent ou invalide
+  n'invalide pas les compteurs d'entrée et de sortie.
+- L'adaptateur demande le chunk final d'usage avec
+  `stream_options: { include_usage: true }` uniquement pour une requête streamée vers
+  l'origine officielle stricte `https://api.openai.com`. Le helper d'identité URL est
+  partagé avec `resolvePricingProvider` afin d'éviter deux politiques divergentes.
+- L'agent Web additionne les tokens cachés uniquement si tous les tours disposant d'un
+  usage fournissent un compteur caché valide. Sinon l'usage agrégé conserve seulement
+  les compteurs d'entrée et de sortie, ce qui rend volontairement le coût inconnu.
+- Tarifs OpenAI vérifiés le **2026-11-06** dans les documentations officielles :
+  - GPT-4o : entrée `$2.50`, entrée cachée `$1.25`, sortie `$10.00` par million —
+    <https://developers.openai.com/api/docs/models/gpt-4o> ;
+  - GPT-4o mini : entrée `$0.15`, entrée cachée `$0.075`, sortie `$0.60` par million —
+    <https://developers.openai.com/api/docs/models/gpt-4o-mini>.
+- Seuls `gpt-4o-2024-11-20`, `gpt-4o-2024-08-06` et
+  `gpt-4o-mini-2024-07-18` sont normalisés par une table explicite pour le pricing et
+  le tokenizer. Toute autre date reste inconnue ; `gpt-4o-2024-05-13` est exclu car la
+  documentation officielle le marque comme arrêté (`Shut down`).
+- Le coût en microdollars vaut
+  `(input - cached) × inputPrice + cached × cachedPrice + output × outputPrice`.
+  Il reste `null` si l'identité fournisseur, le modèle, le compteur caché ou son tarif
+  manque. Les estimations locales n'affichent jamais de coût.
+
 ---
 
 ## Définition de terminé du palier 1
@@ -2030,7 +2115,9 @@ Si la validation révèle une anomalie, ne pas produire de commit générique. A
 - La construction du contexte actuel vit dans une fonction pure, sans encore le tronquer.
 - Chaque réponse assistant peut persister TTFT, durée, tokens, provenance et coût optionnel.
 - Un fournisseur qui rapporte l'usage est prioritaire ; sinon l'estimation locale est marquée comme telle.
+- Seul un usage fournisseur cache-aware et entièrement tarifé peut produire un coût ; une estimation locale n'en produit jamais.
 - Un modèle ou tarif inconnu n'affiche aucun faux coût.
+- Le schéma SQLite final est V8 et l'option `include_usage` ne sort jamais de l'origine OpenAI officielle.
 - `ChatView` ne charge plus les connaissances et ne recompte plus toute la conversation sous chaque bulle.
 - Le contrat anti-perte, l'interruption, le Web MCP, les sources et les images éphémères restent inchangés.
 - Aucun changement de palette, de shell ou d'identité visuelle n'est inclus.

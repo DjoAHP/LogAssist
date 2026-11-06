@@ -18,6 +18,14 @@ const CFG: ProviderConfig = {
   secretRef: "openrouter.key",
 }
 
+const OFFICIAL_OPENAI_CFG: ProviderConfig = {
+  ...CFG,
+  id: "prov-openai",
+  name: "OpenAI",
+  baseUrl: "https://api.openai.com/v1",
+  secretRef: "openai.key",
+}
+
 const BOUNDARY_API_KEY = "CUSTOM.alpha+42/=OMEGA.beta-99"
 const BOUNDARY_API_KEY_MIDDLE = Math.floor(BOUNDARY_API_KEY.length / 2)
 const BOUNDARY_API_KEY_FIRST_HALF = BOUNDARY_API_KEY.slice(0, BOUNDARY_API_KEY_MIDDLE)
@@ -164,6 +172,23 @@ describe("createOpenAICompatible — complete", () => {
     expect(body.messages).toEqual([{ role: "user", content: "Bonjour" }])
     expect(out.text).toBe("Salut !")
     expect(out.totalMs).toBeGreaterThanOrEqual(0)
+  })
+
+  it("n'envoie pas stream_options pour une requête non stream officielle", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      makeRes({ json: { choices: [{ message: { content: "Salut !" } }] } }),
+    )
+    vi.stubGlobal("fetch", fetchMock)
+
+    await createOpenAICompatible(OFFICIAL_OPENAI_CFG).complete(
+      { messages: [{ role: "user", content: "Bonjour" }] },
+      "KEY-123",
+      "gpt-4o-mini",
+    )
+
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body)
+    expect(body.stream).toBe(false)
+    expect(body).not.toHaveProperty("stream_options")
   })
 
   it("complete avec images : content devient array text + image_url en data URI", async () => {
@@ -538,6 +563,44 @@ describe("createOpenAICompatible — stream", () => {
 })
 
 describe("createOpenAICompatible — runTurn", () => {
+  it("demande le chunk d'usage uniquement à l'endpoint OpenAI officiel", async () => {
+    const stream = sseStream([`data: [DONE]${SSE}`])
+    const fetchMock = vi.fn().mockResolvedValue(makeRes({ body: stream }))
+    vi.stubGlobal("fetch", fetchMock)
+
+    await createOpenAICompatible(OFFICIAL_OPENAI_CFG).runTurn(
+      { messages: [{ role: "user", content: "Salut" }] },
+      "K",
+      "gpt-4o-mini",
+      {},
+      {},
+      new AbortController().signal,
+    )
+
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body)
+    expect(body.stream).toBe(true)
+    expect(body.stream_options).toEqual({ include_usage: true })
+  })
+
+  it("n'envoie pas stream_options à un endpoint OpenAI-compatible générique", async () => {
+    const stream = sseStream([`data: [DONE]${SSE}`])
+    const fetchMock = vi.fn().mockResolvedValue(makeRes({ body: stream }))
+    vi.stubGlobal("fetch", fetchMock)
+
+    await createOpenAICompatible(CFG).runTurn(
+      { messages: [{ role: "user", content: "Salut" }] },
+      "K",
+      "gpt-4o-mini",
+      {},
+      {},
+      new AbortController().signal,
+    )
+
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body)
+    expect(body.stream).toBe(true)
+    expect(body).not.toHaveProperty("stream_options")
+  })
+
   it("remonte l'usage du chunk final quand le fournisseur le fournit", async () => {
     const stream = sseStream([
       sseData({ choices: [{ delta: { content: "Bonjour" } }] }),
@@ -556,6 +619,64 @@ describe("createOpenAICompatible — runTurn", () => {
       {},
       new AbortController().signal,
     )
+    expect(result.usage).toEqual({ inputTokens: 120, outputTokens: 30 })
+  })
+
+  it("remonte les tokens d'entrée cachés valides", async () => {
+    const stream = sseStream([
+      sseData({ choices: [{ delta: { content: "Bonjour" } }] }),
+      sseData({
+        choices: [],
+        usage: {
+          prompt_tokens: 120,
+          completion_tokens: 30,
+          prompt_tokens_details: { cached_tokens: 40 },
+        },
+      }),
+      `data: [DONE]${SSE}`,
+    ])
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(makeRes({ body: stream })))
+
+    const result = await createOpenAICompatible(CFG).runTurn(
+      { messages: [{ role: "user", content: "Salut" }] },
+      "K",
+      "m",
+      {},
+      {},
+      new AbortController().signal,
+    )
+
+    expect(result.usage).toEqual({
+      inputTokens: 120,
+      outputTokens: 30,
+      cachedInputTokens: 40,
+    })
+  })
+
+  it("omet les tokens cachés supérieurs au total d'entrée sans perdre l'usage", async () => {
+    const stream = sseStream([
+      sseData({ choices: [{ delta: { content: "Bonjour" } }] }),
+      sseData({
+        choices: [],
+        usage: {
+          prompt_tokens: 120,
+          completion_tokens: 30,
+          prompt_tokens_details: { cached_tokens: 121 },
+        },
+      }),
+      `data: [DONE]${SSE}`,
+    ])
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(makeRes({ body: stream })))
+
+    const result = await createOpenAICompatible(CFG).runTurn(
+      { messages: [{ role: "user", content: "Salut" }] },
+      "K",
+      "m",
+      {},
+      {},
+      new AbortController().signal,
+    )
+
     expect(result.usage).toEqual({ inputTokens: 120, outputTokens: 30 })
   })
 

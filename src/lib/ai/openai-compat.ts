@@ -6,7 +6,7 @@ import {
   normalizeNetworkError,
   redactSensitiveDetail,
 } from "./errors"
-import { cleanApiBaseUrl } from "./url"
+import { cleanApiBaseUrl, isOfficialOpenAiBaseUrl } from "./url"
 import { logger } from "../logger"
 import { parseSseStream } from "./sse"
 import type {
@@ -57,7 +57,11 @@ function retryAfterMs(headers: Headers): number | undefined {
 function parseTokenUsage(value: unknown): TokenUsage | undefined {
   if (typeof value !== "object" || value === null) return undefined
   const usage = (value as {
-    usage?: { prompt_tokens?: unknown; completion_tokens?: unknown }
+    usage?: {
+      prompt_tokens?: unknown
+      completion_tokens?: unknown
+      prompt_tokens_details?: { cached_tokens?: unknown }
+    }
   }).usage
   const input = usage?.prompt_tokens
   const output = usage?.completion_tokens
@@ -69,7 +73,19 @@ function parseTokenUsage(value: unknown): TokenUsage | undefined {
   ) {
     return undefined
   }
-  return { inputTokens: input as number, outputTokens: output as number }
+  const tokenUsage: TokenUsage = {
+    inputTokens: input as number,
+    outputTokens: output as number,
+  }
+  const cachedInput = usage?.prompt_tokens_details?.cached_tokens
+  if (
+    Number.isSafeInteger(cachedInput) &&
+    (cachedInput as number) >= 0 &&
+    (cachedInput as number) <= tokenUsage.inputTokens
+  ) {
+    tokenUsage.cachedInputTokens = cachedInput as number
+  }
+  return tokenUsage
 }
 
 function sanitizeApiError(error: ApiError, apiKey: string): ApiError {
@@ -130,6 +146,7 @@ function normalizeSanitizedHttpStatus(
 export function createOpenAICompatible(cfg: ProviderConfig): IProvider {
   // Nettoie l'URL via le helper partagé avec le formulaire — invariant unique.
   const base = cleanApiBaseUrl(cfg.baseUrl)
+  const isOfficialOpenAi = isOfficialOpenAiBaseUrl(base)
 
   function toOpenAiMessage(message: ChatMessage): Record<string, unknown> {
     const content = message.images?.length
@@ -167,6 +184,9 @@ export function createOpenAICompatible(cfg: ProviderConfig): IProvider {
       model: modelId,
       messages: req.messages.map(toOpenAiMessage),
       stream,
+    }
+    if (stream && isOfficialOpenAi) {
+      body.stream_options = { include_usage: true }
     }
     if (options.tools !== undefined) body.tools = options.tools
     if (options.toolChoice !== undefined) body.tool_choice = options.toolChoice

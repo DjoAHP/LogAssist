@@ -18,6 +18,7 @@ export interface ChatRequest { messages: ChatMessage[]; timeoutMs?: number }
 export interface TokenUsage {
   inputTokens: number
   outputTokens: number
+  cachedInputTokens?: number
 }
 
 export interface CompletionStats {

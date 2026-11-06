@@ -669,6 +669,22 @@ describe("useChat.send — contract anti-perte", () => {
     expect(JSON.stringify(result.current.vm)).not.toContain(opaqueKind)
   })
 
+  it("restaure l'erreur générique V7 d'un assistant historique vide", async () => {
+    vi.mocked(messagesDb.listByConversation).mockResolvedValueOnce([
+      messageRow({
+        id: "assistant-history-v7",
+        content: "",
+        error: JSON.stringify({ kind: "unknown", message: "" }),
+      }),
+    ])
+    const { result } = renderHook(() => useChat(modelSelection))
+
+    await act(async () => result.current.load("conv-1"))
+
+    expect(result.current.vm[0].apiError).toEqual({ kind: "unknown", message: "" })
+    expect(result.current.vm[0].interrupted).toBeUndefined()
+  })
+
   it("préserve le warning Web au reload pour le même id seulement", async () => {
     vi.mocked(messagesDb.insert)
       .mockResolvedValueOnce("user-1")

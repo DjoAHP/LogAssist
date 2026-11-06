@@ -8,12 +8,15 @@ import {
   SCHEMA_V5_STATEMENTS,
   SCHEMA_V6_STATEMENTS,
   SCHEMA_V7_STATEMENTS,
+  SCHEMA_V8_STATEMENTS,
   SCHEMA_VERSION,
 } from "./migrations"
 import { executeSchema } from "./database"
 
 const ERROR_CLEANUP_STATEMENT =
-  "UPDATE messages SET error = CASE WHEN error = '{\"interrupted\":true}' THEN '{\"interrupted\":true}' ELSE NULL END WHERE error IS NOT NULL"
+  "UPDATE messages SET error = CASE WHEN error = '{\"interrupted\":true}' THEN '{\"interrupted\":true}' ELSE '{\"kind\":\"unknown\",\"message\":\"\"}' END WHERE error IS NOT NULL"
+const EMPTY_ASSISTANT_REPAIR_STATEMENT =
+  "UPDATE messages SET error = '{\"kind\":\"unknown\",\"message\":\"\"}' WHERE role = 'assistant' AND content = '' AND error IS NULL"
 
 function createMigrationDbMock() {
   const execute = vi.fn().mockResolvedValue(undefined)
@@ -34,7 +37,7 @@ describe("SCHEMA_V1_STATEMENTS", () => {
     expect(SCHEMA_V1).toBe(SCHEMA_V1_STATEMENTS.join(";\n"))
   })
   it("SCHEMA_VERSION correspond à la dernière migration", () => {
-    expect(SCHEMA_VERSION).toBe(7)
+    expect(SCHEMA_VERSION).toBe(8)
     expect(SCHEMA_V1).toContain("CREATE TABLE IF NOT EXISTS conversations")
     expect(SCHEMA_V1).toContain("idx_conversations_project")
   })
@@ -106,21 +109,22 @@ describe("SCHEMA_V6_STATEMENTS", () => {
 })
 
 describe("SCHEMA_V7_STATEMENTS", () => {
-  it("nettoie les erreurs legacy en ne conservant que l'interruption canonique", () => {
+  it("nettoie les erreurs legacy en conservant un état d'erreur générique", () => {
     expect(SCHEMA_V7_STATEMENTS).toEqual([ERROR_CLEANUP_STATEMENT])
   })
 
-  it("applique seulement V7 à une base déjà en V6", async () => {
+  it("applique V7 puis V8 à une base déjà en V6", async () => {
     const { db, execute } = createMigrationDbMock()
 
     await executeSchema(db, 6)
 
     expect(execute.mock.calls.map(([statement]) => statement)).toEqual([
       ERROR_CLEANUP_STATEMENT,
+      EMPTY_ASSISTANT_REPAIR_STATEMENT,
     ])
   })
 
-  it("applique V6 puis V7 à une base en V5", async () => {
+  it("applique V6, V7 puis V8 à une base en V5", async () => {
     const { db, execute } = createMigrationDbMock()
 
     await executeSchema(db, 5)
@@ -128,6 +132,23 @@ describe("SCHEMA_V7_STATEMENTS", () => {
     expect(execute.mock.calls.map(([statement]) => statement)).toEqual([
       ...SCHEMA_V6_STATEMENTS,
       ERROR_CLEANUP_STATEMENT,
+      EMPTY_ASSISTANT_REPAIR_STATEMENT,
+    ])
+  })
+})
+
+describe("SCHEMA_V8_STATEMENTS", () => {
+  it("répare les assistants vides sans erreur avec le marqueur générique exact", () => {
+    expect(SCHEMA_V8_STATEMENTS).toEqual([EMPTY_ASSISTANT_REPAIR_STATEMENT])
+  })
+
+  it("applique seulement V8 à une base déjà en V7", async () => {
+    const { db, execute } = createMigrationDbMock()
+
+    await executeSchema(db, 7)
+
+    expect(execute.mock.calls.map(([statement]) => statement)).toEqual([
+      EMPTY_ASSISTANT_REPAIR_STATEMENT,
     ])
   })
 })

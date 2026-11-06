@@ -77,11 +77,59 @@ afterEach(() => {
 describe("runWebAgent", () => {
   it("additionne l'usage lorsque tous les tours le fournissent", async () => {
     const { input, call } = createHarness([
-      turn("", [searchCall("call-1")], { inputTokens: 100, outputTokens: 10 }),
-      turn("Réponse sourcée", [], { inputTokens: 160, outputTokens: 40 }),
+      turn("", [searchCall("call-1")], {
+        inputTokens: 100,
+        outputTokens: 10,
+        cachedInputTokens: 40,
+      }),
+      turn("Réponse sourcée", [], {
+        inputTokens: 160,
+        outputTokens: 40,
+        cachedInputTokens: 80,
+      }),
     ])
     call.mockResolvedValueOnce({ content: "Résultat", sources: [] })
     const result = await runWebAgent(input)
+    expect(result.usage).toEqual({
+      inputTokens: 260,
+      outputTokens: 50,
+      cachedInputTokens: 120,
+    })
+  })
+
+  it("conserve l'usage agrégé sans cache si un tour omet ce compteur", async () => {
+    const { input, call } = createHarness([
+      turn("", [searchCall("call-1")], {
+        inputTokens: 100,
+        outputTokens: 10,
+        cachedInputTokens: 40,
+      }),
+      turn("Réponse sourcée", [], { inputTokens: 160, outputTokens: 40 }),
+    ])
+    call.mockResolvedValueOnce({ content: "Résultat", sources: [] })
+
+    const result = await runWebAgent(input)
+
+    expect(result.usage).toEqual({ inputTokens: 260, outputTokens: 50 })
+  })
+
+  it("écarte un compteur caché invalide sans perdre les autres compteurs", async () => {
+    const { input, call } = createHarness([
+      turn("", [searchCall("call-1")], {
+        inputTokens: 100,
+        outputTokens: 10,
+        cachedInputTokens: Number.MAX_SAFE_INTEGER + 1,
+      }),
+      turn("Réponse sourcée", [], {
+        inputTokens: 160,
+        outputTokens: 40,
+        cachedInputTokens: 80,
+      }),
+    ])
+    call.mockResolvedValueOnce({ content: "Résultat", sources: [] })
+
+    const result = await runWebAgent(input)
+
     expect(result.usage).toEqual({ inputTokens: 260, outputTokens: 50 })
   })
 

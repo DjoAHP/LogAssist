@@ -5,8 +5,21 @@ describe("pricing", () => {
   it("normalise le nom du fournisseur", () => {
     expect(getModelPricing(" OpenAI ", "gpt-4o-mini")).toMatchObject({
       input: 0.15,
+      cachedInput: 0.075,
       output: 0.6,
     })
+  })
+
+  it("utilise les tarifs officiels vérifiés de GPT-4o", () => {
+    expect(getModelPricing("openai", "gpt-4o")).toMatchObject({
+      input: 2.5,
+      cachedInput: 1.25,
+      output: 10,
+    })
+  })
+
+  it("ne prétend pas connaître le tarif caché des autres modèles", () => {
+    expect(getModelPricing("openai", "gpt-4-turbo")).not.toHaveProperty("cachedInput")
   })
 
   it("masque les tarifs OpenRouter approximatifs", () => {
@@ -27,6 +40,27 @@ describe("pricing", () => {
 
   it("résout le tokenizer indépendamment du tarif fournisseur", () => {
     expect(getTiktokenModel("Serveur privé", "gpt-4o-mini")).toBe("gpt-4o-mini")
+  })
+
+  it.each([
+    ["gpt-4o-2024-11-20", "gpt-4o"],
+    ["gpt-4o-2024-08-06", "gpt-4o"],
+    ["gpt-4o-mini-2024-07-18", "gpt-4o-mini"],
+  ] as const)("normalise le snapshot officiel %s pour pricing et tokenizer", (snapshot, alias) => {
+    expect(getModelPricing("openai", snapshot)).toEqual(getModelPricing("openai", alias))
+    expect(getTiktokenModel("Serveur privé", snapshot)).toBe(alias)
+  })
+
+  it.each([
+    "gpt-4o-2024-8-06",
+    "gpt-4o-2024-08-06-preview",
+    "gpt-4o-mini-latest",
+    "gpt-4o-2099-99-99",
+    "gpt-4o-mini-9999-99-99",
+    "gpt-4o-2024-05-13",
+  ])("ne normalise pas un snapshot non répertorié : %s", (modelId) => {
+    expect(getModelPricing("openai", modelId)).toBeNull()
+    expect(getTiktokenModel("Serveur privé", modelId)).toBe("cl100k_base")
   })
 
   it.each([

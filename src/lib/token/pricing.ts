@@ -1,14 +1,18 @@
 import { TiktokenModel } from "@dqbd/tiktoken"
+import { isOfficialOpenAiBaseUrl } from "@/lib/ai/url"
 
 /**
  * Configuration du pricing par provider et modèle.
- * Prix en USD par 1 000 000 tokens (input / output).
- * Sources : tarifs publics OpenAI, Anthropic, Google, OpenRouter (approx.).
+ * Prix en USD par 1 000 000 tokens (input / cached input / output).
+ * Tarifs OpenAI vérifiés le 2026-11-06 :
+ * https://developers.openai.com/api/docs/models/gpt-4o
+ * https://developers.openai.com/api/docs/models/gpt-4o-mini
  * À maintenir à jour selon les changements de tarifs.
  */
 
 export interface ModelPricing {
   input: number   // USD par million de tokens d'entrée
+  cachedInput?: number // USD par million de tokens d'entrée servis depuis le cache
   output: number  // USD par million de tokens de sortie
   tiktokenModel?: TiktokenModel  // modèle tiktoken pour encodage exact
 }
@@ -20,8 +24,8 @@ export interface ProviderPricing {
 export const MODEL_PRICING: Record<string, ProviderPricing> = {
   // --- OpenAI ---
   openai: {
-    "gpt-4o": { input: 5.00, output: 15.00, tiktokenModel: "gpt-4o" as TiktokenModel },
-    "gpt-4o-mini": { input: 0.15, output: 0.60, tiktokenModel: "gpt-4o-mini" as TiktokenModel },
+    "gpt-4o": { input: 2.50, cachedInput: 1.25, output: 10.00, tiktokenModel: "gpt-4o" as TiktokenModel },
+    "gpt-4o-mini": { input: 0.15, cachedInput: 0.075, output: 0.60, tiktokenModel: "gpt-4o-mini" as TiktokenModel },
     "gpt-4-turbo": { input: 10.00, output: 30.00, tiktokenModel: "gpt-4-turbo" as TiktokenModel },
     "gpt-4": { input: 30.00, output: 60.00, tiktokenModel: "gpt-4" as TiktokenModel },
     "gpt-3.5-turbo": { input: 0.50, output: 1.50, tiktokenModel: "gpt-3.5-turbo" as TiktokenModel },
@@ -69,8 +73,18 @@ export const MODEL_PRICING: Record<string, ProviderPricing> = {
   },
 }
 
+const MODEL_ALIASES: Record<string, string> = {
+  "gpt-4o-2024-11-20": "gpt-4o",
+  "gpt-4o-2024-08-06": "gpt-4o",
+  "gpt-4o-mini-2024-07-18": "gpt-4o-mini",
+}
+
 function normalizeProvider(provider: string): string {
   return provider.trim().toLowerCase()
+}
+
+function normalizeModelId(modelId: string): string {
+  return MODEL_ALIASES[modelId] ?? modelId
 }
 
 /**
@@ -78,17 +92,7 @@ function normalizeProvider(provider: string): string {
  * Le nom d'affichage est contrôlé par l'utilisateur et ne constitue pas une preuve.
  */
 export function resolvePricingProvider(baseUrl: string): string | null {
-  try {
-    const endpoint = new URL(baseUrl)
-    const isOfficialOpenAi = endpoint.protocol === "https:" &&
-      endpoint.hostname === "api.openai.com" &&
-      endpoint.port === "" &&
-      endpoint.username === "" &&
-      endpoint.password === ""
-    return isOfficialOpenAi ? "openai" : null
-  } catch {
-    return null
-  }
+  return isOfficialOpenAiBaseUrl(baseUrl) ? "openai" : null
 }
 
 /**
@@ -99,18 +103,19 @@ export function getModelPricing(provider: string, modelId: string): ModelPricing
   if (normalizedProvider === "openrouter" || normalizedProvider === "default") return null
 
   const providerPricing = MODEL_PRICING[normalizedProvider]
-  return providerPricing?.[modelId] ?? null
+  return providerPricing?.[normalizeModelId(modelId)] ?? null
 }
 
 /**
  * Retourne le modèle tiktoken à utiliser pour l'encodage.
  */
 export function getTiktokenModel(provider: string, modelId: string): TiktokenModel {
-  const providerPricing = MODEL_PRICING[normalizeProvider(provider)]?.[modelId]
+  const normalizedModelId = normalizeModelId(modelId)
+  const providerPricing = MODEL_PRICING[normalizeProvider(provider)]?.[normalizedModelId]
   if (providerPricing?.tiktokenModel) return providerPricing.tiktokenModel
 
   for (const pricing of Object.values(MODEL_PRICING)) {
-    const knownModel = pricing[modelId]
+    const knownModel = pricing[normalizedModelId]
     if (knownModel?.tiktokenModel) return knownModel.tiktokenModel
   }
 
