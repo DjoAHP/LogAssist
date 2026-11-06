@@ -1,13 +1,18 @@
-![Démo animée du projet](assets/gifs/test.gif)
+![Démo animée du projet](assets/gifs/presentation.gif)
 
 # LogAssist
-
 ![Interface principale de LogAssist](src/assets/capture_ecran_interface.png)
+![Interface principale de LogAssist](src/assets/capture_ecran_interface_light.png)
 
 <p align="center">
-  <img src="src/assets/screen_models_settings.png" width="32%" alt="Sélection et configuration des modèles" />
-  <img src="src/assets/screen_system_prompt.png" width="32%" alt="Configuration du system prompt" />
-  <img src="src/assets/screen_mcp_settings.png" width="32%" alt="Configuration MCP TinyFish" />
+  <img src="src/assets/screen_models_settings.png" width="47%" alt="Sélection et configuration des modèles" />
+  <img src="src/assets/screen_models_settings_local.png" width="47%" alt="Sélection et configuration des modèles local" />
+</p>
+
+<p align="center">
+  <img src="src/assets/screen_system_prompt.png" width="47%" alt="Le system prompt" />
+  <img src="src/assets/screen_mcp_settings.png" width="47%" alt="MCP server" />
+
 </p>
 
 LogAssist est un assistant IA de bureau pour Windows conçu pour apprendre des logiciels. Il combine conversations persistées, fournisseurs LLM configurables et accès Web contrôlé via MCP TinyFish.
