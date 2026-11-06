@@ -146,10 +146,19 @@ describe("ChatView — présentation hybride des messages", () => {
     const assistantBubble = screen.getByTestId("message-assistant")
     expect(assistantBubble.className).toContain("border-l-2")
     expect(assistantBubble.className).toContain("border-l-[var(--brand-to)]")
-    expect(assistantBubble.className).toContain("bg-transparent")
+    expect(assistantBubble.className).toContain("bg-foreground/5")
+    expect(assistantBubble.className).not.toContain("bg-transparent")
     expect(assistantBubble.className).toContain("max-w-[56rem]")
     expect(assistantBubble.className).not.toContain("rounded-lg")
-    expect(assistantBubble.className).not.toContain("bg-foreground/5")
+  })
+
+  it("élargit la zone de conversation pour rapprocher les messages des bords", () => {
+    render(<ChatView {...base} vm={[msg({ role: "assistant", content: "Réponse" })]} />)
+
+    const content = screen.getByRole("log").firstElementChild
+    expect(content).not.toBeNull()
+    expect(content?.className).toContain("max-w-[90rem]")
+    expect(content?.className).not.toContain("max-w-5xl")
   })
 
   it("conserve une bulle d'alerte fermée pour une erreur assistant", () => {

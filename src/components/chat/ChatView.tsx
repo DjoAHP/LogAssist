@@ -214,7 +214,7 @@ export function ChatView({
           }}
           className={`h-full overflow-y-auto p-4${hasUnreadContent ? " pb-16" : ""}`}
         >
-          <div ref={contentRef} className="mx-auto w-full max-w-5xl space-y-4">
+          <div ref={contentRef} className="mx-auto w-full max-w-[90rem] space-y-4">
             {vm.length === 0 && !hasModel && (
               <p className="text-sm text-muted-foreground">{t.chat.configureProvider}</p>
             )}
@@ -366,7 +366,7 @@ function MessageBubble({
     ? "max-w-[88%] rounded-lg border border-destructive bg-destructive/10 px-3 py-2"
     : isUser
       ? "max-w-[80%] rounded-lg border border-border bg-foreground/5 px-3 py-2"
-      : "w-full max-w-[56rem] border-l-2 border-l-[var(--brand-to)] bg-transparent px-4 py-2"
+      : "w-full max-w-[56rem] border-l-2 border-l-[var(--brand-to)] bg-foreground/5 px-4 py-2"
 
   return (
     <div className={`flex ${isUser ? "justify-end" : "justify-start"}`}>
