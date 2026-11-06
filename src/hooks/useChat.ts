@@ -81,6 +81,12 @@ function safeErrorMessage(error: unknown, exactSecrets: readonly string[] = []):
   return redactSensitiveDetail(message, exactSecrets)
 }
 
+function normalizeDuration(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0
+    ? Math.round(value)
+    : null
+}
+
 export function useChat(
   modelSelection: { provider: ProviderConfig; modelId: string; supportsImages: boolean } | null,
   webAccess: WebAccessConfig = WEB_DISABLED,
@@ -89,7 +95,8 @@ export function useChat(
   const [busy, setBusy] = useState(false)
   const [webToolsUnsupported, setWebToolsUnsupported] = useState(false)
   // Hoistés au niveau du hook : useRef dans une callback violerait les règles
-  // des hooks. Un seul tour actif à la fois (gate busy) → un ref partagé sûr.
+  // des hooks. Le verrou ref ferme la fenêtre avant le prochain rendu React.
+  const inFlightRef = useRef(false)
   const accRef = useRef("")
   const abortRef = useRef<AbortController | null>(null)
   const mcpRequestRef = useRef<string | null>(null)
@@ -138,7 +145,8 @@ export function useChat(
     ): Promise<boolean> => {
       const content = text.trim()
       if (!content && attachments.length === 0) return false
-      if (busy || !modelSelection) return false
+      if (inFlightRef.current || !modelSelection) return false
+      inFlightRef.current = true
       setBusy(true)
       const controller = new AbortController()
       abortRef.current = controller
@@ -225,8 +233,8 @@ export function useChat(
           const acc = accRef.current
           return (async (): Promise<void> => {
             const finalContent = result.text || acc
-            const latencyMs = Math.round(result.totalMs)
-            const firstTokenMs = metrics ? Math.round(result.firstTokenMs) : null
+            const latencyMs = normalizeDuration(result.totalMs)
+            const firstTokenMs = normalizeDuration(result.firstTokenMs)
             const id = await messagesDb.insert({
               conversation_id: conversationId,
               role: "assistant",
@@ -245,7 +253,7 @@ export function useChat(
             upsertLast({
               id,
               content: finalContent,
-              latencyMs,
+              latencyMs: latencyMs ?? undefined,
               firstTokenMs: firstTokenMs ?? undefined,
               inputTokens: metrics?.inputTokens,
               outputTokens: metrics?.outputTokens,
@@ -398,14 +406,37 @@ export function useChat(
           if (web) {
             setWebToolsUnsupported(unsupportedToolsRef.current.has(`${provider.id}/${modelId}`))
           }
-          const pricingProvider = resolvePricingProvider(provider.baseUrl) ?? ""
-          const providerMetrics = result.usage
-            ? metricsFromProviderUsage(result.usage, pricingProvider, modelId)
-            : null
-          const metrics = providerMetrics ?? (web
-            ? null
-            : estimateTurnMetrics(apiMessages, result.text, pricingProvider, modelId))
-          await persistDone(result, metrics)
+          let metrics: TurnMetrics | null = null
+          try {
+            const pricingProvider = resolvePricingProvider(provider.baseUrl) ?? ""
+            const providerMetrics = result.usage
+              ? metricsFromProviderUsage(result.usage, pricingProvider, modelId)
+              : null
+            metrics = providerMetrics ?? (web
+              ? null
+              : estimateTurnMetrics(apiMessages, result.text, pricingProvider, modelId))
+          } catch (metricsError) {
+            // Les métriques sont optionnelles : leur panne ne requalifie jamais
+            // une réponse fournisseur réussie en erreur API.
+            logger.error({
+              kind: "chat_metrics",
+              message: safeTurnErrorMessage(metricsError),
+            })
+          }
+          try {
+            await persistDone(result, metrics)
+          } catch (persistenceError) {
+            // La cause SQLite reste réservée au log reconstruit. La VM et la
+            // seconde tentative ne reçoivent qu'un payload public stable.
+            logger.error({
+              kind: "assistant_response_persistence",
+              message: safeTurnErrorMessage(persistenceError),
+            })
+            await persistError({
+              kind: "unknown",
+              message: PERSISTENCE_ERROR_MESSAGE,
+            } satisfies ApiErrorPayload)
+          }
         } catch (e) {
           await persistError(e)
         }
@@ -421,12 +452,13 @@ export function useChat(
       } finally {
         // Le runner et la persistance assistant sont terminés avant de rendre
         // l'input, y compris après erreur ou interruption.
+        inFlightRef.current = false
         setBusy(false)
         abortRef.current = null
         mcpRequestRef.current = null
       }
     },
-    [busy, modelSelection, webAccess],
+    [modelSelection, webAccess],
   )
 
   const interrupt = useCallback(() => {
@@ -490,11 +522,13 @@ function mapRow(r: MessageRow): ChatMessageVM {
       // Valeur historique invalide : aucune source affichée.
     }
   }
+  const latencyMs = normalizeDuration(r.latency_ms)
+  const firstTokenMs = normalizeDuration(r.first_token_ms)
   return {
     id: r.id, role: r.role, content: r.content, attachments,
     modelLabel: r.model_label ?? undefined,
-    latencyMs: r.latency_ms ?? undefined,
-    firstTokenMs: r.first_token_ms ?? undefined,
+    latencyMs: latencyMs ?? undefined,
+    firstTokenMs: firstTokenMs ?? undefined,
     inputTokens: r.input_tokens ?? undefined,
     outputTokens: r.output_tokens ?? undefined,
     usageSource: r.usage_source ?? undefined,

@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { ApiError } from "@/lib/ai/errors"
 import type { IProvider } from "@/lib/ai/openai-compat"
@@ -57,8 +57,21 @@ function createHarness(results: (TurnResult | Error)[]) {
   return { input, runTurn, call }
 }
 
+function mockPerformanceNow(...values: number[]): void {
+  const pending = [...values]
+  vi.spyOn(performance, "now").mockImplementation(() => {
+    const value = pending.shift()
+    if (value === undefined) throw new Error("performance.now appelé plus de fois que prévu")
+    return value
+  })
+}
+
 beforeEach(() => {
   vi.clearAllMocks()
+})
+
+afterEach(() => {
+  vi.restoreAllMocks()
 })
 
 describe("runWebAgent", () => {
@@ -114,10 +127,12 @@ describe("runWebAgent", () => {
   })
 
   it("retourne directement une réponse sans appel MCP", async () => {
+    mockPerformanceNow(100, 130, 200)
     const { input, runTurn, call } = createHarness([turn("Réponse directe")])
 
     await expect(runWebAgent(input)).resolves.toMatchObject({
       text: "Réponse directe",
+      firstTokenMs: 35,
       sources: [],
     })
     expect(runTurn).toHaveBeenCalledTimes(1)
@@ -127,6 +142,7 @@ describe("runWebAgent", () => {
   })
 
   it("exécute search puis retourne la réponse finale avec sources dédupliquées", async () => {
+    mockPerformanceNow(100, 110, 175, 220)
     const { input, runTurn, call } = createHarness([
       turn("", [searchCall("call-1")]),
       turn("Réponse sourcée"),
@@ -146,6 +162,7 @@ describe("runWebAgent", () => {
       arguments: { query: "Tauri" },
     })
     expect(result.text).toBe("Réponse sourcée")
+    expect(result.firstTokenMs).toBe(80)
     expect(result.sources).toEqual([
       { url: "https://example.com", title: "Doc", origin: "search" },
     ])
@@ -190,6 +207,7 @@ describe("runWebAgent", () => {
   })
 
   it("borne la boucle à deux tours et quatre appels MCP", async () => {
+    mockPerformanceNow(100, 110, 150, 210, 300)
     const first = [searchCall("c1"), searchCall("c2"), searchCall("c3")]
     const second = [searchCall("c4"), searchCall("c5"), searchCall("c6")]
     const { input, runTurn, call } = createHarness([
@@ -202,6 +220,7 @@ describe("runWebAgent", () => {
     const result = await runWebAgent(input)
 
     expect(result.text).toBe("Réponse finale bornée")
+    expect(result.firstTokenMs).toBe(115)
     expect(call).toHaveBeenCalledTimes(4)
     expect(runTurn).toHaveBeenCalledTimes(3)
     expect(runTurn.mock.calls[2][3]).toMatchObject({ toolChoice: "none" })
@@ -222,6 +241,7 @@ describe("runWebAgent", () => {
   })
 
   it("relance une seule fois sans outils et mémorise l'incompatibilité", async () => {
+    mockPerformanceNow(100, 110, 170, 220)
     const unsupported = new ApiError(
       "unknown",
       "Erreur inattendue du fournisseur",
@@ -231,7 +251,12 @@ describe("runWebAgent", () => {
 
     const result = await runWebAgent(input)
 
-    expect(result).toMatchObject({ text: "Réponse sans Web", sources: [], warning: expect.any(String) })
+    expect(result).toMatchObject({
+      text: "Réponse sans Web",
+      firstTokenMs: 75,
+      sources: [],
+      warning: expect.any(String),
+    })
     expect(runTurn).toHaveBeenCalledTimes(2)
     expect(runTurn.mock.calls[1][3]).toEqual({})
     expect(input.unsupportedTools.has("provider-1/model-1")).toBe(true)

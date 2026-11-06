@@ -148,12 +148,13 @@ function finalResult(
   result: TurnResult,
   sources: Map<string, WebSource>,
   started: number,
+  firstTokenMs: number,
   warning?: string,
   usage?: TokenUsage,
 ): WebAgentResult {
   return {
     text: result.text,
-    firstTokenMs: result.firstTokenMs,
+    firstTokenMs,
     totalMs: performance.now() - started,
     sources: [...sources.values()],
     ...(warning ? { warning } : {}),
@@ -200,6 +201,7 @@ export async function runWebAgent(input: WebAgentInput): Promise<WebAgentResult>
 
   const runWithoutTools = async (warning?: string): Promise<WebAgentResult> => {
     throwIfAborted(input.signal)
+    const turnStarted = performance.now()
     const result = await input.provider.runTurn(
       input.request,
       input.apiKey,
@@ -213,6 +215,7 @@ export async function runWebAgent(input: WebAgentInput): Promise<WebAgentResult>
       result,
       sources,
       started,
+      (turnStarted - started) + result.firstTokenMs,
       warning,
       allTurnsReportedUsage ? { ...reportedUsage } : undefined,
     )
@@ -231,6 +234,7 @@ export async function runWebAgent(input: WebAgentInput): Promise<WebAgentResult>
     for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
       throwIfAborted(input.signal)
       const request: ChatRequest = { ...input.request, messages: [...messages] }
+      const turnStarted = performance.now()
       const result = await input.provider.runTurn(
         request,
         input.apiKey,
@@ -249,6 +253,7 @@ export async function runWebAgent(input: WebAgentInput): Promise<WebAgentResult>
           result,
           sources,
           started,
+          (turnStarted - started) + result.firstTokenMs,
           warning,
           allTurnsReportedUsage ? { ...reportedUsage } : undefined,
         )
@@ -295,6 +300,7 @@ export async function runWebAgent(input: WebAgentInput): Promise<WebAgentResult>
     }
 
     throwIfAborted(input.signal)
+    const turnStarted = performance.now()
     const final = await input.provider.runTurn(
       { ...input.request, messages },
       input.apiKey,
@@ -308,6 +314,7 @@ export async function runWebAgent(input: WebAgentInput): Promise<WebAgentResult>
       final,
       sources,
       started,
+      (turnStarted - started) + final.firstTokenMs,
       warning,
       allTurnsReportedUsage ? { ...reportedUsage } : undefined,
     )

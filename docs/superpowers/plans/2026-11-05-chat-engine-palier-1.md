@@ -1483,10 +1483,10 @@ const persistDone = (
       content: finalContent,
       attachments: "[]",
       model_label: label,
-      latency_ms: Math.round(result.totalMs),
+      latency_ms: normalizeDuration(result.totalMs),
       error: null,
       sources: JSON.stringify(result.sources),
-      first_token_ms: metrics ? Math.round(result.firstTokenMs) : null,
+      first_token_ms: normalizeDuration(result.firstTokenMs),
       input_tokens: metrics?.inputTokens ?? null,
       output_tokens: metrics?.outputTokens ?? null,
       usage_source: metrics?.usageSource ?? null,
@@ -1495,8 +1495,8 @@ const persistDone = (
     upsertLast({
       id,
       content: finalContent,
-      latencyMs: Math.round(result.totalMs),
-      firstTokenMs: metrics ? Math.round(result.firstTokenMs) : undefined,
+      latencyMs: normalizeDuration(result.totalMs) ?? undefined,
+      firstTokenMs: normalizeDuration(result.firstTokenMs) ?? undefined,
       inputTokens: metrics?.inputTokens,
       outputTokens: metrics?.outputTokens,
       usageSource: metrics?.usageSource,
@@ -1509,8 +1509,9 @@ const persistDone = (
 }
 ```
 
-`persistDone` doit rejeter vers le `inner catch`. Il ne doit jamais absorber un
-échec d'insert : ce dernier est matérialisé par `persistError`.
+`persistDone` ne doit jamais absorber un échec d'insert. Son appelant utilise une
+branche dédiée qui journalise la cause reconstruite et redacted, puis transmet à
+`persistError` uniquement le message public générique de persistance.
 
 - [ ] **Step 6: Unifier l'exécution directe et Web**
 
@@ -1552,14 +1553,27 @@ try {
   setWebToolsUnsupported(
     unsupportedToolsRef.current.has(`${provider.id}/${modelId}`),
   )
-  const pricingProvider = resolvePricingProvider(provider.baseUrl) ?? ""
-  const providerMetrics = result.usage
-    ? metricsFromProviderUsage(result.usage, pricingProvider, modelId)
-    : null
-  const metrics = providerMetrics ?? (web
-    ? null
-    : estimateTurnMetrics(apiMessages, result.text, pricingProvider, modelId))
-  await persistDone(result, metrics)
+  let metrics: TurnMetrics | null = null
+  try {
+    const pricingProvider = resolvePricingProvider(provider.baseUrl) ?? ""
+    const providerMetrics = result.usage
+      ? metricsFromProviderUsage(result.usage, pricingProvider, modelId)
+      : null
+    metrics = providerMetrics ?? (web
+      ? null
+      : estimateTurnMetrics(apiMessages, result.text, pricingProvider, modelId))
+  } catch (metricsError) {
+    logger.error({ kind: "chat_metrics", message: safeTurnErrorMessage(metricsError) })
+  }
+  try {
+    await persistDone(result, metrics)
+  } catch (persistenceError) {
+    logger.error({
+      kind: "assistant_response_persistence",
+      message: safeTurnErrorMessage(persistenceError),
+    })
+    await persistError({ kind: "unknown", message: PERSISTENCE_ERROR_MESSAGE })
+  }
 } catch (error) {
   await persistError(error)
 }
@@ -1611,6 +1625,29 @@ test et de récupération des modèles.
 Si l'insert d'erreur échoue à son tour, conserver une erreur explicite et non
 sensible dans la VM, journaliser uniquement un objet reconstruit et redacted,
 puis terminer `send()` avec `true` sans nouvelle tentative de persistance.
+
+Complément issu de la revue globale :
+
+- `send()` utilise un verrou synchrone `inFlightRef`, acquis avant `setBusy` et
+  libéré dans `finally`. Le state `busy` reste exclusivement un état d'UI et ne
+  protège plus l'exclusion mutuelle entre deux appels effectués avant un rendu.
+- Le calcul optionnel des métriques est isolé dans son propre `try/catch`. Une
+  exception de comptage ou de tarification est journalisée sous forme reconstruite
+  et redacted, puis la réponse est persistée avec ses métriques de tokens, source
+  et coût à `NULL`, sans créer d'erreur fournisseur.
+- `first_token_ms` et `latency_ms` sont validés indépendamment : seuls les nombres
+  finis et positifs ou nuls sont arrondis et exposés dans SQLite/VM. Le TTFT ne
+  dépend jamais de la présence de métriques de tokens. Cette validation s'applique
+  aussi au mapping des lignes historiques.
+- Un rejet de `persistDone` suit une branche dédiée : la cause SQLite est réservée
+  au log redacted et `persistError` reçoit uniquement le payload public générique
+  `{ kind: "unknown", message: PERSISTENCE_ERROR_MESSAGE }`. Le mécanisme
+  `persistenceFailed` conserve ce même message si la seconde insertion échoue.
+- Le TTFT Web est mesuré depuis le début de `runWebAgent` jusqu'au premier token
+  du tour qui produit réellement la réponse finale. Chaque appel `runTurn` capture
+  son instant de départ ; les tours d'outils intermédiaires ne fournissent jamais
+  le TTFT final. La règle couvre la réponse directe, la réponse après recherche,
+  le dernier tour forcé et le repli sans outils.
 
 Enfin, `load()` réapplique uniquement les warnings Web en mémoire dont l'id
 persistant correspond exactement à une row rechargée ; aucun warning n'est

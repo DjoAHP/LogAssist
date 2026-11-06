@@ -219,6 +219,42 @@ describe("useChat.send — contract anti-perte", () => {
     )
   })
 
+  it("conserve la réponse quand l'estimation des métriques échoue", async () => {
+    runTurnMock.mockResolvedValueOnce({
+      text: "Réponse sans métriques",
+      toolCalls: [],
+      firstTokenMs: 18,
+      totalMs: 42,
+    })
+    estimateTurnMetricsMock.mockImplementationOnce(() => {
+      throw new Error("metric failed with Bearer sk-metric-secret")
+    })
+    const { result } = renderHook(() => useChat(modelSelection))
+
+    await act(async () => {
+      expect(await result.current.send("conv-1", "Salut")).toBe(true)
+    })
+
+    expect(messagesDb.insert).toHaveBeenLastCalledWith(expect.objectContaining({
+      role: "assistant",
+      content: "Réponse sans métriques",
+      error: null,
+      latency_ms: 42,
+      first_token_ms: 18,
+      input_tokens: null,
+      output_tokens: null,
+      usage_source: null,
+      cost_microusd: null,
+    }))
+    expect(result.current.vm[result.current.vm.length - 1]).toMatchObject({
+      content: "Réponse sans métriques",
+      latencyMs: 42,
+      firstTokenMs: 18,
+    })
+    expect(result.current.vm[result.current.vm.length - 1].apiError).toBeUndefined()
+    expect(JSON.stringify(loggerErrorMock.mock.calls)).not.toContain("sk-metric-secret")
+  })
+
   it("estime les métriques quand l'usage fournisseur est invalide", async () => {
     metricsFromProviderUsageMock.mockReturnValueOnce(null)
     const { result } = renderHook(() => useChat(modelSelection))
@@ -297,7 +333,8 @@ describe("useChat.send — contract anti-perte", () => {
         role: "assistant",
         content: "Réponse Web",
         sources: JSON.stringify(sources),
-        first_token_ms: null,
+        latency_ms: 15,
+        first_token_ms: 2,
         input_tokens: null,
         output_tokens: null,
         usage_source: null,
@@ -309,8 +346,9 @@ describe("useChat.send — contract anti-perte", () => {
       content: "Réponse Web",
       sources,
       webWarning: "Web partiel",
+      latencyMs: 15,
+      firstTokenMs: 2,
     })
-    expect(result.current.vm[result.current.vm.length - 1].firstTokenMs).toBeUndefined()
     expect(result.current.vm[result.current.vm.length - 1].inputTokens).toBeUndefined()
     const webInput = runWebAgentMock.mock.calls[0][0]
     expect(webInput.signal).toBeInstanceOf(AbortSignal)
@@ -343,13 +381,64 @@ describe("useChat.send — contract anti-perte", () => {
     expect(messagesDb.insert).toHaveBeenCalledWith(
       expect.objectContaining({
         role: "assistant",
-        first_token_ms: null,
+        latency_ms: 20,
+        first_token_ms: 4,
         input_tokens: null,
         output_tokens: null,
         usage_source: null,
         cost_microusd: null,
       }),
     )
+  })
+
+  it.each([
+    ["NaN", Number.NaN],
+    ["négatif", -1],
+  ])("ignore un TTFT %s sans perdre la réponse", async (_label, firstTokenMs) => {
+    runTurnMock.mockResolvedValueOnce({
+      text: "Réponse valide",
+      toolCalls: [],
+      firstTokenMs,
+      totalMs: 20,
+      usage: { inputTokens: 1, outputTokens: 2 },
+    })
+    const { result } = renderHook(() => useChat(modelSelection))
+
+    await act(async () => {
+      expect(await result.current.send("conv-1", "Salut")).toBe(true)
+    })
+
+    expect(messagesDb.insert).toHaveBeenLastCalledWith(expect.objectContaining({
+      role: "assistant",
+      content: "Réponse valide",
+      latency_ms: 20,
+      first_token_ms: null,
+      error: null,
+    }))
+    expect(result.current.vm[result.current.vm.length - 1].firstTokenMs).toBeUndefined()
+  })
+
+  it("ignore une latence totale infinie sans perdre la réponse", async () => {
+    runTurnMock.mockResolvedValueOnce({
+      text: "Réponse valide",
+      toolCalls: [],
+      firstTokenMs: 10,
+      totalMs: Number.POSITIVE_INFINITY,
+      usage: { inputTokens: 1, outputTokens: 2 },
+    })
+    const { result } = renderHook(() => useChat(modelSelection))
+
+    await act(async () => {
+      expect(await result.current.send("conv-1", "Salut")).toBe(true)
+    })
+
+    expect(messagesDb.insert).toHaveBeenLastCalledWith(expect.objectContaining({
+      role: "assistant",
+      latency_ms: null,
+      first_token_ms: 10,
+      error: null,
+    }))
+    expect(result.current.vm[result.current.vm.length - 1].latencyMs).toBeUndefined()
   })
 
   it("retourne true et matérialise l'erreur si l'orchestration échoue après l'insert user", async () => {
@@ -522,6 +611,22 @@ describe("useChat.send — contract anti-perte", () => {
       costMicrousd: 4,
     })
     expect(result.current.vm[1].sources).toEqual([])
+  })
+
+  it("n'expose pas de durées historiques invalides dans la VM", async () => {
+    vi.mocked(messagesDb.listByConversation).mockResolvedValueOnce([
+      messageRow({
+        id: "invalid-durations",
+        latency_ms: Number.NaN,
+        first_token_ms: -5,
+      }),
+    ])
+    const { result } = renderHook(() => useChat(modelSelection))
+
+    await act(async () => result.current.load("conv-1"))
+
+    expect(result.current.vm[0].latencyMs).toBeUndefined()
+    expect(result.current.vm[0].firstTokenMs).toBeUndefined()
   })
 
   it("ne conserve que le kind des erreurs historiques non vérifiables", async () => {
@@ -720,6 +825,51 @@ describe("useChat.send — contract anti-perte", () => {
     expect(result.current.busy).toBe(false)
   })
 
+  it("refuse synchroniquement un second send puis libère le verrou", async () => {
+    let resolveFirstTurn: ((value: {
+      text: string
+      toolCalls: never[]
+      firstTokenMs: number
+      totalMs: number
+      usage: { inputTokens: number; outputTokens: number }
+    }) => void) | undefined
+    runTurnMock.mockImplementationOnce(() => new Promise((resolve) => {
+      resolveFirstTurn = resolve
+    }))
+    const { result } = renderHook(() => useChat(modelSelection))
+    let firstSend: Promise<boolean>
+    let secondSend: Promise<boolean>
+
+    act(() => {
+      firstSend = result.current.send("conv-1", "Premier")
+      secondSend = result.current.send("conv-1", "Second")
+    })
+
+    await expect(secondSend!).resolves.toBe(false)
+    await vi.waitFor(() => expect(resolveFirstTurn).toBeDefined())
+    expect(vi.mocked(messagesDb.insert).mock.calls.filter(([row]) => row.role === "user"))
+      .toHaveLength(1)
+    expect(runTurnMock).toHaveBeenCalledTimes(1)
+
+    await act(async () => {
+      resolveFirstTurn?.({
+        text: "Première réponse",
+        toolCalls: [],
+        firstTokenMs: 5,
+        totalMs: 10,
+        usage: { inputTokens: 1, outputTokens: 1 },
+      })
+      expect(await firstSend!).toBe(true)
+    })
+
+    await act(async () => {
+      expect(await result.current.send("conv-1", "Troisième")).toBe(true)
+    })
+    expect(runTurnMock).toHaveBeenCalledTimes(2)
+    expect(vi.mocked(messagesDb.insert).mock.calls.filter(([row]) => row.role === "user"))
+      .toHaveLength(2)
+  })
+
   it("résout true et persiste l'erreur quand runTurn rejette après l'insert user", async () => {
     runTurnMock.mockRejectedValueOnce({ kind: "network", message: "fail" })
     const { result } = renderHook(() => useChat(modelSelection))
@@ -810,9 +960,13 @@ describe("useChat.send — contract anti-perte", () => {
   })
 
   it("persiste une erreur si l'insert de la réponse finale échoue", async () => {
+    const opaqueKey = "CUSTOM.persistence-key+42/="
+    vi.mocked(secrets.get).mockResolvedValueOnce(opaqueKey)
     vi.mocked(messagesDb.insert)
       .mockResolvedValueOnce("user-1")
-      .mockRejectedValueOnce(new Error("assistant insert failed"))
+      .mockRejectedValueOnce(new Error(
+        `SQLITE_IOERR at C:\\private\\logassist.db with ${opaqueKey}`,
+      ))
       .mockResolvedValueOnce("error-1")
     const { result } = renderHook(() => useChat(modelSelection))
 
@@ -824,13 +978,23 @@ describe("useChat.send — contract anti-perte", () => {
     expect(messagesDb.insert).toHaveBeenLastCalledWith(
       expect.objectContaining({
         role: "assistant",
-        error: JSON.stringify({ kind: "unknown", message: "assistant insert failed" }),
+        error: JSON.stringify({
+          kind: "unknown",
+          message: "La réponse n'a pas pu être enregistrée.",
+        }),
       }),
     )
     expect(result.current.vm[result.current.vm.length - 1].apiError).toEqual({
       kind: "unknown",
-      message: "assistant insert failed",
+      message: "La réponse n'a pas pu être enregistrée.",
     })
+    const serializedInserts = JSON.stringify(vi.mocked(messagesDb.insert).mock.calls)
+    expect(serializedInserts).not.toContain("SQLITE_IOERR")
+    expect(serializedInserts).not.toContain("logassist.db")
+    expect(serializedInserts).not.toContain(opaqueKey)
+    const serializedLogs = JSON.stringify(loggerErrorMock.mock.calls)
+    expect(serializedLogs).toContain("[REDACTED]")
+    expect(serializedLogs).not.toContain(opaqueKey)
     expect(result.current.busy).toBe(false)
   })
 
