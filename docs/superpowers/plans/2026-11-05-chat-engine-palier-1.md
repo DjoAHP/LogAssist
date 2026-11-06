@@ -1026,10 +1026,28 @@ Créer `src/lib/chat/turnRunner.test.ts` :
 
 ```ts
 import { describe, expect, it, vi } from "vitest"
+import type { IProvider } from "@/lib/ai/openai-compat"
+import type { WebAgentInput } from "@/lib/mcp/webAgent"
 import { runAssistantTurn } from "./turnRunner"
+
+type WebTurnOptions = Omit<
+  WebAgentInput,
+  "provider" | "request" | "apiKey" | "modelId" | "callbacks" | "signal"
+>
 
 const request = { messages: [{ role: "user" as const, content: "Question" }] }
 const signal = new AbortController().signal
+const callbacks = {}
+
+const createWebOptions = (): WebTurnOptions => ({
+  webClient: {
+    call: vi.fn().mockResolvedValue({ content: "Résultat", sources: [] }),
+  },
+  toolChoice: "auto",
+  requestId: "assistant-1",
+  compatibilityKey: "provider/model",
+  unsupportedTools: new Set<string>(),
+})
 
 describe("runAssistantTurn", () => {
   it("retourne un résultat uniforme pour un tour direct", async () => {
@@ -1043,11 +1061,11 @@ describe("runAssistantTurn", () => {
       }),
     }
     const result = await runAssistantTurn({
-      provider: provider as never,
+      provider: provider as unknown as IProvider,
       request,
       apiKey: "secret",
       modelId: "model",
-      callbacks: {},
+      callbacks,
       signal,
     })
     expect(result).toMatchObject({
@@ -1061,7 +1079,7 @@ describe("runAssistantTurn", () => {
       "secret",
       "model",
       {},
-      {},
+      callbacks,
       signal,
     )
   })
@@ -1073,35 +1091,66 @@ describe("runAssistantTurn", () => {
       firstTokenMs: 15,
       totalMs: 90,
     })
-    const webInput = { enabled: true } as never
+    const provider = { runTurn: vi.fn() } as unknown as IProvider
+    const web = createWebOptions()
     const result = await runAssistantTurn({
-      provider: {} as never,
+      provider,
       request,
       apiKey: "secret",
       modelId: "model",
-      callbacks: {},
+      callbacks,
       signal,
-      web: webInput,
+      web,
       runWeb,
     })
-    expect(runWeb).toHaveBeenCalledWith(webInput)
+    expect(runWeb).toHaveBeenCalledWith({
+      ...web,
+      provider,
+      request,
+      apiKey: "secret",
+      modelId: "model",
+      callbacks,
+      signal,
+    })
     expect(result.text).toBe("Réponse Web")
   })
 
-  it("laisse remonter une erreur ou une annulation", async () => {
-    const abort = new DOMException("aborted", "AbortError")
-    const provider = { runTurn: vi.fn().mockRejectedValue(abort) }
-    await expect(runAssistantTurn({
-      provider: provider as never,
+  it("écrase les champs communs étrangers présents à l'exécution", async () => {
+    const foreignSignal = new AbortController().signal
+    const web = {
+      ...createWebOptions(),
+      modelId: "modèle étranger",
+      signal: foreignSignal,
+    } as unknown as WebTurnOptions
+    const runWeb = vi.fn().mockResolvedValue({
+      text: "Réponse Web",
+      sources: [],
+      firstTokenMs: 15,
+      totalMs: 90,
+    })
+
+    await runAssistantTurn({
+      provider: { runTurn: vi.fn() } as unknown as IProvider,
       request,
       apiKey: "secret",
       modelId: "model",
-      callbacks: {},
+      callbacks,
       signal,
-    })).rejects.toBe(abort)
+      web,
+      runWeb,
+    })
+
+    expect(runWeb).toHaveBeenCalledWith(expect.objectContaining({
+      modelId: "model",
+      signal,
+    }))
   })
 })
 ```
+
+Ajouter aussi des tests séparés pour une erreur ordinaire et un `AbortError`, sur
+les chemins direct et Web. Chaque rejet doit être propagé par identité. Conserver
+la vérification de propagation de `warning`, `usage` et `sources` sur le chemin Web.
 
 - [ ] **Step 2: Confirmer l'échec du module absent**
 
@@ -1132,23 +1181,42 @@ export interface AssistantTurnResult {
   usage?: TokenUsage
 }
 
-interface RunAssistantTurnInput {
+type WebTurnOptions = Omit<
+  WebAgentInput,
+  "provider" | "request" | "apiKey" | "modelId" | "callbacks" | "signal"
+>
+
+interface BaseTurnInput {
   provider: IProvider
   request: ChatRequest
   apiKey: string
   modelId: string
   callbacks: TurnCallbacks
   signal: AbortSignal
-  web?: WebAgentInput
-  runWeb?: (input: WebAgentInput) => Promise<WebAgentResult>
 }
+
+type RunAssistantTurnInput = BaseTurnInput & (
+  | { web?: undefined; runWeb?: undefined }
+  | {
+      web: WebTurnOptions
+      runWeb?: (input: WebAgentInput) => Promise<WebAgentResult>
+    }
+)
 
 export async function runAssistantTurn(
   input: RunAssistantTurnInput,
 ): Promise<AssistantTurnResult> {
   if (input.web) {
-    const result = await (input.runWeb ?? runWebAgent)(input.web)
-    return result
+    const webInput: WebAgentInput = {
+      ...input.web,
+      provider: input.provider,
+      request: input.request,
+      apiKey: input.apiKey,
+      modelId: input.modelId,
+      callbacks: input.callbacks,
+      signal: input.signal,
+    }
+    return (input.runWeb ?? runWebAgent)(webInput)
   }
   const result = await input.provider.runTurn(
     input.request,
@@ -1408,7 +1476,6 @@ Remplacer les deux branches d'exécution par :
 try {
   const web = webAccess.enabled && webAccess.configured
     ? {
-        provider: apiProvider,
         webClient: {
           call: async (requestId: string, request: Parameters<typeof tinyfish.call>[1]) => {
             mcpRequestRef.current = requestId
@@ -1419,12 +1486,7 @@ try {
             }
           },
         },
-        request: { messages: apiMessages },
-        apiKey,
-        modelId,
         toolChoice: resolveWebChoice(fullContent, options.forceWeb ?? false),
-        callbacks: turnCallbacks,
-        signal: controller.signal,
         requestId: assistantId,
         compatibilityKey: `${provider.id}/${modelId}`,
         unsupportedTools: unsupportedToolsRef.current,
