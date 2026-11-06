@@ -262,14 +262,15 @@ function MessageBubble({
   const tokenLabel = totalTokens === undefined
     ? undefined
     : `${m.usageSource === "estimated" ? "≈ " : ""}${formatTokens(totalTokens)} ${t.chat.tokens}`
+  const bubbleClass = m.apiError
+    ? "max-w-[88%] rounded-lg border border-destructive bg-destructive/10 px-3 py-2"
+    : isUser
+      ? "max-w-[80%] rounded-lg border border-border bg-foreground/5 px-3 py-2"
+      : "w-full max-w-[56rem] border-l-2 border-l-[var(--brand-to)] bg-transparent px-4 py-2"
 
   return (
     <div className={`flex ${isUser ? "justify-end" : "justify-start"}`}>
-      <div
-        className={`max-w-[80%] rounded-lg border px-3 py-2 text-sm ${
-          m.apiError ? "border-destructive bg-destructive/10" : "border-border bg-foreground/5"
-        }`}
-      >
+      <div data-testid={`message-${m.role}`} className={`text-sm ${bubbleClass}`}>
         {attachments.length > 0 && (
           <div className="flex flex-wrap gap-1.5 mb-2">
             {attachments.map((a) =>

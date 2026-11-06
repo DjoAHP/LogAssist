@@ -95,6 +95,44 @@ function installResizeObserverMock(): ResizeObserverHarness {
   }
 }
 
+describe("ChatView — présentation hybride des messages", () => {
+  it("conserve une bulle fermée et compacte pour le message utilisateur", () => {
+    render(<ChatView {...base} vm={[msg({ role: "user", content: "Question" })]} />)
+
+    const userBubble = screen.getByTestId("message-user")
+    expect(userBubble.className).toContain("rounded-lg")
+    expect(userBubble.className).toContain("border")
+    expect(userBubble.className).toContain("bg-foreground/5")
+    expect(userBubble.className).toContain("max-w-[80%]")
+  })
+
+  it("ouvre la surface de lecture d'une réponse assistant normale", () => {
+    render(<ChatView {...base} vm={[msg({ role: "assistant", content: "Réponse" })]} />)
+
+    const assistantBubble = screen.getByTestId("message-assistant")
+    expect(assistantBubble.className).toContain("border-l-2")
+    expect(assistantBubble.className).toContain("border-l-[var(--brand-to)]")
+    expect(assistantBubble.className).toContain("bg-transparent")
+    expect(assistantBubble.className).toContain("max-w-[56rem]")
+    expect(assistantBubble.className).not.toContain("rounded-lg")
+    expect(assistantBubble.className).not.toContain("bg-foreground/5")
+  })
+
+  it("conserve une bulle d'alerte fermée pour une erreur assistant", () => {
+    render(<ChatView {...base} vm={[msg({
+      role: "assistant",
+      content: "",
+      apiError: { kind: "unknown", message: "Échec" },
+    })]} />)
+
+    const assistantBubble = screen.getByTestId("message-assistant")
+    expect(assistantBubble.className).toContain("rounded-lg")
+    expect(assistantBubble.className).toContain("border-destructive")
+    expect(assistantBubble.className).toContain("bg-destructive/10")
+    expect(assistantBubble.className).not.toContain("border-l-[var(--brand-to)]")
+  })
+})
+
 describe("ChatView — suivi respectueux du défilement", () => {
   it("suit automatiquement le streaming lorsque la vue est près du bas", () => {
     const { rerender } = render(
