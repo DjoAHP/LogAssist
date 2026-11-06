@@ -1,4 +1,4 @@
-export const SCHEMA_VERSION = 6
+export const SCHEMA_VERSION = 7
 
 // Chaque statement est un item distinct : audit-able, et exécution séquentielle
 // garantie (sqlx rejette le multi-statement dans un seul execute).
@@ -147,6 +147,10 @@ export const SCHEMA_V6_STATEMENTS: string[] = [
   "ALTER TABLE messages ADD COLUMN output_tokens INTEGER",
   "ALTER TABLE messages ADD COLUMN usage_source TEXT CHECK (usage_source IN ('provider','estimated'))",
   "ALTER TABLE messages ADD COLUMN cost_microusd INTEGER",
+]
+
+export const SCHEMA_V7_STATEMENTS: string[] = [
+  `UPDATE messages SET error = CASE WHEN error = '{"interrupted":true}' THEN '{"interrupted":true}' ELSE NULL END WHERE error IS NOT NULL`,
 ]
 
 export const SCHEMA_V1 = SCHEMA_V1_STATEMENTS.join(";\n")

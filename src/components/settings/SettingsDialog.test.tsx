@@ -9,6 +9,7 @@ const mockSecretsGet = vi.hoisted(() => vi.fn())
 const mockTestConnection = vi.hoisted(() => vi.fn())
 const mockListRemoteModels = vi.hoisted(() => vi.fn())
 const mockDialogConfirm = vi.hoisted(() => vi.fn())
+const mockLoggerError = vi.hoisted(() => vi.fn())
 
 vi.mock("@/lib/db/database", () => ({
   execute: mockExecute,
@@ -19,6 +20,9 @@ vi.mock("@tauri-apps/plugin-dialog", () => ({ confirm: mockDialogConfirm, ask: v
 vi.mock("@/lib/ai/factory", () => ({
   createProvider: () => ({ testConnection: mockTestConnection, listRemoteModels: mockListRemoteModels }),
   buildPreview: (p: string, m: string) => `${p} › ${m}`,
+}))
+vi.mock("@/lib/logger", () => ({
+  logger: { debug: vi.fn(), error: mockLoggerError },
 }))
 vi.mock("./ProviderForm", () => ({ ProviderForm: () => <div data-testid="form-stub" /> }))
 
@@ -83,6 +87,11 @@ async function fetchButton(): Promise<HTMLElement> {
   return btn as HTMLElement
 }
 
+async function testButton(): Promise<HTMLElement> {
+  await screen.findByText("OpenRouter")
+  return screen.getByText(t.settings.test, { selector: "button" })
+}
+
 describe("SettingsDialog — récupération des modèles", () => {
   it("sans clé API : statut fail noKey, aucun appel réseau", async () => {
     mockSecretsGet.mockResolvedValue(null)
@@ -116,6 +125,25 @@ describe("SettingsDialog — récupération des modèles", () => {
       const row = screen.getByText("OpenRouter").closest("li")!
       expect(row.querySelector('[data-fetch-status]')?.textContent).toContain("Clé API invalide")
     })
+  })
+
+  it("masque la clé exacte d'une erreur inconnue de récupération", async () => {
+    const opaqueKey = "CUSTOM.key+42/="
+    mockSecretsGet.mockResolvedValue(opaqueKey)
+    mockListRemoteModels.mockRejectedValue(
+      new Error(`Credential ${opaqueKey} rejected`),
+    )
+    renderDialog()
+
+    fireEvent.click(await fetchButton())
+
+    await waitFor(() => {
+      const row = screen.getByText("OpenRouter").closest("li")!
+      expect(row.querySelector('[data-fetch-status]')?.textContent).toContain(t.settings.fetchFail)
+    })
+    const sinks = JSON.stringify({ ui: document.body.textContent, logs: mockLoggerError.mock.calls })
+    expect(sinks).not.toContain(opaqueKey)
+    expect(JSON.stringify(mockLoggerError.mock.calls)).toContain("[REDACTED]")
   })
 
   it("succès : statut ok affichant le nombre ajouté", async () => {
@@ -166,6 +194,24 @@ describe("SettingsDialog — récupération des modèles", () => {
     })
     // le modèle nouvellement ajouté apparaît ensuite dans la liste du modal
     expect(screen.getByText("openai/nouveau-modele")).not.toBeNull()
+  })
+})
+
+describe("SettingsDialog — test de connexion", () => {
+  it("masque la clé exacte d'une exception inconnue dans l'UI et les logs", async () => {
+    const opaqueKey = "CUSTOM.key+42/="
+    mockSecretsGet.mockResolvedValue(opaqueKey)
+    mockTestConnection.mockRejectedValue(
+      new Error(`Credential ${opaqueKey} rejected`),
+    )
+    renderDialog()
+
+    fireEvent.click(await testButton())
+
+    await waitFor(() => expect(screen.getByText(t.settings.fail, { exact: false })).not.toBeNull())
+    const sinks = JSON.stringify({ ui: document.body.textContent, logs: mockLoggerError.mock.calls })
+    expect(sinks).not.toContain(opaqueKey)
+    expect(JSON.stringify(mockLoggerError.mock.calls)).toContain("[REDACTED]")
   })
 })
 

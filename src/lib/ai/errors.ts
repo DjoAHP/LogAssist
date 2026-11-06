@@ -1,4 +1,4 @@
-import type { ApiErrorKind } from "./types"
+import { API_ERROR_KINDS, type ApiErrorKind } from "./types"
 import { t } from "@/i18n/fr"
 
 // Mapping kind -> clé i18n (fr.ts utilise du camelCase), source unique partagée
@@ -30,7 +30,7 @@ export class ApiError extends Error {
 }
 
 const JSON_NAMED_SECRET = /("(?:authorization|api[_-]?key|token)"\s*:\s*")(?:Bearer\s+)?[^"]*(")/gi
-const AUTHORIZATION_SECRET = /(\bAuthorization\s*:\s*)(?:Bearer\s+)?[^\s,;]+/gi
+const AUTHORIZATION_SECRET = /(\bAuthorization[ \t]*:[ \t]*)[^\r\n]*/gi
 const NAMED_SECRET = /(\b(?:api[_-]?key|token)\s*[:=]\s*)[^\s,;&]+/gi
 const BEARER_SECRET = /(\bBearer)\s+[^\s,;"']+/gi
 const OPENAI_LIKE_SECRET = /\bsk-[A-Za-z0-9][A-Za-z0-9._~+/=-]*/g
@@ -52,6 +52,12 @@ export function redactSensitiveDetail(
     .replace(NAMED_SECRET, "$1[REDACTED]")
     .replace(BEARER_SECRET, "$1 [REDACTED]")
     .replace(OPENAI_LIKE_SECRET, "[REDACTED]")
+}
+
+export function normalizeApiErrorKind(value: unknown): ApiErrorKind {
+  return typeof value === "string" && API_ERROR_KINDS.includes(value as ApiErrorKind)
+    ? value as ApiErrorKind
+    : "unknown"
 }
 
 // Le suffixe (?:\b|_) étend \b : snake_case (insufficient_quota) et codes réseau

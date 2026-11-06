@@ -3,6 +3,13 @@ import { ApiError } from "./errors"
 import { buildPreview, createOpenAICompatible, createProvider } from "./openai-compat"
 import type { ChatRequest, ProviderConfig, ToolDefinition } from "./types"
 
+const loggerDebugMock = vi.hoisted(() => vi.fn())
+const loggerErrorMock = vi.hoisted(() => vi.fn())
+
+vi.mock("../logger", () => ({
+  logger: { debug: loggerDebugMock, error: loggerErrorMock },
+}))
+
 const CFG: ProviderConfig = {
   id: "prov-openrouter",
   name: "OpenRouter",
@@ -10,6 +17,11 @@ const CFG: ProviderConfig = {
   baseUrl: "https://openrouter.ai/api/v1/",
   secretRef: "openrouter.key",
 }
+
+const BOUNDARY_API_KEY = "CUSTOM.alpha+42/=OMEGA.beta-99"
+const BOUNDARY_API_KEY_MIDDLE = Math.floor(BOUNDARY_API_KEY.length / 2)
+const BOUNDARY_API_KEY_FIRST_HALF = BOUNDARY_API_KEY.slice(0, BOUNDARY_API_KEY_MIDDLE)
+const BOUNDARY_API_KEY_SECOND_HALF = BOUNDARY_API_KEY.slice(BOUNDARY_API_KEY_MIDDLE)
 
 function makeRes(overrides: {
   ok?: boolean
@@ -88,6 +100,27 @@ describe("createOpenAICompatible — listRemoteModels", () => {
     await expect(adapter.listRemoteModels("KEY-123")).rejects.toMatchObject({ kind: "network" })
   })
 
+  it("redacte la clé exacte d'un rejet réseau avant propagation", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(
+      new Error(`Credential ${BOUNDARY_API_KEY} rejected`),
+    ))
+
+    let caught: unknown
+    try {
+      await createOpenAICompatible(CFG).listRemoteModels(BOUNDARY_API_KEY)
+    } catch (error) {
+      caught = error
+    }
+
+    const serialized = JSON.stringify({
+      message: (caught as Error).message,
+      detail: (caught as ApiError).detail,
+      stack: (caught as Error).stack,
+    })
+    expect(serialized).not.toContain(BOUNDARY_API_KEY)
+    expect(serialized).toContain("[REDACTED]")
+  })
+
   it("data manquante → liste vide", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(makeRes({ json: {} })))
     const adapter = createOpenAICompatible(CFG)
@@ -105,6 +138,8 @@ describe("createOpenAICompatible — listRemoteModels", () => {
 
 afterEach(() => {
   vi.unstubAllGlobals()
+  loggerDebugMock.mockReset()
+  loggerErrorMock.mockReset()
 })
 
 describe("createOpenAICompatible — complete", () => {
@@ -165,6 +200,34 @@ describe("createOpenAICompatible — complete", () => {
     })
   })
 
+  it("redacte le body avant normalisation d'une erreur HTTP métier", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(makeRes({
+      ok: false,
+      status: 401,
+      text: `Credential ${BOUNDARY_API_KEY} was rejected`,
+    })))
+    const adapter = createOpenAICompatible(CFG)
+    const req: ChatRequest = { messages: [{ role: "user", content: "hi" }] }
+
+    let caught: unknown
+    try {
+      await adapter.complete(req, BOUNDARY_API_KEY, "m")
+    } catch (error) {
+      caught = error
+    }
+
+    expect(caught).toBeInstanceOf(ApiError)
+    const apiError = caught as ApiError
+    const serializedError = JSON.stringify({
+      message: apiError.message,
+      detail: apiError.detail,
+    })
+    expect(serializedError).not.toContain(BOUNDARY_API_KEY)
+    expect(serializedError).not.toContain(BOUNDARY_API_KEY_FIRST_HALF)
+    expect(serializedError).not.toContain(BOUNDARY_API_KEY_SECOND_HALF)
+    expect(serializedError).toContain("[REDACTED]")
+  })
+
   it("429 + retry-after: 0.8 → ApiError rate_limit retryAfterMs 800", async () => {
     vi.stubGlobal(
       "fetch",
@@ -195,6 +258,52 @@ describe("createOpenAICompatible — complete", () => {
     await expect(adapter.complete(req, "K", "m")).rejects.toMatchObject({ kind: "quota" })
   })
 
+  it("classifie le quota sur le body brut mais retourne un détail Authorization sûr", async () => {
+    const body = 'Authorization: Digest username="admin", nonce="abc"; response="deadbeef"\ninsufficient_quota'
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(
+      makeRes({ ok: false, status: 429, text: body }),
+    ))
+
+    let caught: unknown
+    try {
+      await createOpenAICompatible(CFG).complete(
+        { messages: [{ role: "user", content: "hi" }] },
+        "K",
+        "m",
+      )
+    } catch (error) {
+      caught = error
+    }
+
+    expect(caught).toMatchObject({ kind: "quota" })
+    expect((caught as ApiError).detail).toContain("insufficient_quota")
+    expect((caught as ApiError).detail).not.toContain("nonce")
+    expect((caught as ApiError).detail).not.toContain("response")
+  })
+
+  it("classifie une erreur image sur le body brut mais retourne un détail sûr", async () => {
+    const body = 'Authorization: Digest nonce="abc", response="deadbeef"\nimage input unsupported'
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(
+      makeRes({ ok: false, status: 400, text: body }),
+    ))
+
+    let caught: unknown
+    try {
+      await createOpenAICompatible(CFG).complete(
+        { messages: [{ role: "user", content: "hi" }] },
+        "K",
+        "m",
+      )
+    } catch (error) {
+      caught = error
+    }
+
+    expect(caught).toMatchObject({ kind: "image_unsupported" })
+    expect((caught as ApiError).detail).toContain("image input unsupported")
+    expect((caught as ApiError).detail).not.toContain("nonce")
+    expect((caught as ApiError).detail).not.toContain("response")
+  })
+
   it("500 → kind unavailable", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(makeRes({ ok: false, status: 500, text: "oops" })))
     const adapter = createOpenAICompatible(CFG)
@@ -210,6 +319,31 @@ describe("createOpenAICompatible — complete", () => {
       name: "ApiError",
       kind: "network",
     })
+  })
+
+  it("redacte la clé exacte d'un rejet réseau complete", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(
+      new Error(`Credential ${BOUNDARY_API_KEY} rejected`),
+    ))
+
+    let caught: unknown
+    try {
+      await createOpenAICompatible(CFG).complete(
+        { messages: [{ role: "user", content: "hi" }] },
+        BOUNDARY_API_KEY,
+        "m",
+      )
+    } catch (error) {
+      caught = error
+    }
+
+    const serialized = JSON.stringify({
+      message: (caught as Error).message,
+      detail: (caught as ApiError).detail,
+      stack: (caught as Error).stack,
+    })
+    expect(serialized).not.toContain(BOUNDARY_API_KEY)
+    expect(serialized).toContain("[REDACTED]")
   })
 })
 
@@ -274,6 +408,30 @@ describe("createOpenAICompatible — stream", () => {
     expect(err.kind).toBe("network")
   })
 
+  it("stream transmet à onError une erreur réseau sans la clé exacte", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(
+      new Error(`Credential ${BOUNDARY_API_KEY} rejected`),
+    ))
+    const onError = vi.fn()
+
+    await createOpenAICompatible(CFG).stream(
+      { messages: [{ role: "user", content: "hi" }] },
+      BOUNDARY_API_KEY,
+      "m",
+      { onError },
+      new AbortController().signal,
+    )
+
+    const error = onError.mock.calls[0][0] as ApiError
+    const serialized = JSON.stringify({
+      message: error.message,
+      detail: error.detail,
+      stack: error.stack,
+    })
+    expect(serialized).not.toContain(BOUNDARY_API_KEY)
+    expect(serialized).toContain("[REDACTED]")
+  })
+
   it("stream : un throw du consommateur dans onDelta → onError (pas d'absorption silencieuse)", async () => {
     const stream = sseStream([
       `data: {"choices":[{"delta":{"content":"un"}}]}${SSE}`,
@@ -327,7 +485,11 @@ describe("createOpenAICompatible — stream", () => {
 
   it("stream aborté → onError avec AbortError (pas ApiError)", async () => {
     const controller = new AbortController()
-    const abortErr = new DOMException("This operation was aborted", "AbortError")
+    const abortErr = new DOMException(
+      `Request cancelled for ${BOUNDARY_API_KEY}`,
+      "AbortError",
+    ) as DOMException & { providerDebug?: string }
+    abortErr.providerDebug = `raw ${BOUNDARY_API_KEY}`
     vi.stubGlobal(
       "fetch",
       vi.fn().mockImplementation((_url: string, init: RequestInit) => {
@@ -347,15 +509,31 @@ describe("createOpenAICompatible — stream", () => {
     const adapter = createOpenAICompatible(CFG)
     const req: ChatRequest = { messages: [{ role: "user", content: "hi" }] }
 
-    const p = adapter.stream(req, "K", "m", { onDone, onError }, controller.signal)
+    const p = adapter.stream(
+      req,
+      BOUNDARY_API_KEY,
+      "m",
+      { onDone, onError },
+      controller.signal,
+    )
     controller.abort()
     await p
 
     expect(onDone).not.toHaveBeenCalled()
     expect(onError).toHaveBeenCalledTimes(1)
-    const err = onError.mock.calls[0][0]
+    const err = onError.mock.calls[0][0] as Error & { providerDebug?: string }
+    expect(err).not.toBe(abortErr)
     expect(err.name).toBe("AbortError")
     expect(err).not.toBeInstanceOf(ApiError)
+    expect(err.providerDebug).toBeUndefined()
+    const serialized = JSON.stringify({
+      name: err.name,
+      message: err.message,
+      stack: err.stack,
+      providerDebug: err.providerDebug,
+    })
+    expect(serialized).not.toContain(BOUNDARY_API_KEY)
+    expect(serialized).toContain("[REDACTED]")
   })
 })
 
@@ -646,9 +824,41 @@ describe("createOpenAICompatible — runTurn", () => {
     ).rejects.toMatchObject({ kind: "auth" })
   })
 
+  it("redacte la clé exacte d'un rejet réseau runTurn", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(
+      new Error(`Credential ${BOUNDARY_API_KEY} rejected`),
+    ))
+
+    let caught: unknown
+    try {
+      await createOpenAICompatible(CFG).runTurn(
+        { messages: [{ role: "user", content: "doc" }] },
+        BOUNDARY_API_KEY,
+        "m",
+        {},
+        {},
+        new AbortController().signal,
+      )
+    } catch (error) {
+      caught = error
+    }
+
+    const serialized = JSON.stringify({
+      message: (caught as Error).message,
+      detail: (caught as ApiError).detail,
+      stack: (caught as Error).stack,
+    })
+    expect(serialized).not.toContain(BOUNDARY_API_KEY)
+    expect(serialized).toContain("[REDACTED]")
+  })
+
   it("laisse remonter AbortError", async () => {
     const controller = new AbortController()
-    const abortError = new DOMException("aborted", "AbortError")
+    const abortError = new DOMException(
+      `Request cancelled for ${BOUNDARY_API_KEY}`,
+      "AbortError",
+    ) as DOMException & { providerDebug?: string }
+    abortError.providerDebug = `raw ${BOUNDARY_API_KEY}`
     vi.stubGlobal(
       "fetch",
       vi.fn().mockImplementation((_url: string, init: RequestInit) => {
@@ -659,7 +869,7 @@ describe("createOpenAICompatible — runTurn", () => {
     )
     const promise = createOpenAICompatible(CFG).runTurn(
       { messages: [{ role: "user", content: "doc" }] },
-      "K",
+      BOUNDARY_API_KEY,
       "m",
       {},
       {},
@@ -668,7 +878,48 @@ describe("createOpenAICompatible — runTurn", () => {
 
     controller.abort()
 
-    await expect(promise).rejects.toMatchObject({ name: "AbortError" })
+    let caught: unknown
+    try {
+      await promise
+    } catch (error) {
+      caught = error
+    }
+
+    const sanitized = caught as Error & { providerDebug?: string }
+    expect(sanitized).not.toBe(abortError)
+    expect(sanitized.name).toBe("AbortError")
+    expect(sanitized.providerDebug).toBeUndefined()
+    const serialized = JSON.stringify({
+      name: sanitized.name,
+      message: sanitized.message,
+      stack: sanitized.stack,
+      providerDebug: sanitized.providerDebug,
+    })
+    expect(serialized).not.toContain(BOUNDARY_API_KEY)
+    expect(serialized).toContain("[REDACTED]")
+  })
+
+  it("reconstruit un AbortError au message vide avec un message générique", async () => {
+    const abortError = new Error("")
+    abortError.name = "AbortError"
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(abortError))
+
+    let caught: unknown
+    try {
+      await createOpenAICompatible(CFG).runTurn(
+        { messages: [{ role: "user", content: "doc" }] },
+        BOUNDARY_API_KEY,
+        "m",
+        {},
+        {},
+        new AbortController().signal,
+      )
+    } catch (error) {
+      caught = error
+    }
+
+    expect(caught).not.toBe(abortError)
+    expect(caught).toMatchObject({ name: "AbortError", message: "Request cancelled" })
   })
 })
 
@@ -695,6 +946,108 @@ describe("createOpenAICompatible — testConnection", () => {
     expect(out.ok).toBe(false)
     expect(out.error).toBeInstanceOf(ApiError)
     expect(out.error?.kind).toBe("auth")
+  })
+
+  it("redacte avant la troncature à 200 caractères du log /models", async () => {
+    const prefix = "x".repeat(200 - BOUNDARY_API_KEY_FIRST_HALF.length)
+    vi.stubGlobal("fetch", vi.fn()
+      .mockResolvedValueOnce(makeRes({
+        ok: false,
+        status: 404,
+        text: `${prefix}${BOUNDARY_API_KEY}`,
+      }))
+      .mockResolvedValueOnce(makeRes({ ok: true })))
+
+    await createOpenAICompatible(CFG).testConnection(BOUNDARY_API_KEY)
+    const serializedLogs = JSON.stringify(loggerDebugMock.mock.calls)
+
+    expect(serializedLogs).not.toContain(BOUNDARY_API_KEY)
+    expect(serializedLogs).not.toContain(BOUNDARY_API_KEY_FIRST_HALF)
+    expect(serializedLogs).not.toContain(BOUNDARY_API_KEY_SECOND_HALF)
+    expect(serializedLogs).toContain("[REDACTED]")
+  })
+
+  it("redacte avant la troncature à 500 caractères du fallback normalisé", async () => {
+    const prefix = "x".repeat(500 - BOUNDARY_API_KEY_FIRST_HALF.length)
+    vi.stubGlobal("fetch", vi.fn()
+      .mockResolvedValueOnce(makeRes({
+        ok: false,
+        status: 404,
+        text: "models unavailable",
+      }))
+      .mockResolvedValueOnce(makeRes({
+        ok: false,
+        status: 401,
+        text: `${prefix}${BOUNDARY_API_KEY}`,
+      })))
+
+    const out = await createOpenAICompatible(CFG).testConnection(BOUNDARY_API_KEY)
+    const serializedSinks = JSON.stringify({
+      result: {
+        message: out.error?.message,
+        detail: out.error?.detail,
+      },
+      logs: loggerDebugMock.mock.calls,
+    })
+
+    expect(serializedSinks).not.toContain(BOUNDARY_API_KEY)
+    expect(serializedSinks).not.toContain(BOUNDARY_API_KEY_FIRST_HALF)
+    expect(serializedSinks).not.toContain(BOUNDARY_API_KEY_SECOND_HALF)
+    expect(serializedSinks).toContain("[REDACTED]")
+  })
+
+  it("redacte la clé exacte du fallback HTTP dans le log et le résultat", async () => {
+    const opaqueKey = "CUSTOM.key+42/="
+    vi.stubGlobal("fetch", vi.fn()
+      .mockResolvedValueOnce(makeRes({
+        ok: false,
+        status: 404,
+        text: `Incorrect API key provided: ${opaqueKey}`,
+      }))
+      .mockResolvedValueOnce(makeRes({
+        ok: false,
+        status: 401,
+        text: `Credential ${opaqueKey} was rejected`,
+    })))
+
+    const out = await createOpenAICompatible(CFG).testConnection(opaqueKey)
+    const serializedSinks = JSON.stringify({
+      result: {
+        ok: out.ok,
+        error: out.error && {
+          kind: out.error.kind,
+          message: out.error.message,
+          detail: out.error.detail,
+        },
+      },
+      logs: loggerDebugMock.mock.calls,
+    })
+
+    expect(serializedSinks).not.toContain(opaqueKey)
+    expect(serializedSinks).toContain("[REDACTED]")
+  })
+
+  it("redacte la clé exacte d'une exception réseau avant le log et le résultat", async () => {
+    const opaqueKey = "CUSTOM.key+42/="
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(
+      new Error(`Credential ${opaqueKey} was rejected`),
+    ))
+
+    const out = await createOpenAICompatible(CFG).testConnection(opaqueKey)
+    const serializedSinks = JSON.stringify({
+      result: {
+        ok: out.ok,
+        error: out.error && {
+          kind: out.error.kind,
+          message: out.error.message,
+          detail: out.error.detail,
+        },
+      },
+      logs: loggerErrorMock.mock.calls,
+    })
+
+    expect(serializedSinks).not.toContain(opaqueKey)
+    expect(serializedSinks).toContain("[REDACTED]")
   })
 })
 

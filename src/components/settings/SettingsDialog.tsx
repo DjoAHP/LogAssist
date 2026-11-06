@@ -4,7 +4,7 @@ import { confirm as dialogConfirm } from "@tauri-apps/plugin-dialog"
 import { t } from "@/i18n/fr"
 import { logger } from "@/lib/logger"
 import { createProvider } from "@/lib/ai/factory"
-import { KIND_TO_KEY } from "@/lib/ai/errors"
+import { KIND_TO_KEY, redactSensitiveDetail } from "@/lib/ai/errors"
 import { providers, secretRefFor, type ProviderRow, type ModelRow } from "@/lib/db/providers"
 import { secrets } from "@/lib/secrets/service"
 import { ProviderForm } from "./ProviderForm"
@@ -20,6 +20,31 @@ type FetchStatus =
 interface Props {
   onClose: () => void
   onChanged: () => void
+}
+
+function errorMessageForKind(error: unknown): string | undefined {
+  if (typeof error !== "object" || error === null || !("kind" in error)) return undefined
+  const kind = error.kind
+  if (typeof kind !== "string" || !Object.prototype.hasOwnProperty.call(KIND_TO_KEY, kind)) {
+    return undefined
+  }
+  return t.errors[KIND_TO_KEY[kind as keyof typeof KIND_TO_KEY]]
+}
+
+function safeSettingsErrorMessage(
+  error: unknown,
+  exactSecrets: readonly string[] = [],
+): string {
+  const message = error instanceof Error ? error.message : String(error)
+  return redactSensitiveDetail(message, exactSecrets)
+}
+
+function logSettingsError(
+  context: string,
+  error: unknown,
+  exactSecrets: readonly string[] = [],
+): void {
+  logger.error({ context, message: safeSettingsErrorMessage(error, exactSecrets) })
 }
 
 // Overlay plein écran simple M1 (pas de shadcn Dialog avant V1.1) :
@@ -45,7 +70,7 @@ export function SettingsDialog({ onClose, onChanged }: Props) {
   }, [])
 
   useEffect(() => {
-    void refresh().catch(console.error)
+    void refresh().catch((error) => logSettingsError("settings.refresh", error))
   }, [refresh])
 
   // Escape ferme (globale : focus pouvant être dans n'importe quel input) ;
@@ -68,27 +93,30 @@ export function SettingsDialog({ onClose, onChanged }: Props) {
 
   const test = async (p: ProviderRow) => {
     setTestStatus((s) => ({ ...s, [p.id]: { state: "testing" } }))
+    let activeKey = ""
     try {
       const prov = createProvider({
         id: p.id, name: p.name, apiFamily: p.api_family, baseUrl: p.base_url, secretRef: secretRefFor(p.id),
       })
-      const key = await secrets.get(secretRefFor(p.id))
-      if (!key) {
+      activeKey = (await secrets.get(secretRefFor(p.id))) ?? ""
+      if (!activeKey) {
         setTestStatus((s) => ({ ...s, [p.id]: { state: "fail", message: t.settings.noKey } }))
         return
       }
       // Signature exacte (Task 5) : { ok: boolean; error?: ApiError } — pas de latence.
-      const res = await prov.testConnection(key)
-        logger.debug("[SettingsDialog] testConnection result:", res)
+      const res = await prov.testConnection(activeKey)
       setTestStatus((s) => ({
         ...s,
         [p.id]: res.ok
           ? { state: "ok" }
-          : { state: "fail", message: t.errors[KIND_TO_KEY[res.error!.kind]] },
+          : { state: "fail", message: errorMessageForKind(res.error) ?? t.settings.fail },
       }))
     } catch (e) {
-      console.error("[SettingsDialog] testConnection error:", e)
-      setTestStatus((s) => ({ ...s, [p.id]: { state: "fail", message: e instanceof Error ? e.message : String(e) } }))
+      logSettingsError("settings.testConnection", e, [activeKey])
+      setTestStatus((s) => ({
+        ...s,
+        [p.id]: { state: "fail", message: errorMessageForKind(e) ?? t.settings.fail },
+      }))
     }
   }
 
@@ -115,15 +143,16 @@ export function SettingsDialog({ onClose, onChanged }: Props) {
   // dédoublonnage contre la base ET contre les doublons du retour API.
   const fetchModels = async (p: ProviderRow) => {
     setFetchStatus((s) => ({ ...s, [p.id]: { state: "fetching" } }))
+    let activeKey = ""
     try {
-      const key = await secrets.get(secretRefFor(p.id))
-      if (!key) {
+      activeKey = (await secrets.get(secretRefFor(p.id))) ?? ""
+      if (!activeKey) {
         setFetchStatus((s) => ({ ...s, [p.id]: { state: "fail", message: t.settings.noKey } }))
         return
       }
       const ids = await createProvider({
         id: p.id, name: p.name, apiFamily: p.api_family, baseUrl: p.base_url, secretRef: secretRefFor(p.id),
-      }).listRemoteModels(key)
+      }).listRemoteModels(activeKey)
       if (ids.length === 0) {
         setFetchStatus((s) => ({ ...s, [p.id]: { state: "fail", message: t.settings.fetchFail } }))
         return
@@ -146,11 +175,10 @@ export function SettingsDialog({ onClose, onChanged }: Props) {
       await afterChange()
       setFetchStatus((s) => ({ ...s, [p.id]: { state: "ok", added } }))
     } catch (e) {
-      const api = e as { kind?: keyof typeof KIND_TO_KEY }
-      const key = api.kind && KIND_TO_KEY[api.kind] ? KIND_TO_KEY[api.kind] : undefined
+      logSettingsError("settings.fetchModels", e, [activeKey])
       setFetchStatus((s) => ({
         ...s,
-        [p.id]: { state: "fail", message: key ? t.errors[key] : e instanceof Error ? e.message : String(e) },
+        [p.id]: { state: "fail", message: errorMessageForKind(e) ?? t.settings.fetchFail },
       }))
     }
   }
@@ -182,7 +210,7 @@ export function SettingsDialog({ onClose, onChanged }: Props) {
             initial={editing === "new" ? undefined : editing}
             onSaved={() => {
               setEditing(null)
-              void afterChange().catch(console.error)
+              void afterChange().catch((error) => logSettingsError("settings.afterChange", error))
             }}
             onCancel={() => setEditing(null)}
           />
@@ -212,7 +240,7 @@ export function SettingsDialog({ onClose, onChanged }: Props) {
                       </div>
                       <div className="flex flex-shrink-0 items-center gap-1">
                         <button
-                          onClick={() => void test(p).catch(console.error)}
+                          onClick={() => void test(p)}
                           disabled={status.state === "testing"}
                           className="rounded-md border border-border px-2 py-1 text-xs hover:bg-foreground/5 disabled:opacity-50"
                         >
@@ -220,7 +248,7 @@ export function SettingsDialog({ onClose, onChanged }: Props) {
                         </button>
                         <button
                           data-action="fetch-models"
-                          onClick={() => void fetchModels(p).catch(console.error)}
+                          onClick={() => void fetchModels(p)}
                           disabled={fetchStatus[p.id]?.state === "fetching"}
                           className="rounded-md border border-border px-2 py-1 text-xs hover:bg-foreground/5 disabled:opacity-50"
                         >
@@ -234,7 +262,8 @@ export function SettingsDialog({ onClose, onChanged }: Props) {
                         </button>
                         <button
                           aria-label={t.settings.delete}
-                          onClick={() => void removeProvider(p).catch(console.error)}
+                          onClick={() => void removeProvider(p).catch((error) =>
+                            logSettingsError("settings.removeProvider", error))}
                           className="rounded-md p-1 hover:bg-foreground/5"
                         >
                           <Trash2 className="size-3.5" />
@@ -294,7 +323,7 @@ export function SettingsDialog({ onClose, onChanged }: Props) {
               void providers
                 .setDefaultModel(modelRowId)
                 .then(afterChange)
-                .catch(console.error)
+                .catch((error) => logSettingsError("settings.selectModel", error))
             }}
             onClose={() => setBrowsing(null)}
           />

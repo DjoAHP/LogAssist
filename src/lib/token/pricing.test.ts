@@ -39,9 +39,16 @@ describe("pricing", () => {
   it.each([
     "https://api.openai.com.evil.test/v1",
     "https://openrouter.ai/api/v1",
+    "http://api.openai.com/v1",
+    "https://api.openai.com:444/v1",
+    "https://user:pass@api.openai.com/v1",
     "http://localhost:1234/v1",
     "invalid",
   ])("refuse une identité tarifaire non fiable : %s", (baseUrl) => {
     expect(resolvePricingProvider(baseUrl)).toBeNull()
+  })
+
+  it("accepte le port HTTPS standard normalisé par URL", () => {
+    expect(resolvePricingProvider("https://api.openai.com:443/v1")).toBe("openai")
   })
 })

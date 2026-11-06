@@ -2,9 +2,11 @@ import { describe, it, expect } from "vitest"
 import {
   normalizeHttpStatus,
   normalizeNetworkError,
+  normalizeApiErrorKind,
   redactSensitiveDetail,
   ApiError,
 } from "@/lib/ai/errors"
+import { API_ERROR_KINDS } from "@/lib/ai/types"
 
 describe("redactSensitiveDetail", () => {
   it("masque un bearer token", () => {
@@ -14,11 +16,28 @@ describe("redactSensitiveDetail", () => {
 
   it.each([
     ["Authorization: abc123", "Authorization: [REDACTED]"],
+    ["Authorization: Basic abc123", "Authorization: [REDACTED]"],
+    ["Authorization: Token abc123", "Authorization: [REDACTED]"],
     ["api_key=abc123", "api_key=[REDACTED]"],
     ["api-key: abc123", "api-key: [REDACTED]"],
     ["token=abc123", "token=[REDACTED]"],
   ])("masque %s", (input, expected) => {
     expect(redactSensitiveDetail(input)).toBe(expected)
+  })
+
+  it("arrête la redaction Authorization à la fin de ligne", () => {
+    expect(redactSensitiveDetail("Authorization: Basic abc123\nstatus: denied"))
+      .toBe("Authorization: [REDACTED]\nstatus: denied")
+  })
+
+  it("masque une valeur Digest complète avec virgules et points-virgules", () => {
+    const redacted = redactSensitiveDetail(
+      'Authorization: Digest username="admin", nonce="abc"; response="deadbeef"\nstatus: denied',
+    )
+
+    expect(redacted).toBe("Authorization: [REDACTED]\nstatus: denied")
+    expect(redacted).not.toContain("nonce")
+    expect(redacted).not.toContain("response")
   })
 
   it.each([
@@ -64,6 +83,19 @@ describe("redactSensitiveDetail", () => {
     expect(redactSensitiveDetail("clé sk-or-v1-history rejetée, marqueur sk- conservé"))
       .toBe("clé [REDACTED] rejetée, marqueur sk- conservé")
   })
+})
+
+describe("normalizeApiErrorKind", () => {
+  it.each(API_ERROR_KINDS)("conserve le kind valide %s", (kind) => {
+    expect(normalizeApiErrorKind(kind)).toBe(kind)
+  })
+
+  it.each(["custom", "CUSTOM.key+42/=", 401, null, undefined, {}])(
+    "rabats une valeur runtime inconnue sur unknown : %o",
+    (value) => {
+      expect(normalizeApiErrorKind(value)).toBe("unknown")
+    },
+  )
 })
 
 describe("normalizeHttpStatus", () => {

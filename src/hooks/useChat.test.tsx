@@ -524,14 +524,14 @@ describe("useChat.send — contract anti-perte", () => {
     expect(result.current.vm[1].sources).toEqual([])
   })
 
-  it("redacte les erreurs historiques lors du chargement", async () => {
+  it("ne conserve que le kind des erreurs historiques non vérifiables", async () => {
     vi.mocked(messagesDb.listByConversation).mockResolvedValueOnce([
       messageRow({
         id: "assistant-history",
         error: JSON.stringify({
           kind: "auth",
-          message: "Authorization: old-secret",
-          detail: "Bearer sk-history",
+          message: "Credential CUSTOM.key+42 was rejected",
+          detail: "The supplied value CUSTOM.key+42 is invalid",
         }),
       }),
     ])
@@ -541,12 +541,27 @@ describe("useChat.send — contract anti-perte", () => {
 
     expect(result.current.vm[0].apiError).toEqual({
       kind: "auth",
-      message: "Authorization: [REDACTED]",
-      detail: "Bearer [REDACTED]",
+      message: "",
     })
     const serializedVm = JSON.stringify(result.current.vm)
-    expect(serializedVm).not.toContain("old-secret")
-    expect(serializedVm).not.toContain("sk-history")
+    expect(serializedVm).not.toContain("CUSTOM")
+    expect(serializedVm).not.toContain("detail")
+  })
+
+  it("rabats un kind historique inconnu sans l'exposer dans la VM", async () => {
+    const opaqueKind = "CUSTOM.key+42/="
+    vi.mocked(messagesDb.listByConversation).mockResolvedValueOnce([
+      messageRow({
+        id: "assistant-history-unknown",
+        error: JSON.stringify({ kind: opaqueKind, message: "legacy" }),
+      }),
+    ])
+    const { result } = renderHook(() => useChat(modelSelection))
+
+    await act(async () => result.current.load("conv-1"))
+
+    expect(result.current.vm[0].apiError).toEqual({ kind: "unknown", message: "" })
+    expect(JSON.stringify(result.current.vm)).not.toContain(opaqueKind)
   })
 
   it("préserve le warning Web au reload pour le même id seulement", async () => {
@@ -722,6 +737,27 @@ describe("useChat.send — contract anti-perte", () => {
     )
   })
 
+  it("rabats un kind runtime inconnu avant la VM et la persistance", async () => {
+    const opaqueKind = "CUSTOM.key+42/="
+    runTurnMock.mockRejectedValueOnce({ kind: opaqueKind, message: "provider failure" })
+    const { result } = renderHook(() => useChat(modelSelection))
+
+    await act(async () => {
+      expect(await result.current.send("conv-1", "Salut")).toBe(true)
+    })
+
+    const serializedVm = JSON.stringify(result.current.vm)
+    const serializedInserts = JSON.stringify(vi.mocked(messagesDb.insert).mock.calls)
+    expect(serializedVm).not.toContain(opaqueKind)
+    expect(serializedInserts).not.toContain(opaqueKind)
+    expect(result.current.vm[result.current.vm.length - 1]?.apiError)
+      .toMatchObject({ kind: "unknown" })
+    expect(messagesDb.insert).toHaveBeenCalledWith(expect.objectContaining({
+      role: "assistant",
+      error: JSON.stringify({ kind: "unknown", message: "provider failure" }),
+    }))
+  })
+
   it("redacte message et détail fournisseur avant VM et persistance", async () => {
     runTurnMock.mockRejectedValueOnce({
       kind: "auth",
@@ -747,14 +783,16 @@ describe("useChat.send — contract anti-perte", () => {
   })
 
   it("redacte exactement la clé active dans la VM, SQLite et les logs", async () => {
+    const opaqueKey = "CUSTOM.key+42/="
+    vi.mocked(secrets.get).mockResolvedValueOnce(opaqueKey)
     runTurnMock.mockRejectedValueOnce({
       kind: "auth",
-      message: "Credential sk-test was rejected",
-      detail: "The supplied value sk-test is invalid",
+      message: `Credential ${opaqueKey} was rejected`,
+      detail: `The supplied value ${opaqueKey} is invalid`,
     })
     vi.mocked(messagesDb.insert)
       .mockResolvedValueOnce("user-1")
-      .mockRejectedValueOnce(new Error("Persistence rejected credential sk-test"))
+      .mockRejectedValueOnce(new Error(`Persistence rejected credential ${opaqueKey}`))
     const { result } = renderHook(() => useChat(modelSelection))
 
     await act(async () => {
@@ -765,7 +803,7 @@ describe("useChat.send — contract anti-perte", () => {
     const serializedInserts = JSON.stringify(vi.mocked(messagesDb.insert).mock.calls)
     const serializedLogs = JSON.stringify(loggerErrorMock.mock.calls)
     for (const sink of [serializedVm, serializedInserts, serializedLogs]) {
-      expect(sink).not.toContain("sk-test")
+      expect(sink).not.toContain(opaqueKey)
     }
     expect(serializedInserts).toContain("[REDACTED]")
     expect(serializedLogs).toContain("[REDACTED]")

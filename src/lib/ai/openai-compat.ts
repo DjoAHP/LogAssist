@@ -1,6 +1,11 @@
 import { isTauri } from "@tauri-apps/api/core"
 import { fetch as tauriFetch } from "@tauri-apps/plugin-http"
-import { ApiError, normalizeHttpStatus, normalizeNetworkError } from "./errors"
+import {
+  ApiError,
+  normalizeHttpStatus,
+  normalizeNetworkError,
+  redactSensitiveDetail,
+} from "./errors"
 import { cleanApiBaseUrl } from "./url"
 import { logger } from "../logger"
 import { parseSseStream } from "./sse"
@@ -67,6 +72,61 @@ function parseTokenUsage(value: unknown): TokenUsage | undefined {
   return { inputTokens: input as number, outputTokens: output as number }
 }
 
+function sanitizeApiError(error: ApiError, apiKey: string): ApiError {
+  return new ApiError(
+    error.kind,
+    redactSensitiveDetail(error.message, [apiKey]),
+    error.detail === undefined
+      ? undefined
+      : redactSensitiveDetail(error.detail, [apiKey]),
+    error.retryAfterMs,
+  )
+}
+
+function sanitizeBody(body: string, apiKey: string): string {
+  return redactSensitiveDetail(body, [apiKey])
+}
+
+function isAbortError(error: unknown): error is Error {
+  return error instanceof Error &&
+    (error.name === "AbortError" || error.message === "Request cancelled")
+}
+
+function sanitizeAbortError(error: Error, apiKey: string): Error {
+  const redactedMessage = redactSensitiveDetail(error.message, [apiKey])
+  const sanitized = new Error(
+    redactedMessage.trim().length > 0 ? redactedMessage : "Request cancelled",
+  )
+  sanitized.name = "AbortError"
+  return sanitized
+}
+
+function sanitizeAdapterError(error: unknown, apiKey: string): Error {
+  if (isAbortError(error)) return sanitizeAbortError(error, apiKey)
+
+  const normalized = error instanceof ApiError ? error : normalizeNetworkError(error)
+  if (normalized instanceof ApiError) return sanitizeApiError(normalized, apiKey)
+
+  const message = redactSensitiveDetail(normalized.message, [apiKey])
+  return new Error(message)
+}
+
+function normalizeSanitizedHttpStatus(
+  status: number,
+  rawBody: string,
+  apiKey: string,
+  retryAfter?: number,
+): ApiError {
+  const classified = normalizeHttpStatus(status, rawBody, retryAfter)
+  const safeBody = sanitizeBody(rawBody, apiKey)
+  return new ApiError(
+    classified.kind,
+    classified.message,
+    safeBody.slice(0, 500) || undefined,
+    classified.retryAfterMs,
+  )
+}
+
 export function createOpenAICompatible(cfg: ProviderConfig): IProvider {
   // Nettoie l'URL via le helper partagé avec le formulaire — invariant unique.
   const base = cleanApiBaseUrl(cfg.baseUrl)
@@ -118,11 +178,6 @@ export function createOpenAICompatible(cfg: ProviderConfig): IProvider {
     })
   }
 
-  function isAbortError(error: unknown): error is Error {
-    return error instanceof Error &&
-      (error.name === "AbortError" || error.message === "Request cancelled")
-  }
-
   async function runTurn(
     req: ChatRequest,
     apiKey: string,
@@ -142,7 +197,12 @@ export function createOpenAICompatible(cfg: ProviderConfig): IProvider {
       const res = await chatRequest(req, apiKey, modelId, true, signal, options)
       if (!res.ok) {
         const body = await res.text()
-        throw normalizeHttpStatus(res.status, body, retryAfterMs(res.headers))
+        throw normalizeSanitizedHttpStatus(
+          res.status,
+          body,
+          apiKey,
+          retryAfterMs(res.headers),
+        )
       }
       if (!res.body) throw new ApiError("unknown", "Réponse vide du fournisseur")
       reader = res.body.getReader()
@@ -214,8 +274,7 @@ export function createOpenAICompatible(cfg: ProviderConfig): IProvider {
         ...(usage ? { usage } : {}),
       }
     } catch (error) {
-      if (error instanceof ApiError || isAbortError(error)) throw error
-      throw normalizeNetworkError(error)
+      throw sanitizeAdapterError(error, apiKey)
     } finally {
       if (reader) reader.cancel().catch(() => {})
     }
@@ -228,14 +287,18 @@ export function createOpenAICompatible(cfg: ProviderConfig): IProvider {
         const res = await chatRequest(req, apiKey, modelId, false)
         if (!res.ok) {
           const body = await res.text()
-          throw normalizeHttpStatus(res.status, body, retryAfterMs(res.headers))
+          throw normalizeSanitizedHttpStatus(
+            res.status,
+            body,
+            apiKey,
+            retryAfterMs(res.headers),
+          )
         }
         const data = await res.json()
         const text: string = data?.choices?.[0]?.message?.content ?? ""
         return { text, totalMs: performance.now() - start }
       } catch (e) {
-        if (e instanceof ApiError) throw e
-        throw normalizeNetworkError(e)
+        throw sanitizeAdapterError(e, apiKey)
       }
     },
 
@@ -246,14 +309,13 @@ export function createOpenAICompatible(cfg: ProviderConfig): IProvider {
       try {
         result = await runTurn(req, apiKey, modelId, {}, cb, signal)
       } catch (error: unknown) {
-        const normalized = error instanceof Error ? error : normalizeNetworkError(error)
-        await cb.onError?.(normalized)
+        await cb.onError?.(sanitizeAdapterError(error, apiKey))
         return
       }
       await cb.onDone?.(result)
     },
 
-    async     testConnection(apiKey) {
+    async testConnection(apiKey) {
       try {
         // Try /models first (standard OpenAI)
         const res = await getFetch()(`${base}/models`, { headers: { Authorization: `Bearer ${apiKey}` } })
@@ -262,8 +324,13 @@ export function createOpenAICompatible(cfg: ProviderConfig): IProvider {
         }
         // If /models fails (404, 405, etc.), try a minimal chat completion as fallback
         // Some OpenAI-compatible APIs (like NVIDIA NIM) don't implement /models
-        const bodyText = await res.text()
-        logger.debug("[testConnection] /models failed:", res.status, bodyText.slice(0, 200))
+        const rawBodyText = await res.text()
+        const bodyText = sanitizeBody(rawBodyText, apiKey)
+        logger.debug({
+          context: "testConnection.models",
+          status: res.status,
+          detail: bodyText.slice(0, 200),
+        })
         
         // Fallback: try a minimal completion request
         const testRes = await getFetch()(`${base}/chat/completions`, {
@@ -277,15 +344,36 @@ export function createOpenAICompatible(cfg: ProviderConfig): IProvider {
           // 404 = endpoint not found
           if (testRes.status === 401 || testRes.status === 403) {
             const body = await testRes.text()
-            return { ok: false, error: normalizeHttpStatus(testRes.status, body, retryAfterMs(testRes.headers)) }
+            return {
+              ok: false,
+              error: normalizeSanitizedHttpStatus(
+                testRes.status,
+                body,
+                apiKey,
+                retryAfterMs(testRes.headers),
+              ),
+            }
           }
           return { ok: true }
         }
         const body = await testRes.text()
-        return { ok: false, error: normalizeHttpStatus(testRes.status, body, retryAfterMs(testRes.headers)) }
+        return {
+          ok: false,
+          error: normalizeSanitizedHttpStatus(
+            testRes.status,
+            body,
+            apiKey,
+            retryAfterMs(testRes.headers),
+          ),
+        }
       } catch (e) {
-        console.error("[testConnection] network error:", e)
-        return { ok: false, error: normalizeNetworkError(e) as ApiError }
+        const error = sanitizeAdapterError(e, apiKey)
+        if (!(error instanceof ApiError)) throw error
+        logger.error({
+          context: "testConnection.network",
+          message: error.message,
+        })
+        return { ok: false, error }
       }
     },
 
@@ -294,13 +382,18 @@ export function createOpenAICompatible(cfg: ProviderConfig): IProvider {
         const res = await getFetch()(`${base}/models`, { headers: { Authorization: `Bearer ${apiKey}` } })
         if (!res.ok) {
           const body = await res.text()
-          throw normalizeHttpStatus(res.status, body, retryAfterMs(res.headers))
+          throw normalizeSanitizedHttpStatus(
+            res.status,
+            body,
+            apiKey,
+            retryAfterMs(res.headers),
+          )
         }
         const data = await res.json()
         const list: { id?: string }[] = data?.data ?? []
         return list.map((m) => m.id).filter((id): id is string => typeof id === "string" && id.length > 0)
       } catch (e) {
-        throw e instanceof ApiError ? e : normalizeNetworkError(e)
+        throw sanitizeAdapterError(e, apiKey)
       }
     },
   }

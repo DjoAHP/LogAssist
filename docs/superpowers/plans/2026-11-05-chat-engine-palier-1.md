@@ -4,7 +4,7 @@
 
 **Goal:** Extraire l'exécution d'un tour hors de `useChat`, persister des métriques honnêtes par réponse et supprimer l'affichage cumulatif trompeur, sans modifier l'identité visuelle ni le comportement fonctionnel du chat.
 
-**Architecture:** Le palier introduit deux unités pures (`contextBuilder` et `turnRunner`) entre le hook React et les adaptateurs existants. Les adaptateurs remontent l'usage lorsqu'il est fourni ; sinon un estimateur local calcule les tokens une seule fois à la fin du tour. SQLite V6 persiste ces métriques optionnelles afin que `ChatView` affiche les données propres à chaque réponse.
+**Architecture:** Le palier introduit deux unités pures (`contextBuilder` et `turnRunner`) entre le hook React et les adaptateurs existants. Les adaptateurs remontent l'usage lorsqu'il est fourni ; sinon un estimateur local calcule les tokens une seule fois à la fin du tour. SQLite V6 persiste ces métriques optionnelles afin que `ChatView` affiche les données propres à chaque réponse ; SQLite V7 nettoie les anciens diagnostics fournisseur non vérifiables.
 
 **Tech Stack:** React 19, TypeScript strict, Vitest 5, Testing Library, Tauri SQL/SQLite, `@dqbd/tiktoken`, adaptateurs OpenAI-compatible et MCP TinyFish existants.
 
@@ -15,6 +15,7 @@
 Ce plan implémente uniquement :
 
 - migration V6 pour les métriques par réponse ;
+- migration V7 pour le nettoyage des erreurs legacy ;
 - usage fournisseur optionnel et estimation locale ;
 - extraction de la construction actuelle du contexte, sans fenêtre glissante ni résumé ;
 - extraction de l'exécution directe/Web dans `TurnRunner` ;
@@ -47,7 +48,7 @@ Ce plan n'implémente pas encore :
 
 ### Fichiers modifiés
 
-- `src/lib/db/migrations.ts` et `src/lib/db/database.ts` — migration V6 additive.
+- `src/lib/db/migrations.ts` et `src/lib/db/database.ts` — migration V6 des métriques et migration V7 de nettoyage conservateur des erreurs legacy.
 - `src/lib/db/migrations.test.ts` — contrat de la migration.
 - `src/lib/db/messages.ts` et `src/lib/db/messages.test.ts` — lecture/écriture des métriques optionnelles.
 - `src/lib/ai/types.ts` — type `TokenUsage` et usage optionnel dans les résultats.
@@ -112,16 +113,18 @@ Par défaut, aucune modification et aucun commit ne sont nécessaires pour cette
 
 ---
 
-### Task 2: Ajouter la migration V6 des métriques par réponse
+### Task 2: Ajouter les métriques V6 et le nettoyage legacy V7
 
 **Files:**
 - Modify: `src/lib/db/migrations.ts:1-144`
 - Modify: `src/lib/db/database.ts:1-62`
 - Test: `src/lib/db/migrations.test.ts:1-73`
 
-- [ ] **Step 1: Écrire le test rouge de la migration V6**
+- [ ] **Step 1: Écrire les tests rouges des migrations V6 et V7**
 
-Ajouter `SCHEMA_V6_STATEMENTS` à l'import de `src/lib/db/migrations.test.ts`, passer l'attente de version à `6`, puis ajouter :
+Ajouter `SCHEMA_V6_STATEMENTS` et `SCHEMA_V7_STATEMENTS` à l'import de
+`src/lib/db/migrations.test.ts`, passer l'attente de version à `7`, puis verrouiller
+les statements et leur ordre d'exécution :
 
 ```ts
 describe("SCHEMA_V6_STATEMENTS", () => {
@@ -135,7 +138,18 @@ describe("SCHEMA_V6_STATEMENTS", () => {
     ])
   })
 })
+
+describe("SCHEMA_V7_STATEMENTS", () => {
+  it("nettoie les erreurs legacy", () => {
+    expect(SCHEMA_V7_STATEMENTS).toEqual([
+      `UPDATE messages SET error = CASE WHEN error = '{"interrupted":true}' THEN '{"interrupted":true}' ELSE NULL END WHERE error IS NOT NULL`,
+    ])
+  })
+})
 ```
+
+Le test comportemental de `executeSchema` doit aussi prouver qu'une base V6 exécute
+uniquement V7, tandis qu'une base V5 exécute les cinq statements V6 puis V7.
 
 - [ ] **Step 2: Lancer le test pour confirmer l'échec**
 
@@ -145,14 +159,15 @@ Run:
 npx vitest run src/lib/db/migrations.test.ts
 ```
 
-Expected: FAIL car `SCHEMA_V6_STATEMENTS` n'existe pas et `SCHEMA_VERSION` vaut encore `5`.
+Expected: FAIL car le nettoyage est encore rattaché à V6, `SCHEMA_V7_STATEMENTS`
+n'existe pas et `SCHEMA_VERSION` vaut encore `6`.
 
-- [ ] **Step 3: Implémenter la migration V6**
+- [ ] **Step 3: Implémenter les migrations V6 et V7**
 
 Dans `src/lib/db/migrations.ts`, remplacer la version et ajouter après V5 :
 
 ```ts
-export const SCHEMA_VERSION = 6
+export const SCHEMA_VERSION = 7
 
 export const SCHEMA_V6_STATEMENTS: string[] = [
   "ALTER TABLE messages ADD COLUMN first_token_ms INTEGER",
@@ -161,9 +176,18 @@ export const SCHEMA_V6_STATEMENTS: string[] = [
   "ALTER TABLE messages ADD COLUMN usage_source TEXT CHECK (usage_source IN ('provider','estimated'))",
   "ALTER TABLE messages ADD COLUMN cost_microusd INTEGER",
 ]
+
+export const SCHEMA_V7_STATEMENTS: string[] = [
+  `UPDATE messages SET error = CASE WHEN error = '{"interrupted":true}' THEN '{"interrupted":true}' ELSE NULL END WHERE error IS NOT NULL`,
+]
 ```
 
-Dans `src/lib/db/database.ts`, importer `SCHEMA_V6_STATEMENTS` puis ajouter après le bloc V5 :
+Le statement V7 assume explicitement la perte des anciens diagnostics fournisseur, JSON
+ou non JSON, car leur absence de clé exacte empêche de garantir leur innocuité. Le
+payload canonique `{"interrupted":true}` généré par l'application est le seul conservé ;
+les contenus, sources et autres colonnes des messages ne sont pas modifiés.
+
+Dans `src/lib/db/database.ts`, importer les deux listes puis exécuter V7 après V6 :
 
 ```ts
 if (fromVersion < 6) {
@@ -171,7 +195,15 @@ if (fromVersion < 6) {
     await db.execute(statement)
   }
 }
+if (fromVersion < 7) {
+  for (const statement of SCHEMA_V7_STATEMENTS) {
+    await db.execute(statement)
+  }
+}
 ```
+
+Le palier V7 séparé est obligatoire pour qu'une base déjà marquée `user_version=6`
+exécute le nettoyage lors de l'upgrade V6→V7 sans rejouer les `ALTER` de métriques.
 
 - [ ] **Step 4: Relancer le test de migration**
 
@@ -1539,17 +1571,24 @@ jamais être estimé depuis le seul prompt initial et le texte final ; ses cinq
 colonnes de métriques restent à `NULL`.
 
 Le coût utilise exclusivement l'identité conservatrice dérivée de l'endpoint par
-`resolvePricingProvider(provider.baseUrl)`, jamais `provider.name`. Une identité vide
-autorise toujours le comptage via le tokenizer résolu par `modelId`, mais impose un coût
-`null` tant que l'endpoint officiel n'est pas prouvé.
+`resolvePricingProvider(provider.baseUrl)`, jamais `provider.name`. L'identité OpenAI
+n'est reconnue que pour une origine stricte : protocole `https:`, hostname exact
+`api.openai.com`, aucun port non standard et aucune information d'authentification dans
+l'URL. Une identité vide autorise toujours le comptage via le tokenizer résolu par
+`modelId`, mais impose un coût `null` tant que l'endpoint officiel n'est pas prouvé.
 
 Après l'insert user, créer immédiatement le placeholder assistant, `upsertLast`
 et `persistError`, avant le prompt, les connaissances, l'historique, le provider
 et le secret. Toute erreur post-insert est ainsi visible et persistée, tandis que
 l'outer catch reste le filet du chemin pré-insert. Les messages et détails API
-sont passés par `redactSensitiveDetail` avant la VM, SQLite ou les logs. Les
-payloads d'erreur historiques sont également reconstruits et redacted dans
-`mapRow` avant leur exposition à la VM, sans réécriture de SQLite.
+sont passés par `redactSensitiveDetail` avant la VM, SQLite ou les logs. Pour les
+payloads historiques avec `kind`, `mapRow` conserve uniquement un kind validé par
+`normalizeApiErrorKind`, force `message: ""` et supprime `detail`, car une clé
+fournisseur legacy arbitraire ne peut pas être reconnue sans sa valeur exacte. Les
+kinds runtime sont validés par le même helper avant la VM et la persistance ; toute
+valeur inconnue devient `unknown`. La migration V7 nettoie ponctuellement `messages.error`
+en supprimant tous les anciens diagnostics, au prix assumé de leur perte, et conserve
+uniquement le payload d'interruption canonique `{"interrupted":true}`.
 
 Après lecture du Credential Manager, la clé du tour est conservée uniquement dans
 `activeApiKey` et fournie à `redactSensitiveDetail(value, [activeApiKey])` pour masquer
@@ -1557,13 +1596,26 @@ sa valeur exacte dans le message, le détail, les erreurs de persistance et les 
 reconstruits. Avant cette lecture, les motifs génériques restent le seul filet ; la clé
 elle-même n'est jamais persistée ni journalisée.
 
+L'adaptateur sanitise toutes les erreurs réseau à sa frontière avec la clé active :
+`runTurn`, `complete`, `testConnection` et `listRemoteModels` reconstruisent les erreurs
+et ne transportent jamais une stack brute fournisseur. Un `AbortError` est lui aussi
+reconstruit : seul son nom et son message redacted sont conservés, jamais son identité,
+sa stack source ou ses propriétés custom. Pour les erreurs HTTP, le body brut sert uniquement à classifier le kind,
+tandis que le détail exposé est redacted avant toute troncature. Le body `/models` de
+`testConnection` est lui aussi redacted avant le `slice` du log. `SettingsDialog` ne
+journalise jamais l'objet de résultat ou l'exception brute : les erreurs reconnues
+utilisent le libellé i18n de leur `kind`, les erreurs inconnues restent génériques dans
+l'UI, et les logs reconstruits sont redacted avec la clé active pour les chemins de
+test et de récupération des modèles.
+
 Si l'insert d'erreur échoue à son tour, conserver une erreur explicite et non
 sensible dans la VM, journaliser uniquement un objet reconstruit et redacted,
 puis terminer `send()` avec `true` sans nouvelle tentative de persistance.
 
 Enfin, `load()` réapplique uniquement les warnings Web en mémoire dont l'id
 persistant correspond exactement à une row rechargée ; aucun warning n'est
-transféré vers un autre message et aucune migration n'est ajoutée.
+transféré vers un autre message et aucune migration supplémentaire n'est ajoutée
+au-delà du nettoyage V7 décrit ci-dessus.
 
 Une bulle dont l'insert final puis l'insert d'erreur ont tous deux échoué reste
 marquée `persistenceFailed` avec son `conversationId` pendant la session. Au

@@ -79,7 +79,13 @@ function normalizeProvider(provider: string): string {
  */
 export function resolvePricingProvider(baseUrl: string): string | null {
   try {
-    return new URL(baseUrl).hostname === "api.openai.com" ? "openai" : null
+    const endpoint = new URL(baseUrl)
+    const isOfficialOpenAi = endpoint.protocol === "https:" &&
+      endpoint.hostname === "api.openai.com" &&
+      endpoint.port === "" &&
+      endpoint.username === "" &&
+      endpoint.password === ""
+    return isOfficialOpenAi ? "openai" : null
   } catch {
     return null
   }

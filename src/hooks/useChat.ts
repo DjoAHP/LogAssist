@@ -1,7 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { createProvider, buildPreview } from "@/lib/ai/factory"
 import { logger } from "@/lib/logger"
-import { redactSensitiveDetail, type ApiError } from "@/lib/ai/errors"
+import {
+  normalizeApiErrorKind,
+  redactSensitiveDetail,
+  type ApiError,
+} from "@/lib/ai/errors"
 import type { ApiErrorKind, ProviderConfig, ChatMessage } from "@/lib/ai/types"
 import { buildSystemPrompt } from "@/lib/prompts/compose"
 import { loadPromptSettings } from "@/lib/prompts/store"
@@ -276,7 +280,7 @@ export function useChat(
             }
             const api = e as Partial<ApiError>
             const payload: ApiErrorPayload = {
-              kind: api.kind ?? "unknown",
+              kind: normalizeApiErrorKind(api.kind),
               message: redactTurnDetail(api.message ?? "Erreur inattendue"),
               ...(api.detail ? { detail: redactTurnDetail(api.detail) } : {}),
             }
@@ -448,13 +452,10 @@ function mapRow(r: MessageRow): ChatMessageVM {
       if (parsed.interrupted) interrupted = true
       else if (parsed.kind) {
         apiError = {
-          kind: parsed.kind,
-          message: typeof parsed.message === "string"
-            ? redactSensitiveDetail(parsed.message)
-            : "Erreur inattendue",
-          ...(typeof parsed.detail === "string"
-            ? { detail: redactSensitiveDetail(parsed.detail) }
-            : {}),
+          kind: normalizeApiErrorKind(parsed.kind),
+          // Une ligne legacy ne permet pas de retrouver sa clé arbitraire exacte.
+          // Seul le kind contrôlé atteint la VM ; le libellé vient de l'i18n.
+          message: "",
         }
       }
     } catch {

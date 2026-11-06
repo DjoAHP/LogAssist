@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest"
+import { describe, it, expect, vi } from "vitest"
 import {
   SCHEMA_V1,
   SCHEMA_V1_STATEMENTS,
@@ -7,8 +7,21 @@ import {
   SCHEMA_V4_STATEMENTS,
   SCHEMA_V5_STATEMENTS,
   SCHEMA_V6_STATEMENTS,
+  SCHEMA_V7_STATEMENTS,
   SCHEMA_VERSION,
 } from "./migrations"
+import { executeSchema } from "./database"
+
+const ERROR_CLEANUP_STATEMENT =
+  "UPDATE messages SET error = CASE WHEN error = '{\"interrupted\":true}' THEN '{\"interrupted\":true}' ELSE NULL END WHERE error IS NOT NULL"
+
+function createMigrationDbMock() {
+  const execute = vi.fn().mockResolvedValue(undefined)
+  return {
+    execute,
+    db: { execute } as unknown as Parameters<typeof executeSchema>[0],
+  }
+}
 
 describe("SCHEMA_V1_STATEMENTS", () => {
   it("couvre 8 tables + 2 index en 10 statements non vides", () => {
@@ -21,7 +34,7 @@ describe("SCHEMA_V1_STATEMENTS", () => {
     expect(SCHEMA_V1).toBe(SCHEMA_V1_STATEMENTS.join(";\n"))
   })
   it("SCHEMA_VERSION correspond à la dernière migration", () => {
-    expect(SCHEMA_VERSION).toBe(6)
+    expect(SCHEMA_VERSION).toBe(7)
     expect(SCHEMA_V1).toContain("CREATE TABLE IF NOT EXISTS conversations")
     expect(SCHEMA_V1).toContain("idx_conversations_project")
   })
@@ -81,6 +94,40 @@ describe("SCHEMA_V6_STATEMENTS", () => {
       "ALTER TABLE messages ADD COLUMN output_tokens INTEGER",
       "ALTER TABLE messages ADD COLUMN usage_source TEXT CHECK (usage_source IN ('provider','estimated'))",
       "ALTER TABLE messages ADD COLUMN cost_microusd INTEGER",
+    ])
+  })
+
+  it("reste limitée aux cinq ALTER de métriques", () => {
+    expect(SCHEMA_V6_STATEMENTS).toHaveLength(5)
+    expect(SCHEMA_V6_STATEMENTS.every((statement) =>
+      statement.startsWith("ALTER TABLE messages ADD COLUMN"),
+    )).toBe(true)
+  })
+})
+
+describe("SCHEMA_V7_STATEMENTS", () => {
+  it("nettoie les erreurs legacy en ne conservant que l'interruption canonique", () => {
+    expect(SCHEMA_V7_STATEMENTS).toEqual([ERROR_CLEANUP_STATEMENT])
+  })
+
+  it("applique seulement V7 à une base déjà en V6", async () => {
+    const { db, execute } = createMigrationDbMock()
+
+    await executeSchema(db, 6)
+
+    expect(execute.mock.calls.map(([statement]) => statement)).toEqual([
+      ERROR_CLEANUP_STATEMENT,
+    ])
+  })
+
+  it("applique V6 puis V7 à une base en V5", async () => {
+    const { db, execute } = createMigrationDbMock()
+
+    await executeSchema(db, 5)
+
+    expect(execute.mock.calls.map(([statement]) => statement)).toEqual([
+      ...SCHEMA_V6_STATEMENTS,
+      ERROR_CLEANUP_STATEMENT,
     ])
   })
 })

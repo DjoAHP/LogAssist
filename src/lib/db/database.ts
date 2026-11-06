@@ -7,6 +7,7 @@ import {
   SCHEMA_V4_STATEMENTS,
   SCHEMA_V5_STATEMENTS,
   SCHEMA_V6_STATEMENTS,
+  SCHEMA_V7_STATEMENTS,
 } from "./migrations"
 
 let dbPromise: Promise<Database> | null = null
@@ -33,7 +34,7 @@ async function init(): Promise<Database> {
 
 // Exécution séquentielle des statements du schéma (sqlx rejette le multi-statement).
 // `fromVersion` = version actuelle de la DB ; on applique les migrations manquantes.
-async function executeSchema(db: Database, fromVersion: number): Promise<void> {
+export async function executeSchema(db: Database, fromVersion: number): Promise<void> {
   if (fromVersion < 1) {
     for (const statement of SCHEMA_V1_STATEMENTS) {
       await db.execute(statement)
@@ -64,7 +65,12 @@ async function executeSchema(db: Database, fromVersion: number): Promise<void> {
       await db.execute(statement)
     }
   }
-  // Ajouter ici les futures migrations (fromVersion < 7, etc.)
+  if (fromVersion < 7) {
+    for (const statement of SCHEMA_V7_STATEMENTS) {
+      await db.execute(statement)
+    }
+  }
+  // Ajouter ici les futures migrations (fromVersion < 8, etc.)
 }
 
 export async function execute(sql: string, bind: unknown[] = []): Promise<void> {
