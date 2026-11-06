@@ -7,6 +7,15 @@ LogAssist est un assistant IA de bureau pour Windows conçu pour apprendre des l
 ## Fonctionnalités
 
 - Conversations et sources persistées dans SQLite, avec export Markdown.
+- Streaming SSE avec rendu Markdown, tableaux GFM, coloration syntaxique et copie des blocs de code.
+- Présentation hybride : questions compactes et réponses assistant ouvertes avec suivi de lecture intelligent.
+- Auto-scroll respectueux : la lecture reste figée lorsque l'utilisateur remonte, avec retour explicite au nouveau contenu.
+- Actions **Retenter** et **Régénérer** sur la dernière réponse admissible, sans dupliquer le message utilisateur.
+- Métriques par réponse : premier token, latence, tokens d'entrée/sortie et coût uniquement lorsqu'il est vérifiable.
+- Thèmes sombre et clair, arrière-plans dédiés et fenêtre maximisée au lancement.
+- Recherche automatique, lecture d'URL et forçage Web pour le prochain message.
+- Sources cliquables conservées avec les réponses, sans persister le contenu Web brut.
+- Captures éphémères : le binaire d'une image n'est jamais archivé par LogAssist après la session.
 
 <p align="center">
   <img src="src/assets/capture_ecran_interface.png" width="47%" alt="Sélection et configuration des modèles" />
@@ -14,34 +23,25 @@ LogAssist est un assistant IA de bureau pour Windows conçu pour apprendre des l
 </p>
 
 - Fournisseurs OpenAI-compatible configurables, notamment OpenAI, OpenRouter et NVIDIA NIM.
+- Sélecteur de modèles avec recherche, ajout et activation directe.
 
 <p align="center">
   <img src="src/assets/screen_models_settings.png" width="47%" alt="Sélection et configuration des modèles" />
   <img src="src/assets/screen_models_settings_local.png" width="47%" alt="Sélection et configuration des modèles local" />
 </p>
 
-- Streaming SSE avec rendu Markdown, tableaux GFM, coloration syntaxique et copie des blocs de code.
-- Présentation hybride : questions compactes et réponses assistant ouvertes avec suivi de lecture intelligent.
-- Auto-scroll respectueux : la lecture reste figée lorsque l'utilisateur remonte, avec retour explicite au nouveau contenu.
-- Actions **Retenter** et **Régénérer** sur la dernière réponse admissible, sans dupliquer le message utilisateur.
 - System prompt modulaire et bases de connaissances Markdown par conversation.
 
 <p align="center">
   <img src="src/assets/screen_system_prompt.png" width="60%" alt="Le system prompt" />
 </p>
 
-- Sélecteur de modèles avec recherche, ajout et activation directe.
-- Métriques par réponse : premier token, latence, tokens d'entrée/sortie et coût uniquement lorsqu'il est vérifiable.
-- Thèmes sombre et clair, arrière-plans dédiés et fenêtre maximisée au lancement.
 - Accès Web MCP TinyFish limité à `search` et `fetch_content`.
 
 <p align="center">
   <img src="src/assets/screen_mcp_settings.png" width="60%" alt="MCP server" />
 </p>
 
-- Recherche automatique, lecture d'URL et forçage Web pour le prochain message.
-- Sources cliquables conservées avec les réponses, sans persister le contenu Web brut.
-- Captures éphémères : le binaire d'une image n'est jamais archivé par LogAssist après la session.
 - Clés API stockées dans le Credential Manager Windows, jamais dans SQLite ou `localStorage`.
 
 ## Prérequis
