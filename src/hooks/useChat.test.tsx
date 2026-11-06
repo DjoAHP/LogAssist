@@ -1292,6 +1292,12 @@ describe("useChat — récupération de la dernière réponse", () => {
       recoveryMode: undefined,
       recoveryFailed: true,
     })
+
+    await act(async () => result.current.load("conv-1"))
+    expect(result.current.vm.find((message) => message.id === answeredRow.id)).toMatchObject({
+      content: "Ancienne réponse",
+      recoveryFailed: true,
+    })
   })
 
   it("ne remplace pas l'ancienne réponse par un résultat vide", async () => {

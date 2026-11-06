@@ -125,9 +125,15 @@ export function useChat(
           .filter((message) => message.id && message.webWarning)
           .map((message) => [message.id as string, message.webWarning as string]),
       )
+      const recoveryFailedIds = new Set(
+        current
+          .filter((message) => message.id && message.recoveryFailed)
+          .map((message) => message.id as string),
+      )
       const persisted = rows.map((row): ChatMessageVM => ({
         ...mapRow(row),
         ...(warningsById.has(row.id) ? { webWarning: warningsById.get(row.id) } : {}),
+        ...(recoveryFailedIds.has(row.id) ? { recoveryFailed: true } : {}),
       }))
       const persistedIds = new Set(persisted.map((message) => message.id))
       const transients = current.filter((message) =>
