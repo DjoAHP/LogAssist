@@ -55,13 +55,14 @@ function mockReducedMotion(matches: boolean): void {
 }
 
 interface ResizeObserverHarness {
-  trigger: (height: number) => void
+  trigger: (target: Element, height: number) => void
+  triggerEntries: (entries: Array<{ target: Element; height: number }>) => void
   disconnect: ReturnType<typeof vi.fn>
 }
 
 function installResizeObserverMock(): ResizeObserverHarness {
   let callback: ResizeObserverCallback | undefined
-  let observedElement: Element | undefined
+  const observedElements = new Set<Element>()
   const disconnect = vi.fn()
 
   class FakeResizeObserver {
@@ -70,7 +71,7 @@ function installResizeObserverMock(): ResizeObserverHarness {
     }
 
     observe(element: Element): void {
-      observedElement = element
+      observedElements.add(element)
     }
 
     unobserve(): void {}
@@ -82,17 +83,50 @@ function installResizeObserverMock(): ResizeObserverHarness {
 
   vi.stubGlobal("ResizeObserver", FakeResizeObserver)
 
+  const triggerEntries = (entries: Array<{ target: Element; height: number }>): void => {
+    if (!callback || entries.some(({ target }) => !observedElements.has(target))) {
+      throw new Error("ResizeObserver non initialisé pour cette cible")
+    }
+    const observerEntries = entries.map(({ target, height }) => ({
+      target,
+      contentRect: { height },
+    })) as ResizeObserverEntry[]
+    act(() => callback?.(observerEntries, {} as ResizeObserver))
+  }
+
   return {
     disconnect,
-    trigger: (height: number) => {
-      if (!callback || !observedElement) throw new Error("ResizeObserver non initialisé")
-      const entry = {
-        target: observedElement,
-        contentRect: { height },
-      } as ResizeObserverEntry
-      act(() => callback?.([entry], {} as ResizeObserver))
-    },
+    trigger: (target: Element, height: number) => triggerEntries([{ target, height }]),
+    triggerEntries,
   }
+}
+
+function startSmoothReturn(): {
+  resizeObserver: ResizeObserverHarness
+  log: HTMLElement
+  content: Element
+  scrollTo: ReturnType<typeof vi.fn>
+  rerender: ReturnType<typeof render>["rerender"]
+  visibleVm: ChatMessageVM[]
+} {
+  mockReducedMotion(false)
+  const resizeObserver = installResizeObserverMock()
+  const initialVm = [msg({ role: "assistant", content: "Début" })]
+  const visibleVm = [msg({ role: "assistant", content: "Réponse complète" })]
+  const { rerender } = render(
+    <ChatView {...base} conversationId="conv-1" isGenerating={false} vm={initialVm} />,
+  )
+  const log = screen.getByRole("log")
+  const content = log.firstElementChild
+  if (!content) throw new Error("Contenu de conversation absent")
+  setScrollMetrics(log, { scrollTop: 100, clientHeight: 100, scrollHeight: 1_000 })
+  const scrollTo = vi.fn()
+  Object.defineProperty(log, "scrollTo", { configurable: true, value: scrollTo })
+  fireEvent.scroll(log)
+  rerender(<ChatView {...base} conversationId="conv-1" isGenerating={false} vm={visibleVm} />)
+  fireEvent.click(screen.getByRole("button", { name: "Revenir en bas de la conversation" }))
+
+  return { resizeObserver, log, content, scrollTo, rerender, visibleVm }
 }
 
 describe("ChatView — présentation hybride des messages", () => {
@@ -177,12 +211,18 @@ describe("ChatView — suivi respectueux du défilement", () => {
     const announcement = screen.getByText("Nouvelle réponse", { selector: ".sr-only" })
     expect(announcement.getAttribute("role")).toBe("status")
     expect(log.classList.contains("pb-16")).toBe(true)
+    const button = screen.getByRole("button", { name: "Revenir en bas de la conversation" })
+    expect(button.classList.contains("focus-visible:ring-foreground")).toBe(true)
+    expect(button.classList.contains("focus-visible:ring-[var(--brand-to)]")).toBe(false)
+    expect(button.classList.contains("focus-visible:ring-offset-2")).toBe(true)
+    expect(button.classList.contains("focus-visible:ring-offset-background")).toBe(true)
   })
 
-  it("revient en douceur au bas au clic lorsque les animations sont autorisées", () => {
+  it("revient sans animation pendant le streaming et continue de suivre le delta suivant", () => {
     mockReducedMotion(false)
+    const initialVm = [msg({ role: "assistant", content: "Début" })]
     const { rerender } = render(
-      <ChatView {...base} conversationId="conv-1" vm={[msg({ role: "assistant", content: "Début" })]} />,
+      <ChatView {...base} conversationId="conv-1" isGenerating vm={initialVm} />,
     )
     const log = screen.getByRole("log")
     setScrollMetrics(log, { scrollTop: 100, clientHeight: 100, scrollHeight: 1_000 })
@@ -190,7 +230,46 @@ describe("ChatView — suivi respectueux du défilement", () => {
     Object.defineProperty(log, "scrollTo", { configurable: true, value: scrollTo })
     fireEvent.scroll(log)
     rerender(
-      <ChatView {...base} conversationId="conv-1" vm={[msg({ role: "assistant", content: "Début suite" })]} />,
+      <ChatView
+        {...base}
+        conversationId="conv-1"
+        isGenerating
+        vm={[msg({ role: "assistant", content: "Début suite" })]}
+      />,
+    )
+    scrollTo.mockReset()
+
+    fireEvent.click(screen.getByRole("button", { name: "Revenir en bas de la conversation" }))
+
+    expect(scrollTo).toHaveBeenCalledWith({ top: 1_000, behavior: "auto" })
+    expect(screen.queryByRole("button", { name: "Revenir en bas de la conversation" })).toBeNull()
+    scrollTo.mockReset()
+    setScrollMetrics(log, { scrollTop: 900, clientHeight: 100, scrollHeight: 1_200 })
+    rerender(
+      <ChatView
+        {...base}
+        conversationId="conv-1"
+        isGenerating
+        vm={[msg({ role: "assistant", content: "Début suite et fin" })]}
+      />,
+    )
+
+    expect(scrollTo).toHaveBeenCalledWith({ top: 1_200, behavior: "auto" })
+    expect(screen.queryByRole("button", { name: "Revenir en bas de la conversation" })).toBeNull()
+  })
+
+  it("revient en douceur au bas hors streaming lorsque les animations sont autorisées", () => {
+    mockReducedMotion(false)
+    const { rerender } = render(
+      <ChatView {...base} conversationId="conv-1" isGenerating={false} vm={[msg({ role: "assistant", content: "Début" })]} />,
+    )
+    const log = screen.getByRole("log")
+    setScrollMetrics(log, { scrollTop: 100, clientHeight: 100, scrollHeight: 1_000 })
+    const scrollTo = vi.fn()
+    Object.defineProperty(log, "scrollTo", { configurable: true, value: scrollTo })
+    fireEvent.scroll(log)
+    rerender(
+      <ChatView {...base} conversationId="conv-1" isGenerating={false} vm={[msg({ role: "assistant", content: "Début suite" })]} />,
     )
     scrollTo.mockReset()
 
@@ -200,10 +279,170 @@ describe("ChatView — suivi respectueux du défilement", () => {
     expect(screen.queryByRole("button", { name: "Revenir en bas de la conversation" })).toBeNull()
   })
 
+  it("ignore le scroll intermédiaire puis recale une croissance DOM pendant le retour smooth", () => {
+    const { resizeObserver, log, content, scrollTo } = startSmoothReturn()
+    expect(scrollTo).toHaveBeenCalledWith({ top: 1_000, behavior: "smooth" })
+    scrollTo.mockReset()
+
+    setScrollMetrics(log, { scrollTop: 300, clientHeight: 100, scrollHeight: 1_000 })
+    fireEvent.scroll(log)
+    expect(screen.queryByRole("button", { name: "Revenir en bas de la conversation" })).toBeNull()
+
+    setScrollMetrics(log, { scrollTop: 300, clientHeight: 100, scrollHeight: 1_300 })
+    resizeObserver.trigger(content, 700)
+
+    expect(scrollTo).toHaveBeenCalledWith({ top: 1_300, behavior: "auto" })
+    expect(screen.queryByRole("button", { name: "Revenir en bas de la conversation" })).toBeNull()
+  })
+
+  it("pointer down stoppe le smooth à la position courante sans attendre un événement scroll", () => {
+    const { resizeObserver, log, content, scrollTo } = startSmoothReturn()
+    scrollTo.mockReset()
+
+    setScrollMetrics(log, { scrollTop: 300, clientHeight: 100, scrollHeight: 1_000 })
+    fireEvent.pointerDown(log)
+    expect(scrollTo).toHaveBeenCalledTimes(1)
+    expect(scrollTo).toHaveBeenCalledWith({ top: 300, behavior: "auto" })
+
+    setScrollMetrics(log, { scrollTop: 300, clientHeight: 100, scrollHeight: 1_300 })
+    resizeObserver.trigger(content, 700)
+
+    expect(scrollTo).toHaveBeenCalledTimes(1)
+    expect(scrollTo).not.toHaveBeenCalledWith({ top: 1_300, behavior: "auto" })
+    expect(screen.getByRole("button", { name: "Revenir en bas de la conversation" })).toBeTruthy()
+  })
+
+  it.each(["wheel", "touch", "PageUp"] as const)(
+    "annule le retour smooth avec l'action utilisateur %s",
+    (action) => {
+      const { resizeObserver, log, content, scrollTo } = startSmoothReturn()
+      scrollTo.mockReset()
+
+      setScrollMetrics(log, { scrollTop: 300, clientHeight: 100, scrollHeight: 1_000 })
+      if (action === "wheel") fireEvent.wheel(log)
+      else if (action === "touch") fireEvent.touchStart(log)
+      else fireEvent.keyDown(log, { key: action })
+      expect(scrollTo).toHaveBeenCalledWith({ top: 300, behavior: "auto" })
+
+      setScrollMetrics(log, { scrollTop: 300, clientHeight: 100, scrollHeight: 1_300 })
+      resizeObserver.trigger(content, 700)
+
+      expect(scrollTo).toHaveBeenCalledTimes(1)
+      expect(scrollTo).not.toHaveBeenCalledWith({ top: 1_300, behavior: "auto" })
+      expect(screen.getByRole("button", { name: "Revenir en bas de la conversation" })).toBeTruthy()
+    },
+  )
+
+  it("conserve le suivi si le retour smooth est annulé alors que la vue est déjà près du bas", () => {
+    const { resizeObserver, log, content, scrollTo } = startSmoothReturn()
+    scrollTo.mockReset()
+
+    setScrollMetrics(log, { scrollTop: 900, clientHeight: 100, scrollHeight: 1_000 })
+    fireEvent.wheel(log)
+    expect(scrollTo).toHaveBeenCalledWith({ top: 900, behavior: "auto" })
+    scrollTo.mockReset()
+
+    setScrollMetrics(log, { scrollTop: 900, clientHeight: 100, scrollHeight: 1_300 })
+    resizeObserver.trigger(content, 700)
+
+    expect(scrollTo).toHaveBeenCalledWith({ top: 1_300, behavior: "auto" })
+    expect(screen.queryByRole("button", { name: "Revenir en bas de la conversation" })).toBeNull()
+  })
+
+  it("ignore les événements d'annulation hors retour programmatique", () => {
+    render(<ChatView {...base} conversationId="conv-1" vm={[msg({ role: "assistant", content: "Réponse" })]} />)
+    const log = screen.getByRole("log")
+    setScrollMetrics(log, { scrollTop: 300, clientHeight: 100, scrollHeight: 1_000 })
+    const scrollTo = vi.fn()
+    Object.defineProperty(log, "scrollTo", { configurable: true, value: scrollTo })
+
+    fireEvent.wheel(log)
+    fireEvent.pointerDown(log)
+    fireEvent.touchStart(log)
+    fireEvent.keyDown(log, { key: "PageUp" })
+
+    expect(scrollTo).not.toHaveBeenCalled()
+  })
+
+  it("reconnaît une remontée manuelle après l'arrivée naturelle du smooth au bas", () => {
+    const { resizeObserver, log, content, scrollTo } = startSmoothReturn()
+    scrollTo.mockReset()
+
+    setScrollMetrics(log, { scrollTop: 900, clientHeight: 100, scrollHeight: 1_000 })
+    fireEvent.scroll(log)
+    setScrollMetrics(log, { scrollTop: 300, clientHeight: 100, scrollHeight: 1_000 })
+    fireEvent.scroll(log)
+    setScrollMetrics(log, { scrollTop: 300, clientHeight: 100, scrollHeight: 1_300 })
+    resizeObserver.trigger(content, 700)
+
+    expect(scrollTo).not.toHaveBeenCalled()
+    expect(screen.getByRole("button", { name: "Revenir en bas de la conversation" })).toBeTruthy()
+  })
+
+  it("annule le retour smooth lors d'un changement de conversation", () => {
+    const { resizeObserver, log, content, scrollTo, rerender, visibleVm } = startSmoothReturn()
+    rerender(<ChatView {...base} conversationId="conv-2" isGenerating={false} vm={visibleVm} />)
+    scrollTo.mockReset()
+
+    setScrollMetrics(log, { scrollTop: 300, clientHeight: 100, scrollHeight: 1_000 })
+    fireEvent.scroll(log)
+    setScrollMetrics(log, { scrollTop: 300, clientHeight: 100, scrollHeight: 1_300 })
+    resizeObserver.trigger(content, 700)
+
+    expect(scrollTo).not.toHaveBeenCalled()
+    expect(screen.getByRole("button", { name: "Revenir en bas de la conversation" })).toBeTruthy()
+  })
+
+  it("préserve le scroll smooth lors d'un reload canonique sémantiquement identique", () => {
+    mockReducedMotion(false)
+    const initialVm = [msg({ id: "m1", role: "assistant", content: "Début" })]
+    const visibleVm = [msg({
+      id: "m1",
+      role: "assistant",
+      content: "Réponse complète",
+      inputTokens: 12,
+      outputTokens: 8,
+      usageSource: "provider",
+      sources: [{ url: "https://example.com", title: "Exemple", origin: "search" }],
+    })]
+    const { rerender } = render(
+      <ChatView {...base} conversationId="conv-1" isGenerating vm={initialVm} />,
+    )
+    const log = screen.getByRole("log")
+    setScrollMetrics(log, { scrollTop: 100, clientHeight: 100, scrollHeight: 1_000 })
+    const scrollTo = vi.fn()
+    Object.defineProperty(log, "scrollTo", { configurable: true, value: scrollTo })
+    fireEvent.scroll(log)
+    rerender(<ChatView {...base} conversationId="conv-1" isGenerating vm={visibleVm} />)
+    expect(screen.getByRole("button", { name: "Revenir en bas de la conversation" })).toBeTruthy()
+
+    rerender(<ChatView {...base} conversationId="conv-1" isGenerating={false} vm={visibleVm} />)
+    scrollTo.mockReset()
+    fireEvent.click(screen.getByRole("button", { name: "Revenir en bas de la conversation" }))
+
+    expect(scrollTo).toHaveBeenCalledTimes(1)
+    expect(scrollTo).toHaveBeenLastCalledWith({ top: 1_000, behavior: "smooth" })
+    expect(document.activeElement).toBe(log)
+
+    const canonicalVm = visibleVm.map((message, messageIndex) => ({
+      ...message,
+      id: `db-message-${messageIndex}`,
+      attachments: message.attachments?.map((attachment, attachmentIndex) => ({
+        ...attachment,
+        id: `db-attachment-${attachmentIndex}`,
+      })),
+      sources: message.sources?.map((source) => ({ ...source })),
+    }))
+    rerender(<ChatView {...base} conversationId="conv-1" isGenerating={false} vm={canonicalVm} />)
+
+    expect(scrollTo).toHaveBeenCalledTimes(1)
+    expect(screen.queryByRole("button", { name: "Revenir en bas de la conversation" })).toBeNull()
+  })
+
   it("revient sans animation au bas quand les mouvements sont réduits", () => {
     mockReducedMotion(true)
     const { rerender } = render(
-      <ChatView {...base} conversationId="conv-1" vm={[msg({ role: "assistant", content: "Début" })]} />,
+      <ChatView {...base} conversationId="conv-1" isGenerating={false} vm={[msg({ role: "assistant", content: "Début" })]} />,
     )
     const log = screen.getByRole("log")
     setScrollMetrics(log, { scrollTop: 100, clientHeight: 100, scrollHeight: 1_000 })
@@ -211,7 +450,7 @@ describe("ChatView — suivi respectueux du défilement", () => {
     Object.defineProperty(log, "scrollTo", { configurable: true, value: scrollTo })
     fireEvent.scroll(log)
     rerender(
-      <ChatView {...base} conversationId="conv-1" vm={[msg({ role: "assistant", content: "Début suite" })]} />,
+      <ChatView {...base} conversationId="conv-1" isGenerating={false} vm={[msg({ role: "assistant", content: "Début suite" })]} />,
     )
     scrollTo.mockReset()
 
@@ -240,7 +479,7 @@ describe("ChatView — suivi respectueux du défilement", () => {
     expect(scrollTo).toHaveBeenCalledWith({ top: 1_000, behavior: "smooth" })
   })
 
-  it("resynchronise le bas lorsque la nouvelle VM chargée a la même taille et le même contenu final", () => {
+  it("réinitialise le suivi au changement de conversation malgré une VM visuellement identique", () => {
     const oldVm = [msg({ id: "old-message", role: "assistant", content: "Même réponse" })]
     const { rerender } = render(
       <ChatView {...base} conversationId="conv-1" vm={oldVm} />,
@@ -253,14 +492,51 @@ describe("ChatView — suivi respectueux du défilement", () => {
     scrollTo.mockReset()
     setScrollMetrics(log, { scrollTop: 0, clientHeight: 100, scrollHeight: 700 })
 
-    rerender(<ChatView {...base} conversationId="conv-2" vm={oldVm} />)
+    const nextConversationVm = [msg({
+      id: "new-message",
+      role: "assistant",
+      content: "Même réponse",
+      attachments: oldVm[0].attachments?.map((attachment) => ({
+        ...attachment,
+        id: "new-attachment",
+      })),
+    })]
+    rerender(<ChatView {...base} conversationId="conv-2" vm={nextConversationVm} />)
+
     expect(screen.queryByRole("button", { name: "Revenir en bas de la conversation" })).toBeNull()
     expect(scrollTo).toHaveBeenCalledWith({ top: 700, behavior: "auto" })
+  })
+
+  it("synchronise les changements visibles de source et de nom de pièce jointe", () => {
+    const initialVm = [msg({ id: "m1", role: "assistant", content: "Même réponse" })]
+    const { rerender } = render(
+      <ChatView {...base} conversationId="conv-1" vm={initialVm} />,
+    )
+    const log = screen.getByRole("log")
+    setScrollMetrics(log, { scrollTop: 820, clientHeight: 100, scrollHeight: 1_000 })
+    const scrollTo = vi.fn()
+    Object.defineProperty(log, "scrollTo", { configurable: true, value: scrollTo })
+    fireEvent.scroll(log)
     scrollTo.mockReset()
 
-    const loadedVm = [msg({ id: "new-message", role: "assistant", content: "Même réponse" })]
-    setScrollMetrics(log, { scrollTop: 0, clientHeight: 100, scrollHeight: 1_200 })
-    rerender(<ChatView {...base} conversationId="conv-2" vm={loadedVm} />)
+    const withSource = [msg({
+      ...initialVm[0],
+      sources: [{ url: "https://example.com/source", title: "Source visible", origin: "search" }],
+    })]
+    setScrollMetrics(log, { scrollTop: 820, clientHeight: 100, scrollHeight: 1_100 })
+    rerender(<ChatView {...base} conversationId="conv-1" vm={withSource} />)
+    expect(scrollTo).toHaveBeenCalledWith({ top: 1_100, behavior: "auto" })
+    scrollTo.mockReset()
+
+    const renamedAttachment = [msg({
+      ...withSource[0],
+      attachments: withSource[0].attachments?.map((attachment) => ({
+        ...attachment,
+        name: "Nouveau nom.md",
+      })),
+    })]
+    setScrollMetrics(log, { scrollTop: 920, clientHeight: 100, scrollHeight: 1_200 })
+    rerender(<ChatView {...base} conversationId="conv-1" vm={renamedAttachment} />)
 
     expect(scrollTo).toHaveBeenCalledWith({ top: 1_200, behavior: "auto" })
   })
@@ -297,6 +573,8 @@ describe("ChatView — croissance asynchrone du contenu", () => {
     const resizeObserver = installResizeObserverMock()
     render(<ChatView {...base} conversationId="conv-1" vm={[msg({ role: "assistant", content: "Réponse" })]} />)
     const log = screen.getByRole("log")
+    const content = log.firstElementChild
+    if (!content) throw new Error("Contenu de conversation absent")
     setScrollMetrics(log, { scrollTop: 1_020, clientHeight: 100, scrollHeight: 1_200 })
     const scrollTo = vi.fn()
     Object.defineProperty(log, "scrollTo", { configurable: true, value: scrollTo })
@@ -304,12 +582,69 @@ describe("ChatView — croissance asynchrone du contenu", () => {
     scrollTo.mockReset()
 
     setScrollMetrics(log, { scrollTop: 1_100, clientHeight: 100, scrollHeight: 1_500 })
-    resizeObserver.trigger(600)
+    resizeObserver.trigger(content, 600)
 
     expect(scrollTo).toHaveBeenCalledWith({ top: 1_500, behavior: "auto" })
   })
 
   it("signale une hausse de hauteur sans déplacer une vue figée", () => {
+    const resizeObserver = installResizeObserverMock()
+    render(<ChatView {...base} conversationId="conv-1" vm={[msg({ role: "assistant", content: "Réponse" })]} />)
+    const log = screen.getByRole("log")
+    const content = log.firstElementChild
+    if (!content) throw new Error("Contenu de conversation absent")
+    setScrollMetrics(log, { scrollTop: 100, clientHeight: 100, scrollHeight: 1_000 })
+    const scrollTo = vi.fn()
+    Object.defineProperty(log, "scrollTo", { configurable: true, value: scrollTo })
+    fireEvent.scroll(log)
+    scrollTo.mockReset()
+
+    setScrollMetrics(log, { scrollTop: 100, clientHeight: 100, scrollHeight: 1_300 })
+    resizeObserver.trigger(content, 700)
+
+    expect(scrollTo).not.toHaveBeenCalled()
+    expect(screen.getByRole("button", { name: "Revenir en bas de la conversation" })).toBeTruthy()
+  })
+
+  it("recolle au bas quand le viewport rétrécit pendant le suivi", () => {
+    const resizeObserver = installResizeObserverMock()
+    render(<ChatView {...base} conversationId="conv-1" vm={[msg({ role: "assistant", content: "Réponse" })]} />)
+    const log = screen.getByRole("log")
+    setScrollMetrics(log, { scrollTop: 820, clientHeight: 100, scrollHeight: 1_000 })
+    const scrollTo = vi.fn()
+    Object.defineProperty(log, "scrollTo", { configurable: true, value: scrollTo })
+    fireEvent.scroll(log)
+    scrollTo.mockReset()
+
+    setScrollMetrics(log, { scrollTop: 820, clientHeight: 60, scrollHeight: 1_000 })
+    resizeObserver.trigger(log, 60)
+
+    expect(scrollTo).toHaveBeenCalledWith({ top: 1_000, behavior: "auto" })
+  })
+
+  it("recolle au bas pendant un reflow groupant viewport et contenu", () => {
+    const resizeObserver = installResizeObserverMock()
+    render(<ChatView {...base} conversationId="conv-1" vm={[msg({ role: "assistant", content: "Réponse" })]} />)
+    const log = screen.getByRole("log")
+    const content = log.firstElementChild
+    if (!content) throw new Error("Contenu de conversation absent")
+    setScrollMetrics(log, { scrollTop: 820, clientHeight: 100, scrollHeight: 1_000 })
+    const scrollTo = vi.fn()
+    Object.defineProperty(log, "scrollTo", { configurable: true, value: scrollTo })
+    fireEvent.scroll(log)
+    scrollTo.mockReset()
+
+    setScrollMetrics(log, { scrollTop: 820, clientHeight: 60, scrollHeight: 1_300 })
+    resizeObserver.triggerEntries([
+      { target: content, height: 700 },
+      { target: log, height: 60 },
+    ])
+
+    expect(scrollTo).toHaveBeenCalledWith({ top: 1_300, behavior: "auto" })
+    expect(screen.queryByRole("button", { name: "Revenir en bas de la conversation" })).toBeNull()
+  })
+
+  it("ignore le redimensionnement du viewport pendant une lecture figée", () => {
     const resizeObserver = installResizeObserverMock()
     render(<ChatView {...base} conversationId="conv-1" vm={[msg({ role: "assistant", content: "Réponse" })]} />)
     const log = screen.getByRole("log")
@@ -319,12 +654,43 @@ describe("ChatView — croissance asynchrone du contenu", () => {
     fireEvent.scroll(log)
     scrollTo.mockReset()
 
-    setScrollMetrics(log, { scrollTop: 100, clientHeight: 100, scrollHeight: 1_300 })
-    resizeObserver.trigger(700)
+    setScrollMetrics(log, { scrollTop: 100, clientHeight: 60, scrollHeight: 1_000 })
+    resizeObserver.trigger(log, 60)
 
     expect(scrollTo).not.toHaveBeenCalled()
-    expect(screen.getByRole("button", { name: "Revenir en bas de la conversation" })).toBeTruthy()
+    expect(screen.queryByRole("button", { name: "Revenir en bas de la conversation" })).toBeNull()
   })
+
+  it.each(["viewport-contenu", "contenu-viewport"] as const)(
+    "traite un reflow %s sans faux unread pendant une lecture figée",
+    (order) => {
+      const resizeObserver = installResizeObserverMock()
+      render(<ChatView {...base} conversationId="conv-1" vm={[msg({ role: "assistant", content: "Réponse" })]} />)
+      const log = screen.getByRole("log")
+      const content = log.firstElementChild
+      if (!content) throw new Error("Contenu de conversation absent")
+      setScrollMetrics(log, { scrollTop: 100, clientHeight: 100, scrollHeight: 1_000 })
+      const scrollTo = vi.fn()
+      Object.defineProperty(log, "scrollTo", { configurable: true, value: scrollTo })
+      fireEvent.scroll(log)
+      scrollTo.mockReset()
+
+      setScrollMetrics(log, { scrollTop: 100, clientHeight: 60, scrollHeight: 1_300 })
+      const viewportEntry = { target: log, height: 60 }
+      const contentEntry = { target: content, height: 700 }
+      resizeObserver.triggerEntries(
+        order === "viewport-contenu"
+          ? [viewportEntry, contentEntry]
+          : [contentEntry, viewportEntry],
+      )
+
+      expect(scrollTo).not.toHaveBeenCalled()
+      expect(screen.queryByRole("button", { name: "Revenir en bas de la conversation" })).toBeNull()
+
+      resizeObserver.trigger(content, 800)
+      expect(screen.getByRole("button", { name: "Revenir en bas de la conversation" })).toBeTruthy()
+    },
+  )
 
   it("déconnecte l'observer au démontage", () => {
     const resizeObserver = installResizeObserverMock()
@@ -350,7 +716,7 @@ describe("ChatView — croissance asynchrone du contenu", () => {
     scrollTo.mockReset()
 
     expect(() => rerender(
-      <ChatView {...base} conversationId="conv-1" vm={[msg({ id: "m2", role: "assistant", content: "Réponse" })]} />,
+      <ChatView {...base} conversationId="conv-1" vm={[msg({ id: "m2", role: "assistant", content: "Réponse suite" })]} />,
     )).not.toThrow()
     expect(scrollTo).toHaveBeenCalledWith({ top: 1_400, behavior: "auto" })
   })

@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react"
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import { AlertTriangle, Check, Copy, ExternalLink, FileText, Maximize2, Search, X } from "lucide-react"
 import { t } from "@/i18n/fr"
 import { logger } from "@/lib/logger"
@@ -24,21 +24,67 @@ interface Props {
   hasModel: boolean
   showConversation: boolean
   conversationId?: string | null
+  isGenerating?: boolean
   modelSelector?: ModelSelectorProps | null
 }
+
+function createRenderSignature(vm: ChatMessageVM[]): string {
+  return JSON.stringify(vm.map((message) => ({
+    role: message.role,
+    content: message.content,
+    apiError: message.apiError
+      ? { kind: message.apiError.kind, message: message.apiError.message }
+      : null,
+    interrupted: message.interrupted ?? false,
+    webStatus: message.webStatus ?? null,
+    webWarning: message.webWarning ?? null,
+    sources: (message.sources ?? []).map((source) => ({
+      url: source.url,
+      title: source.title,
+      origin: source.origin,
+    })),
+    attachments: (message.attachments ?? []).map((attachment) => ({
+      kind: attachment.kind,
+      name: attachment.name,
+      mimeType: attachment.mimeType,
+      hasBase64: Boolean(attachment.base64),
+    })),
+    modelLabel: message.modelLabel ?? null,
+    firstTokenMs: message.firstTokenMs ?? null,
+    latencyMs: message.latencyMs ?? null,
+    inputTokens: message.inputTokens ?? null,
+    outputTokens: message.outputTokens ?? null,
+    usageSource: message.usageSource ?? null,
+    costMicrousd: message.costMicrousd ?? null,
+  })))
+}
+
+const PROGRAMMATIC_RETURN_CANCEL_KEYS = new Set([
+  "ArrowUp",
+  "ArrowDown",
+  "PageUp",
+  "PageDown",
+  "Home",
+  "End",
+  " ",
+  "Space",
+])
 
 export function ChatView({
   vm,
   hasModel,
   showConversation,
   conversationId,
+  isGenerating = false,
   modelSelector,
 }: Props) {
   const scrollRef = useRef<HTMLDivElement>(null)
   const contentRef = useRef<HTMLDivElement>(null)
   const shouldFollowRef = useRef(true)
+  const returningToBottomRef = useRef(false)
   const [hasUnreadContent, setHasUnreadContent] = useState(false)
   const [expandedImage, setExpandedImage] = useState<{ src: string; alt: string } | null>(null)
+  const renderSignature = useMemo(() => createRenderSignature(vm), [vm])
 
   const scrollToBottom = (behavior: ScrollBehavior): void => {
     const element = scrollRef.current
@@ -50,49 +96,96 @@ export function ChatView({
     const element = scrollRef.current
     if (!element) return
     const follows = isNearChatBottom(element)
+
+    if (returningToBottomRef.current) {
+      if (follows) {
+        returningToBottomRef.current = false
+        shouldFollowRef.current = true
+        setHasUnreadContent(false)
+      }
+      return
+    }
+
     shouldFollowRef.current = follows
     if (follows) setHasUnreadContent(false)
   }
 
   const jumpToBottom = (): void => {
+    const reduced = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false
+    const behavior: ScrollBehavior = reduced || isGenerating ? "auto" : "smooth"
+    returningToBottomRef.current = behavior === "smooth"
     shouldFollowRef.current = true
     setHasUnreadContent(false)
-    const reduced = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false
-    scrollToBottom(reduced ? "auto" : "smooth")
+    scrollToBottom(behavior)
+    scrollRef.current?.focus({ preventScroll: true })
+  }
+
+  const cancelProgrammaticReturn = (): void => {
+    if (!returningToBottomRef.current) return
+    returningToBottomRef.current = false
+    const element = scrollRef.current
+    if (!element) return
+    element.scrollTo({ top: element.scrollTop, behavior: "auto" })
+    const follows = isNearChatBottom(element)
+    shouldFollowRef.current = follows
+    if (follows) setHasUnreadContent(false)
   }
 
   // Le reset précède volontairement la synchronisation VM : lors d'un
   // changement de conversation, l'ancienne VM transitoire repart déjà du bas.
   useLayoutEffect(() => {
+    returningToBottomRef.current = false
     shouldFollowRef.current = true
     setHasUnreadContent(false)
   }, [conversationId])
 
-  // La référence VM entière est significative : un historique nouvellement
-  // chargé peut avoir la même taille et le même dernier contenu que l'ancien.
+  // La signature ne réagit qu'aux données rendues : un reload SQLite composé
+  // de nouveaux objets identiques ne doit pas interrompre un scroll smooth.
   useLayoutEffect(() => {
     if (shouldFollowRef.current) scrollToBottom("auto")
     else if (vm.length > 0) setHasUnreadContent(true)
-  }, [conversationId, vm])
+  }, [conversationId, renderSignature])
 
   useEffect(() => {
     if (typeof ResizeObserver === "undefined") return
     const element = contentRef.current
-    if (!element) return
+    const viewport = scrollRef.current
+    if (!element || !viewport) return
 
     let previousHeight = element.scrollHeight
     const observer = new ResizeObserver((entries) => {
-      const entry = entries[0]
-      if (!entry) return
-      const nextHeight = entry.contentRect.height || element.scrollHeight
-      const grew = nextHeight > previousHeight
-      previousHeight = nextHeight
-      if (!grew) return
+      const viewportChanged = entries.some((entry) => entry.target === viewport)
+      let contentGrew = false
 
+      for (const entry of entries) {
+        if (entry.target !== element) continue
+
+        const nextHeight = entry.contentRect.height || element.scrollHeight
+        if (nextHeight > previousHeight) contentGrew = true
+        previousHeight = nextHeight
+      }
+
+      // Un lot viewport + contenu correspond à un reflow. En lecture figée,
+      // il ne représente pas une nouvelle réponse et ne crée donc pas d'unread.
+      if (contentGrew && returningToBottomRef.current) {
+        returningToBottomRef.current = false
+        shouldFollowRef.current = true
+        setHasUnreadContent(false)
+        scrollToBottom("auto")
+        return
+      }
+
+      if (viewportChanged) {
+        if (shouldFollowRef.current) scrollToBottom("auto")
+        return
+      }
+
+      if (!contentGrew) return
       if (shouldFollowRef.current) scrollToBottom("auto")
       else setHasUnreadContent(true)
     })
     observer.observe(element)
+    observer.observe(viewport)
     return () => observer.disconnect()
   }, [showConversation])
 
@@ -110,8 +203,15 @@ export function ChatView({
         <div
           ref={scrollRef}
           role="log"
+          tabIndex={-1}
           aria-live="polite"
           onScroll={onScroll}
+          onWheel={cancelProgrammaticReturn}
+          onTouchStart={cancelProgrammaticReturn}
+          onPointerDown={cancelProgrammaticReturn}
+          onKeyDown={(event) => {
+            if (PROGRAMMATIC_RETURN_CANCEL_KEYS.has(event.key)) cancelProgrammaticReturn()
+          }}
           className={`h-full overflow-y-auto p-4${hasUnreadContent ? " pb-16" : ""}`}
         >
           <div ref={contentRef} className="mx-auto w-full max-w-5xl space-y-4">
@@ -135,7 +235,7 @@ export function ChatView({
             type="button"
             onClick={jumpToBottom}
             aria-label={t.chat.backToBottom}
-            className="absolute bottom-3 left-1/2 -translate-x-1/2 rounded-full border border-[var(--brand-to)] bg-background/95 px-3 py-1.5 text-xs text-foreground shadow-lg hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--brand-to)]"
+            className="absolute bottom-3 left-1/2 -translate-x-1/2 rounded-full border border-[var(--brand-to)] bg-background/95 px-3 py-1.5 text-xs text-foreground shadow-lg hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground focus-visible:ring-offset-2 focus-visible:ring-offset-background"
           >
             ↓ {t.chat.newResponse}
           </button>

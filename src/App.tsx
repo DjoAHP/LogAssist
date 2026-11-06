@@ -252,6 +252,7 @@ function App() {
           hasModel={modelSelection !== null}
           showConversation={activeId !== null}
           conversationId={activeId}
+          isGenerating={busy}
           modelSelector={{
             options: modelOptions,
             onSelect: onModelSelect,
