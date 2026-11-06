@@ -121,7 +121,16 @@ function App() {
         supportsImages: modelOptions.find((o) => o.isDefault)?.supportsImages ?? false,
       }
     : null
-  const { vm, busy, send, interrupt, load, webToolsUnsupported } = useChat(modelSelection, webAccess)
+  const {
+    vm,
+    busy,
+    send,
+    retryLast,
+    regenerateLast,
+    interrupt,
+    load,
+    webToolsUnsupported,
+  } = useChat(modelSelection, webAccess)
 
   // Chargement de l'historique à chaque changement de conversation active.
   useEffect(() => {
@@ -174,6 +183,18 @@ function App() {
       return send(activeId, text, attachments, options)
     },
     [activeId, send],
+  )
+
+  const onRetry = useCallback(
+    (messageId: string): Promise<boolean> =>
+      activeId ? retryLast(activeId, messageId) : Promise.resolve(false),
+    [activeId, retryLast],
+  )
+
+  const onRegenerate = useCallback(
+    (messageId: string): Promise<boolean> =>
+      activeId ? regenerateLast(activeId, messageId) : Promise.resolve(false),
+    [activeId, regenerateLast],
   )
 
   const toggleSidebar = useCallback(() => {
@@ -253,6 +274,8 @@ function App() {
           showConversation={activeId !== null}
           conversationId={activeId}
           isGenerating={busy}
+          onRetry={onRetry}
+          onRegenerate={onRegenerate}
           modelSelector={{
             options: modelOptions,
             onSelect: onModelSelect,

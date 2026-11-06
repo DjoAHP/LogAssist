@@ -176,6 +176,116 @@ describe("ChatView — présentation hybride des messages", () => {
   })
 })
 
+describe("ChatView — actions de récupération", () => {
+  it("affiche Retenter uniquement sur la dernière erreur fournisseur", () => {
+    render(<ChatView
+      {...base}
+      vm={[msg({
+        id: "assistant-error",
+        role: "assistant",
+        content: "",
+        apiError: { kind: "network", message: "Échec" },
+      })]}
+      onRetry={vi.fn()}
+    />)
+
+    expect(screen.getByRole("button", { name: "Retenter" })).toBeTruthy()
+    expect(screen.queryByRole("button", { name: "Régénérer" })).toBeNull()
+  })
+
+  it("n'affiche pas Retenter pour une erreur de persistance", () => {
+    render(<ChatView
+      {...base}
+      vm={[msg({
+        id: "assistant-persistence",
+        role: "assistant",
+        content: "",
+        apiError: { kind: "persistence", message: "Non enregistré" },
+      })]}
+      onRetry={vi.fn()}
+    />)
+
+    expect(screen.queryByRole("button", { name: "Retenter" })).toBeNull()
+  })
+
+  it("affiche Régénérer uniquement sur la dernière réponse réussie", () => {
+    render(<ChatView
+      {...base}
+      vm={[
+        msg({ id: "assistant-old", role: "assistant", content: "Ancienne" }),
+        msg({ id: "assistant-last", role: "assistant", content: "Dernière" }),
+      ]}
+      onRegenerate={vi.fn()}
+    />)
+
+    expect(screen.getAllByRole("button", { name: "Régénérer" })).toHaveLength(1)
+    expect(screen.getAllByTestId("message-assistant")[1]
+      .querySelector('[aria-label="Régénérer"]')).not.toBeNull()
+  })
+
+  it("désactive les actions pendant une génération", () => {
+    render(<ChatView
+      {...base}
+      isGenerating
+      vm={[msg({ id: "assistant-last", role: "assistant", content: "Réponse" })]}
+      onRegenerate={vi.fn()}
+    />)
+
+    expect((screen.getByRole("button", { name: "Régénérer" }) as HTMLButtonElement).disabled).toBe(true)
+  })
+
+  it("délègue les actions avec l'id du message", () => {
+    const onRetry = vi.fn().mockResolvedValue(true)
+    render(<ChatView
+      {...base}
+      vm={[msg({
+        id: "assistant-error",
+        role: "assistant",
+        content: "",
+        apiError: { kind: "network", message: "Échec" },
+      })]}
+      onRetry={onRetry}
+    />)
+
+    fireEvent.click(screen.getByRole("button", { name: "Retenter" }))
+    expect(onRetry).toHaveBeenCalledWith("assistant-error")
+  })
+
+  it("affiche l'état de relance et conserve le bouton copier unique", () => {
+    render(<ChatView
+      {...base}
+      vm={[msg({
+        id: "assistant-last",
+        role: "assistant",
+        content: "Réponse",
+        recoveryMode: "regenerate",
+      })]}
+      onRegenerate={vi.fn()}
+    />)
+
+    expect(screen.getByRole("status", { name: "Régénération…" }).textContent)
+      .toContain("Régénération")
+    expect(screen.getAllByRole("button", { name: "Copier le message" })).toHaveLength(1)
+    expect((screen.getByRole("button", { name: "Régénérer" }) as HTMLButtonElement).disabled).toBe(true)
+  })
+
+  it("signale un échec de relance en conservant la réponse", () => {
+    render(<ChatView
+      {...base}
+      vm={[msg({
+        id: "assistant-last",
+        role: "assistant",
+        content: "Réponse conservée",
+        recoveryFailed: true,
+      })]}
+      onRegenerate={vi.fn()}
+    />)
+
+    expect(screen.getByRole("note").textContent).toContain("réponse précédente est conservée")
+    expect(screen.getByText("Réponse conservée")).toBeTruthy()
+  })
+})
+
 describe("ChatView — suivi respectueux du défilement", () => {
   it("suit automatiquement le streaming lorsque la vue est près du bas", () => {
     const { rerender } = render(

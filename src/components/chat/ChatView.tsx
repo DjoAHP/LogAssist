@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
-import { AlertTriangle, Check, Copy, ExternalLink, FileText, Maximize2, Search, X } from "lucide-react"
+import { AlertTriangle, Check, Copy, ExternalLink, FileText, Maximize2, RefreshCw, RotateCcw, Search, X } from "lucide-react"
 import { t } from "@/i18n/fr"
 import { logger } from "@/lib/logger"
 import { KIND_TO_KEY } from "@/lib/ai/errors"
@@ -25,6 +25,8 @@ interface Props {
   showConversation: boolean
   conversationId?: string | null
   isGenerating?: boolean
+  onRetry?: (messageId: string) => Promise<boolean>
+  onRegenerate?: (messageId: string) => Promise<boolean>
   modelSelector?: ModelSelectorProps | null
 }
 
@@ -56,6 +58,8 @@ function createRenderSignature(vm: ChatMessageVM[]): string {
     outputTokens: message.outputTokens ?? null,
     usageSource: message.usageSource ?? null,
     costMicrousd: message.costMicrousd ?? null,
+    recoveryMode: message.recoveryMode ?? null,
+    recoveryFailed: message.recoveryFailed ?? false,
   })))
 }
 
@@ -76,6 +80,8 @@ export function ChatView({
   showConversation,
   conversationId,
   isGenerating = false,
+  onRetry,
+  onRegenerate,
   modelSelector,
 }: Props) {
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -85,6 +91,12 @@ export function ChatView({
   const [hasUnreadContent, setHasUnreadContent] = useState(false)
   const [expandedImage, setExpandedImage] = useState<{ src: string; alt: string } | null>(null)
   const renderSignature = useMemo(() => createRenderSignature(vm), [vm])
+  const latestAssistantId = useMemo(() => {
+    for (let index = vm.length - 1; index >= 0; index--) {
+      if (vm[index].role === "assistant") return vm[index].id
+    }
+    return undefined
+  }, [vm])
 
   const scrollToBottom = (behavior: ScrollBehavior): void => {
     const element = scrollRef.current
@@ -223,6 +235,10 @@ export function ChatView({
                 key={m.id ?? `local-${i}`}
                 m={m}
                 onImageClick={setExpandedImage}
+                isLatestAssistant={m.role === "assistant" && m.id === latestAssistantId}
+                isGenerating={isGenerating}
+                onRetry={onRetry}
+                onRegenerate={onRegenerate}
               />
             ))}
           </div>
@@ -303,9 +319,17 @@ function ModelSelectorFooter({ options, onSelect }: ModelSelectorProps) {
 function MessageBubble({
   m,
   onImageClick,
+  isLatestAssistant,
+  isGenerating,
+  onRetry,
+  onRegenerate,
 }: {
   m: ChatMessageVM
   onImageClick: (img: { src: string; alt: string }) => void
+  isLatestAssistant: boolean
+  isGenerating: boolean
+  onRetry?: (messageId: string) => Promise<boolean>
+  onRegenerate?: (messageId: string) => Promise<boolean>
 }) {
   const isUser = m.role === "user"
   const attachments = m.attachments ?? []
@@ -362,6 +386,13 @@ function MessageBubble({
   const tokenLabel = totalTokens === undefined
     ? undefined
     : `${m.usageSource === "estimated" ? "≈ " : ""}${formatTokens(totalTokens)} ${t.chat.tokens}`
+  const hasPersistedId = Boolean(m.id && !m.persistenceFailed)
+  const canRetry = isLatestAssistant && hasPersistedId &&
+    Boolean(m.apiError) && m.apiError?.kind !== "persistence" && !m.interrupted && Boolean(onRetry)
+  const canRegenerate = isLatestAssistant && hasPersistedId &&
+    Boolean(m.content) && !m.apiError && !m.interrupted && Boolean(onRegenerate)
+  const recoveryDisabled = isGenerating || Boolean(m.recoveryMode)
+  const showAssistantActions = !isUser && (Boolean(m.content) || canRetry || Boolean(m.recoveryMode))
   const bubbleClass = m.apiError
     ? "max-w-[88%] rounded-lg border border-destructive bg-destructive/10 px-3 py-2"
     : isUser
@@ -452,6 +483,21 @@ function MessageBubble({
         {m.interrupted && (
           <span className="mt-1 inline-block text-xs text-muted-foreground">{t.chat.interrupted}</span>
         )}
+        {m.recoveryMode && (
+          <span
+            role="status"
+            aria-label={m.recoveryMode === "retry" ? t.chat.retrying : t.chat.regenerating}
+            className="mt-2 inline-flex items-center gap-2 text-xs text-muted-foreground"
+          >
+            <span className="thinking-spinner" aria-hidden="true" />
+            {m.recoveryMode === "retry" ? t.chat.retrying : t.chat.regenerating}
+          </span>
+        )}
+        {m.recoveryFailed && (
+          <p role="note" className="mt-2 text-xs text-destructive">
+            {t.chat.recoveryFailed}
+          </p>
+        )}
         {m.webWarning && !isUser && (
           <div role="note" className="mt-2 flex items-start gap-1.5 rounded-md border border-amber-500/25 bg-amber-500/10 px-2 py-1.5 text-xs text-amber-700 dark:text-amber-300">
             <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
@@ -477,7 +523,7 @@ function MessageBubble({
             </div>
           </div>
         )}
-        {!isUser && m.content && (
+        {showAssistantActions && (
           <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
             {m.modelLabel && <span>{m.modelLabel}</span>}
             {m.firstTokenMs !== undefined && <span>{formatLatency(m.firstTokenMs)} {t.chat.firstToken}</span>}
@@ -496,18 +542,44 @@ function MessageBubble({
                 ({t.chat.inputShort}: {formatTokens(m.inputTokens)} / {t.chat.outputShort}: {formatTokens(m.outputTokens)})
               </span>
             )}
-            <button
-              type="button"
-              onClick={onCopyMessage}
-              aria-label={copied ? t.chat.messageCopied : t.chat.copyMessage}
-              className="ml-auto shrink-0 rounded-md p-1 text-muted-foreground hover:text-foreground focus-visible:text-foreground"
-            >
-              {copied ? (
-                <Check className="size-3.5 text-[var(--brand-to)]" aria-hidden="true" />
-              ) : (
-                <Copy className="size-3.5" aria-hidden="true" />
-              )}
-            </button>
+            {canRetry && (
+              <button
+                type="button"
+                disabled={recoveryDisabled}
+                onClick={() => void onRetry?.(m.id!)}
+                aria-label={t.chat.retry}
+                title={t.chat.retry}
+                className="ml-auto shrink-0 rounded-md p-1 text-muted-foreground hover:text-foreground focus-visible:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                <RefreshCw className="size-3.5" aria-hidden="true" />
+              </button>
+            )}
+            {canRegenerate && (
+              <button
+                type="button"
+                disabled={recoveryDisabled}
+                onClick={() => void onRegenerate?.(m.id!)}
+                aria-label={t.chat.regenerate}
+                title={t.chat.regenerate}
+                className={`${canRetry ? "" : "ml-auto "}shrink-0 rounded-md p-1 text-muted-foreground hover:text-foreground focus-visible:text-foreground disabled:cursor-not-allowed disabled:opacity-40`}
+              >
+                <RotateCcw className="size-3.5" aria-hidden="true" />
+              </button>
+            )}
+            {m.content && (
+              <button
+                type="button"
+                onClick={onCopyMessage}
+                aria-label={copied ? t.chat.messageCopied : t.chat.copyMessage}
+                className={`${canRetry || canRegenerate ? "" : "ml-auto "}shrink-0 rounded-md p-1 text-muted-foreground hover:text-foreground focus-visible:text-foreground`}
+              >
+                {copied ? (
+                  <Check className="size-3.5 text-[var(--brand-to)]" aria-hidden="true" />
+                ) : (
+                  <Copy className="size-3.5" aria-hidden="true" />
+                )}
+              </button>
+            )}
           </div>
         )}
       </div>
