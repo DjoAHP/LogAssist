@@ -74,6 +74,18 @@ function normalizeProvider(provider: string): string {
 }
 
 /**
+ * Déduit une identité tarifaire uniquement d'un endpoint officiel vérifiable.
+ * Le nom d'affichage est contrôlé par l'utilisateur et ne constitue pas une preuve.
+ */
+export function resolvePricingProvider(baseUrl: string): string | null {
+  try {
+    return new URL(baseUrl).hostname === "api.openai.com" ? "openai" : null
+  } catch {
+    return null
+  }
+}
+
+/**
  * Récupère uniquement un tarif explicitement associé au fournisseur et au modèle.
  */
 export function getModelPricing(provider: string, modelId: string): ModelPricing | null {

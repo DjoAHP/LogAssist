@@ -33,13 +33,25 @@ const JSON_NAMED_SECRET = /("(?:authorization|api[_-]?key|token)"\s*:\s*")(?:Bea
 const AUTHORIZATION_SECRET = /(\bAuthorization\s*:\s*)(?:Bearer\s+)?[^\s,;]+/gi
 const NAMED_SECRET = /(\b(?:api[_-]?key|token)\s*[:=]\s*)[^\s,;&]+/gi
 const BEARER_SECRET = /(\bBearer)\s+[^\s,;"']+/gi
+const OPENAI_LIKE_SECRET = /\bsk-[A-Za-z0-9][A-Za-z0-9._~+/=-]*/g
 
-export function redactSensitiveDetail(value: string): string {
-  return value
+export function redactSensitiveDetail(
+  value: string,
+  exactSecrets: readonly string[] = [],
+): string {
+  // La clé active est la garantie principale : split/join traite les caractères
+  // spéciaux littéralement et évite qu'un secret vide remplace chaque caractère.
+  const exactRedacted = exactSecrets.reduce((redacted, secret) =>
+    secret.trim().length > 0
+      ? redacted.split(secret).join("[REDACTED]")
+      : redacted, value)
+
+  return exactRedacted
     .replace(JSON_NAMED_SECRET, "$1[REDACTED]$2")
     .replace(AUTHORIZATION_SECRET, "$1[REDACTED]")
     .replace(NAMED_SECRET, "$1[REDACTED]")
     .replace(BEARER_SECRET, "$1 [REDACTED]")
+    .replace(OPENAI_LIKE_SECRET, "[REDACTED]")
 }
 
 // Le suffixe (?:\b|_) étend \b : snake_case (insufficient_quota) et codes réseau

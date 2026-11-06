@@ -35,6 +35,35 @@ describe("redactSensitiveDetail", () => {
     const message = "Le fournisseur a refusé le modèle demandé"
     expect(redactSensitiveDetail(message)).toBe(message)
   })
+
+  it.each([
+    "Incorrect API key provided: sk-live-secret",
+    "Credential sk-live-secret was rejected",
+    "The supplied value sk-live-secret is invalid",
+  ])("masque le secret exact dans une phrase libre : %s", (input) => {
+    const redacted = redactSensitiveDetail(input, ["sk-live-secret"])
+
+    expect(redacted).not.toContain("sk-live-secret")
+    expect(redacted).toContain("[REDACTED]")
+  })
+
+  it("ignore les secrets exacts vides ou composés d'espaces", () => {
+    expect(redactSensitiveDetail("message intact", ["", "   "])).toBe("message intact")
+  })
+
+  it("remplace littéralement un secret contenant des caractères regex", () => {
+    const redacted = redactSensitiveDetail(
+      "Credential sk.a+b/c= was rejected",
+      ["sk.a+b/c="],
+    )
+
+    expect(redacted).toBe("Credential [REDACTED] was rejected")
+  })
+
+  it("masque par défense une clé OpenAI-like sans masquer sk- isolé", () => {
+    expect(redactSensitiveDetail("clé sk-or-v1-history rejetée, marqueur sk- conservé"))
+      .toBe("clé [REDACTED] rejetée, marqueur sk- conservé")
+  })
 })
 
 describe("normalizeHttpStatus", () => {

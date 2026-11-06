@@ -12,6 +12,7 @@ const resolveWebChoiceMock = vi.hoisted(() => vi.fn(() => "auto"))
 const tinyfishCallMock = vi.hoisted(() => vi.fn())
 const tinyfishCancelMock = vi.hoisted(() => vi.fn())
 const loggerErrorMock = vi.hoisted(() => vi.fn())
+const resolvePricingProviderMock = vi.hoisted(() => vi.fn())
 const estimateTurnMetricsMock = vi.hoisted(() => vi.fn(() => ({
   inputTokens: 7,
   outputTokens: 3,
@@ -56,6 +57,7 @@ vi.mock("@/lib/ai/factory", () => ({
 vi.mock("@/lib/token", () => ({
   estimateTurnMetrics: estimateTurnMetricsMock,
   metricsFromProviderUsage: metricsFromProviderUsageMock,
+  resolvePricingProvider: resolvePricingProviderMock,
 }))
 vi.mock("@/lib/mcp/webAgent", () => ({ runWebAgent: runWebAgentMock }))
 vi.mock("@/lib/mcp/webIntent", () => ({ resolveWebChoice: resolveWebChoiceMock }))
@@ -113,6 +115,7 @@ beforeEach(() => {
   tinyfishCallMock.mockReset()
   tinyfishCancelMock.mockReset()
   loggerErrorMock.mockReset()
+  resolvePricingProviderMock.mockReset().mockReturnValue(null)
   systemPromptMock.mockReturnValue("")
   resolveWebChoiceMock.mockReturnValue("auto")
   vi.mocked(messagesDb.insert).mockReset().mockResolvedValue("row-1")
@@ -168,7 +171,7 @@ describe("useChat.send — contract anti-perte", () => {
     )
     expect(metricsFromProviderUsageMock).toHaveBeenCalledWith(
       { inputTokens: 40, outputTokens: 10 },
-      "Test",
+      "",
       "m1",
     )
     expect(estimateTurnMetricsMock).not.toHaveBeenCalled()
@@ -203,7 +206,7 @@ describe("useChat.send — contract anti-perte", () => {
     expect(estimateTurnMetricsMock).toHaveBeenCalledWith(
       expect.any(Array),
       "Sans usage",
-      "Test",
+      "",
       "m1",
     )
     expect(messagesDb.insert).toHaveBeenCalledWith(
@@ -233,6 +236,37 @@ describe("useChat.send — contract anti-perte", () => {
         usage_source: "estimated",
         cost_microusd: null,
       }),
+    )
+  })
+
+  it("n'accorde aucun tarif à un fournisseur affiché OpenAI sur un endpoint non officiel", async () => {
+    metricsFromProviderUsageMock.mockReturnValueOnce(null)
+    const displayedAsOpenAi = {
+      ...provider,
+      name: "OpenAI",
+      baseUrl: "https://proxy.example.test/v1",
+    } as ProviderConfig
+    const { result } = renderHook(() => useChat({
+      provider: displayedAsOpenAi,
+      modelId: "gpt-4o-mini",
+      supportsImages: false,
+    }))
+
+    await act(async () => {
+      await result.current.send("conv-1", "Salut")
+    })
+
+    expect(resolvePricingProviderMock).toHaveBeenCalledWith("https://proxy.example.test/v1")
+    expect(metricsFromProviderUsageMock).toHaveBeenCalledWith(
+      { inputTokens: 40, outputTokens: 10 },
+      "",
+      "gpt-4o-mini",
+    )
+    expect(estimateTurnMetricsMock).toHaveBeenCalledWith(
+      expect.any(Array),
+      "Réponse",
+      "",
+      "gpt-4o-mini",
     )
   })
 
@@ -710,6 +744,31 @@ describe("useChat.send — contract anti-perte", () => {
     }))
     expect(JSON.stringify(result.current.vm)).not.toContain("sk-secret-value")
     expect(JSON.stringify(result.current.vm)).not.toContain("abc123")
+  })
+
+  it("redacte exactement la clé active dans la VM, SQLite et les logs", async () => {
+    runTurnMock.mockRejectedValueOnce({
+      kind: "auth",
+      message: "Credential sk-test was rejected",
+      detail: "The supplied value sk-test is invalid",
+    })
+    vi.mocked(messagesDb.insert)
+      .mockResolvedValueOnce("user-1")
+      .mockRejectedValueOnce(new Error("Persistence rejected credential sk-test"))
+    const { result } = renderHook(() => useChat(modelSelection))
+
+    await act(async () => {
+      expect(await result.current.send("conv-1", "Salut")).toBe(true)
+    })
+
+    const serializedVm = JSON.stringify(result.current.vm)
+    const serializedInserts = JSON.stringify(vi.mocked(messagesDb.insert).mock.calls)
+    const serializedLogs = JSON.stringify(loggerErrorMock.mock.calls)
+    for (const sink of [serializedVm, serializedInserts, serializedLogs]) {
+      expect(sink).not.toContain("sk-test")
+    }
+    expect(serializedInserts).toContain("[REDACTED]")
+    expect(serializedLogs).toContain("[REDACTED]")
   })
 
   it("persiste une erreur si l'insert de la réponse finale échoue", async () => {

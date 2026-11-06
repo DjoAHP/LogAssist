@@ -687,6 +687,12 @@ Les valeurs `input` et `output` sont des prix en USD par **million** de tokens. 
 fonction ne doit l'utiliser comme tarif réel. Les tarifs OpenRouter approximatifs restent
 masqués, tandis que leur registre peut aider à résoudre un tokenizer.
 
+L'identité utilisée pour le coût ne vient jamais de `provider.name`, car ce libellé est
+modifiable et ne prouve pas quel service facture la requête. `resolvePricingProvider(baseUrl)`
+parse l'URL et ne retourne initialement `"openai"` que pour le host exact
+`api.openai.com`; proxy, OpenRouter, localhost, host ressemblant et URL invalide donnent
+`null`. Le tokenizer reste résolu séparément grâce au `modelId`.
+
 - [ ] **Step 4: Relancer les tests de pricing**
 
 Run:
@@ -1292,6 +1298,7 @@ Ajouter le mock suivant avec les autres `vi.mock` :
 vi.mock("@/lib/token", () => ({
   estimateTurnMetrics: estimateTurnMetricsMock,
   metricsFromProviderUsage: metricsFromProviderUsageMock,
+  resolvePricingProvider: vi.fn(() => null),
 }))
 ```
 
@@ -1407,7 +1414,7 @@ Ajouter en tête de `useChat.ts` :
 ```ts
 import { buildChatMessages } from "@/lib/chat/contextBuilder"
 import { runAssistantTurn, type AssistantTurnResult } from "@/lib/chat/turnRunner"
-import { estimateTurnMetrics, metricsFromProviderUsage } from "@/lib/token"
+import { estimateTurnMetrics, metricsFromProviderUsage, resolvePricingProvider } from "@/lib/token"
 ```
 
 Retirer l'import direct de `runWebAgent`.
@@ -1513,12 +1520,13 @@ try {
   setWebToolsUnsupported(
     unsupportedToolsRef.current.has(`${provider.id}/${modelId}`),
   )
+  const pricingProvider = resolvePricingProvider(provider.baseUrl) ?? ""
   const providerMetrics = result.usage
-    ? metricsFromProviderUsage(result.usage, provider.name, modelId)
+    ? metricsFromProviderUsage(result.usage, pricingProvider, modelId)
     : null
   const metrics = providerMetrics ?? (web
     ? null
-    : estimateTurnMetrics(apiMessages, result.text, provider.name, modelId))
+    : estimateTurnMetrics(apiMessages, result.text, pricingProvider, modelId))
   await persistDone(result, metrics)
 } catch (error) {
   await persistError(error)
@@ -1530,6 +1538,11 @@ estimé localement. Un tour Web multi-tour sans usage complet et valide ne doit
 jamais être estimé depuis le seul prompt initial et le texte final ; ses cinq
 colonnes de métriques restent à `NULL`.
 
+Le coût utilise exclusivement l'identité conservatrice dérivée de l'endpoint par
+`resolvePricingProvider(provider.baseUrl)`, jamais `provider.name`. Une identité vide
+autorise toujours le comptage via le tokenizer résolu par `modelId`, mais impose un coût
+`null` tant que l'endpoint officiel n'est pas prouvé.
+
 Après l'insert user, créer immédiatement le placeholder assistant, `upsertLast`
 et `persistError`, avant le prompt, les connaissances, l'historique, le provider
 et le secret. Toute erreur post-insert est ainsi visible et persistée, tandis que
@@ -1537,6 +1550,12 @@ l'outer catch reste le filet du chemin pré-insert. Les messages et détails API
 sont passés par `redactSensitiveDetail` avant la VM, SQLite ou les logs. Les
 payloads d'erreur historiques sont également reconstruits et redacted dans
 `mapRow` avant leur exposition à la VM, sans réécriture de SQLite.
+
+Après lecture du Credential Manager, la clé du tour est conservée uniquement dans
+`activeApiKey` et fournie à `redactSensitiveDetail(value, [activeApiKey])` pour masquer
+sa valeur exacte dans le message, le détail, les erreurs de persistance et les logs
+reconstruits. Avant cette lecture, les motifs génériques restent le seul filet ; la clé
+elle-même n'est jamais persistée ni journalisée.
 
 Si l'insert d'erreur échoue à son tour, conserver une erreur explicite et non
 sensible dans la VM, journaliser uniquement un objet reconstruit et redacted,

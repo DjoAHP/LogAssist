@@ -16,7 +16,12 @@ import { resolveWebChoice } from "@/lib/mcp/webIntent"
 import type { WebAccessConfig, WebSource, WebStatus, WebToolRequest } from "@/lib/mcp/types"
 import { buildChatMessages } from "@/lib/chat/contextBuilder"
 import { runAssistantTurn, type AssistantTurnResult } from "@/lib/chat/turnRunner"
-import { estimateTurnMetrics, metricsFromProviderUsage, type TurnMetrics } from "@/lib/token"
+import {
+  estimateTurnMetrics,
+  metricsFromProviderUsage,
+  resolvePricingProvider,
+  type TurnMetrics,
+} from "@/lib/token"
 
 export interface Attachment {
   id: string
@@ -64,12 +69,12 @@ export interface SendOptions {
 const WEB_DISABLED: WebAccessConfig = { enabled: false, configured: false }
 const PERSISTENCE_ERROR_MESSAGE = "La réponse n'a pas pu être enregistrée."
 
-function safeErrorMessage(error: unknown): string {
+function safeErrorMessage(error: unknown, exactSecrets: readonly string[] = []): string {
   const message = typeof error === "object" && error !== null &&
       "message" in error && typeof error.message === "string"
     ? error.message
     : "Erreur inattendue"
-  return redactSensitiveDetail(message)
+  return redactSensitiveDetail(message, exactSecrets)
 }
 
 export function useChat(
@@ -141,6 +146,13 @@ export function useChat(
       let userPersisted = false
       // id client de la bulle optimiste (retirée si l'insert échoue)
       let localUserId: string | undefined = undefined
+      // Secret limité à ce tour et utilisé uniquement pour la requête et la
+      // redaction exacte. Il ne doit jamais être persisté ni journalisé.
+      let activeApiKey = ""
+      const redactTurnDetail = (value: string) =>
+        redactSensitiveDetail(value, [activeApiKey])
+      const safeTurnErrorMessage = (error: unknown) =>
+        safeErrorMessage(error, [activeApiKey])
 
       try {
         // 1. Stocker les images en base et préparer les pièces jointes pour l'API
@@ -178,7 +190,7 @@ export function useChat(
         })
         userPersisted = true
         await conversations.touch(conversationId).catch((error) => {
-          logger.error({ kind: "conversation_touch", message: safeErrorMessage(error) })
+          logger.error({ kind: "conversation_touch", message: safeTurnErrorMessage(error) })
         })
 
         // Dès que le message user est committé, la bulle assistant et sa voie
@@ -265,8 +277,8 @@ export function useChat(
             const api = e as Partial<ApiError>
             const payload: ApiErrorPayload = {
               kind: api.kind ?? "unknown",
-              message: redactSensitiveDetail(api.message ?? "Erreur inattendue"),
-              ...(api.detail ? { detail: redactSensitiveDetail(api.detail) } : {}),
+              message: redactTurnDetail(api.message ?? "Erreur inattendue"),
+              ...(api.detail ? { detail: redactTurnDetail(api.detail) } : {}),
             }
             upsertLast({ apiError: payload, interrupted: false, webStatus: undefined })
             const id = await messagesDb.insert({
@@ -289,7 +301,7 @@ export function useChat(
             })
             logger.error({
               kind: "assistant_error_persistence",
-              message: safeErrorMessage(persistenceError),
+              message: safeTurnErrorMessage(persistenceError),
             })
           }
         }
@@ -337,7 +349,7 @@ export function useChat(
             currentImages: apiImages,
           })
           const apiProvider = createProvider(provider)
-          const apiKey = (await secrets.get(provider.secretRef)) ?? ""
+          activeApiKey = (await secrets.get(provider.secretRef)) ?? ""
 
           // DEBUG: uniquement des métadonnées non sensibles (no-op en production).
           logger.debug("[useChat] Envoi à l'API:", {
@@ -371,7 +383,7 @@ export function useChat(
           const result = await runAssistantTurn({
             provider: apiProvider,
             request: { messages: apiMessages },
-            apiKey,
+            apiKey: activeApiKey,
             modelId,
             callbacks: turnCallbacks,
             signal: controller.signal,
@@ -382,12 +394,13 @@ export function useChat(
           if (web) {
             setWebToolsUnsupported(unsupportedToolsRef.current.has(`${provider.id}/${modelId}`))
           }
+          const pricingProvider = resolvePricingProvider(provider.baseUrl) ?? ""
           const providerMetrics = result.usage
-            ? metricsFromProviderUsage(result.usage, provider.name, modelId)
+            ? metricsFromProviderUsage(result.usage, pricingProvider, modelId)
             : null
           const metrics = providerMetrics ?? (web
             ? null
-            : estimateTurnMetrics(apiMessages, result.text, provider.name, modelId))
+            : estimateTurnMetrics(apiMessages, result.text, pricingProvider, modelId))
           await persistDone(result, metrics)
         } catch (e) {
           await persistError(e)
@@ -398,7 +411,7 @@ export function useChat(
         // InputBar) et retrait de la bulle optimiste (sinon doublon au renvoi).
         // Le cas post-insert est un dernier filet : le inner catch matérialise
         // normalement déjà toute erreur dans la bulle assistant.
-        logger.error({ kind: "chat_send", message: safeErrorMessage(e) })
+        logger.error({ kind: "chat_send", message: safeTurnErrorMessage(e) })
         if (!userPersisted) setVm((s) => s.filter((m) => m.id !== localUserId))
         return userPersisted
       } finally {

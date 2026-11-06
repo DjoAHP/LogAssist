@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { getModelPricing, getTiktokenModel } from "./pricing"
+import { getModelPricing, getTiktokenModel, resolvePricingProvider } from "./pricing"
 
 describe("pricing", () => {
   it("normalise le nom du fournisseur", () => {
@@ -27,5 +27,21 @@ describe("pricing", () => {
 
   it("résout le tokenizer indépendamment du tarif fournisseur", () => {
     expect(getTiktokenModel("Serveur privé", "gpt-4o-mini")).toBe("gpt-4o-mini")
+  })
+
+  it.each([
+    "https://api.openai.com/v1",
+    "HTTPS://API.OPENAI.COM/V1/chat/completions",
+  ])("reconnaît uniquement l'endpoint OpenAI officiel : %s", (baseUrl) => {
+    expect(resolvePricingProvider(baseUrl)).toBe("openai")
+  })
+
+  it.each([
+    "https://api.openai.com.evil.test/v1",
+    "https://openrouter.ai/api/v1",
+    "http://localhost:1234/v1",
+    "invalid",
+  ])("refuse une identité tarifaire non fiable : %s", (baseUrl) => {
+    expect(resolvePricingProvider(baseUrl)).toBeNull()
   })
 })
