@@ -7,7 +7,13 @@ describe("garde-fou i18n des erreurs", () => {
   it("chaque ApiErrorKind a une entrée traduite", () => {
     for (const k of API_ERROR_KINDS) expect(t.errors[KIND_TO_KEY[k]]).toBeTruthy()
   })
-  it("le mapping couvre exactement les 8 kinds", () => {
+  it("le mapping couvre exactement tous les kinds déclarés", () => {
     expect(Object.keys(KIND_TO_KEY)).toHaveLength(API_ERROR_KINDS.length)
+  })
+
+  it("déclare un libellé local dédié aux échecs de persistance", () => {
+    expect(API_ERROR_KINDS).toContain("persistence")
+    expect(KIND_TO_KEY).toHaveProperty("persistence", "persistence")
+    expect(t.errors).toHaveProperty("persistence", "Réponse non enregistrée localement")
   })
 })

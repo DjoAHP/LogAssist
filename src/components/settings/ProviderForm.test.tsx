@@ -5,6 +5,7 @@ import { ProviderForm } from "./ProviderForm"
 
 const mockCreate = vi.hoisted(() => vi.fn())
 const mockUpdate = vi.hoisted(() => vi.fn())
+const mockLoggerError = vi.hoisted(() => vi.fn())
 
 vi.mock("@/lib/db/providers", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/db/providers")>()
@@ -14,6 +15,9 @@ vi.mock("@/lib/db/providers", async (importOriginal) => {
   }
 })
 vi.mock("@/lib/secrets/service", () => ({ secrets: { set: vi.fn(), get: vi.fn(), remove: vi.fn() } }))
+vi.mock("@/lib/logger", () => ({
+  logger: { debug: vi.fn(), error: mockLoggerError },
+}))
 
 import { t } from "@/i18n/fr"
 
@@ -71,5 +75,31 @@ describe("ProviderForm — validation boucle locale", () => {
     submitForm()
     await screen.findByText(t.settings.invalidUrl)
     expect(mockCreate).not.toHaveBeenCalled()
+  })
+})
+
+describe("ProviderForm — erreur d'enregistrement", () => {
+  it("n'expose pas la clé ni l'erreur brute et journalise un message reconstruit", async () => {
+    const secret = "CUSTOM.key+42/="
+    mockCreate.mockRejectedValueOnce(new Error(`Credential ${secret} rejected`))
+    render(<ProviderForm onSaved={() => {}} onCancel={() => {}} />)
+    type(t.settings.name, "Fournisseur distant")
+    type(t.settings.baseUrl, "https://api.example.test/v1")
+    fireEvent.change(document.querySelector('input[type="password"]') as HTMLInputElement, {
+      target: { value: secret },
+    })
+
+    submitForm()
+
+    await screen.findByText(t.settings.saveFailed)
+    expect(document.body.textContent).not.toContain(secret)
+    expect(document.body.textContent).not.toContain("Credential")
+    expect(mockLoggerError).toHaveBeenCalledWith({
+      context: "ProviderForm.save",
+      message: "Credential [REDACTED] rejected",
+    })
+    const serializedLogs = JSON.stringify(mockLoggerError.mock.calls)
+    expect(serializedLogs).toContain("[REDACTED]")
+    expect(serializedLogs).not.toContain(secret)
   })
 })

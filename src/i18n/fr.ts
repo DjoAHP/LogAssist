@@ -158,6 +158,7 @@ export const fr = {
     quota: "Quota ou crédit épuisé",
     unavailable: "Service momentanément indisponible",
     imageUnsupported: "Images non supportées par ce modèle",
+    persistence: "Réponse non enregistrée localement",
     unknown: "Erreur inattendue du fournisseur",
   },
 } as const

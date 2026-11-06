@@ -1618,7 +1618,7 @@ try {
       kind: "assistant_response_persistence",
       message: safeTurnErrorMessage(persistenceError),
     })
-    await persistError({ kind: "unknown", message: PERSISTENCE_ERROR_MESSAGE })
+    await persistError({ kind: "persistence", message: PERSISTENCE_ERROR_MESSAGE })
   }
 } catch (error) {
   await persistError(error)
@@ -1692,7 +1692,7 @@ Complément issu de la revue globale :
   aussi au mapping des lignes historiques.
 - Un rejet de `persistDone` suit une branche dédiée : la cause SQLite est réservée
   au log redacted et `persistError` reçoit uniquement le payload public générique
-  `{ kind: "unknown", message: PERSISTENCE_ERROR_MESSAGE }`. Le mécanisme
+  `{ kind: "persistence", message: PERSISTENCE_ERROR_MESSAGE }`. Le mécanisme
   `persistenceFailed` conserve ce même message si la seconde insertion échoue.
 - Le TTFT Web est mesuré depuis le début de `runWebAgent` jusqu'au premier token
   du tour qui produit réellement la réponse finale. Chaque appel `runTurn` capture
@@ -2106,6 +2106,17 @@ Si la validation révèle une anomalie, ne pas produire de commit générique. A
   `(input - cached) × inputPrice + cached × cachedPrice + output × outputPrice`.
   Il reste `null` si l'identité fournisseur, le modèle, le compteur caché ou son tarif
   manque. Les estimations locales n'affichent jamais de coût.
+
+### Durcissements mineurs de revue finale
+
+- Les échecs de persistance d'une réponse utilisent le kind public dédié `persistence`,
+  traduit par « Réponse non enregistrée localement ». Ce kind est conservé dans la
+  seconde tentative SQLite, dans la VM après double échec et au rechargement. Les erreurs
+  fournisseur non reconnues restent `unknown` et la migration V7 legacy ne change pas.
+- `ProviderForm` n'affiche plus le message brut d'une exception d'enregistrement. L'UI
+  utilise uniquement `settings.saveFailed` et le logger reçoit un objet reconstruit
+  `ProviderForm.save`, dont le message est redacted avec la clé saisie et les motifs
+  génériques, sans objet erreur brut ni stack.
 
 ---
 

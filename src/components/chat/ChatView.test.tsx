@@ -298,6 +298,17 @@ describe("ChatView — erreurs historiques", () => {
     expect(screen.queryByRole("status", { name: "Le modèle réfléchit…" })).toBeNull()
     expect(screen.getByText("Erreur inattendue du fournisseur")).toBeTruthy()
   })
+
+  it("affiche le libellé local d'une erreur de persistance rechargée", () => {
+    render(<ChatView {...base} vm={[msg({
+      role: "assistant",
+      content: "Réponse reçue",
+      apiError: { kind: "persistence", message: "" },
+    })]} />)
+
+    expect(screen.getByText("Réponse non enregistrée localement")).toBeTruthy()
+    expect(screen.queryByText("Erreur inattendue du fournisseur")).toBeNull()
+  })
 })
 
 describe("ChatView — bouton copier du message", () => {

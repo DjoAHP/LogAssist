@@ -1,8 +1,10 @@
 import { useState } from "react"
 import { t } from "@/i18n/fr"
+import { redactSensitiveDetail } from "@/lib/ai/errors"
 import { isLocalBaseUrl } from "@/lib/ai/local"
 import { cleanApiBaseUrl } from "@/lib/ai/url"
 import { providers, type ProviderRow } from "@/lib/db/providers"
+import { logger } from "@/lib/logger"
 
 interface Props {
   initial?: ProviderRow
@@ -41,7 +43,12 @@ export function ProviderForm({ initial, onSaved, onCancel }: Props) {
         : await providers.create(name.trim(), family, cleanedBaseUrl, secret || undefined)
       onSaved(row)
     } catch (e) {
-      setError(`${t.settings.saveFailed} : ${e instanceof Error ? e.message : String(e)}`)
+      const message = e instanceof Error ? e.message : String(e)
+      setError(t.settings.saveFailed)
+      logger.error({
+        context: "ProviderForm.save",
+        message: redactSensitiveDetail(message, [secret]),
+      })
     } finally {
       setSaving(false)
     }

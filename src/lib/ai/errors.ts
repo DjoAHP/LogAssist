@@ -12,6 +12,7 @@ export const KIND_TO_KEY: Record<ApiErrorKind, keyof typeof t.errors> = {
   quota: "quota",
   unavailable: "unavailable",
   image_unsupported: "imageUnsupported",
+  persistence: "persistence",
   unknown: "unknown",
 }
 

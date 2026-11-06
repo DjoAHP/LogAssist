@@ -301,7 +301,7 @@ export function useChat(
             upsertLast({ id, content: acc, persistenceFailed: undefined })
           } catch (persistenceError) {
             const payload: ApiErrorPayload = {
-              kind: "unknown",
+              kind: "persistence",
               message: PERSISTENCE_ERROR_MESSAGE,
             }
             upsertLast({
@@ -433,7 +433,7 @@ export function useChat(
               message: safeTurnErrorMessage(persistenceError),
             })
             await persistError({
-              kind: "unknown",
+              kind: "persistence",
               message: PERSISTENCE_ERROR_MESSAGE,
             } satisfies ApiErrorPayload)
           }

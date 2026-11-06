@@ -1,9 +1,9 @@
 export type ApiErrorKind =
   | "auth" | "model_not_found" | "network" | "rate_limit" | "quota"
-  | "unavailable" | "image_unsupported" | "unknown"
+  | "unavailable" | "image_unsupported" | "persistence" | "unknown"
 
 export const API_ERROR_KINDS: ApiErrorKind[] =
-  ["auth", "model_not_found", "network", "rate_limit", "quota", "unavailable", "image_unsupported", "unknown"]
+  ["auth", "model_not_found", "network", "rate_limit", "quota", "unavailable", "image_unsupported", "persistence", "unknown"]
 
 export interface ChatMessage {
   role: "system" | "user" | "assistant" | "tool"

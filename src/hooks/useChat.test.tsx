@@ -653,6 +653,26 @@ describe("useChat.send — contract anti-perte", () => {
     expect(serializedVm).not.toContain("detail")
   })
 
+  it("conserve le kind persistence validé au rechargement", async () => {
+    vi.mocked(messagesDb.listByConversation).mockResolvedValueOnce([
+      messageRow({
+        id: "assistant-persistence",
+        error: JSON.stringify({
+          kind: "persistence",
+          message: "La réponse n'a pas pu être enregistrée.",
+        }),
+      }),
+    ])
+    const { result } = renderHook(() => useChat(modelSelection))
+
+    await act(async () => result.current.load("conv-1"))
+
+    expect(result.current.vm[0].apiError).toEqual({
+      kind: "persistence",
+      message: "",
+    })
+  })
+
   it("rabats un kind historique inconnu sans l'exposer dans la VM", async () => {
     const opaqueKind = "CUSTOM.key+42/="
     vi.mocked(messagesDb.listByConversation).mockResolvedValueOnce([
@@ -995,13 +1015,13 @@ describe("useChat.send — contract anti-perte", () => {
       expect.objectContaining({
         role: "assistant",
         error: JSON.stringify({
-          kind: "unknown",
+          kind: "persistence",
           message: "La réponse n'a pas pu être enregistrée.",
         }),
       }),
     )
     expect(result.current.vm[result.current.vm.length - 1].apiError).toEqual({
-      kind: "unknown",
+      kind: "persistence",
       message: "La réponse n'a pas pu être enregistrée.",
     })
     const serializedInserts = JSON.stringify(vi.mocked(messagesDb.insert).mock.calls)
@@ -1028,6 +1048,8 @@ describe("useChat.send — contract anti-perte", () => {
     expect(messagesDb.insert).toHaveBeenCalledTimes(3)
     expect(result.current.vm[result.current.vm.length - 1].apiError?.message)
       .toContain("pas pu être enregistrée")
+    expect(result.current.vm[result.current.vm.length - 1].apiError?.kind)
+      .toBe("persistence")
     expect(result.current.busy).toBe(false)
     const logged = JSON.stringify(loggerErrorMock.mock.calls)
     expect(logged).toContain("[REDACTED]")
