@@ -44,6 +44,11 @@ export const fr = {
     webSearching: "Recherche sur le Web…",
     webFetching: "Lecture de la page…",
     sources: "Sources",
+    estimatedUsage: "Estimation locale des tokens",
+    tokens: "tokens",
+    firstToken: "premier token",
+    inputShort: "in",
+    outputShort: "out",
   },
   settings: {
     title: "Réglages",

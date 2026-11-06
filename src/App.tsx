@@ -16,7 +16,6 @@ import { InputBar } from "@/components/chat/InputBar"
 import { SettingsDialog } from "@/components/settings/SettingsDialog"
 import { AssistantDialog } from "@/components/settings/AssistantDialog"
 import { McpDialog } from "@/components/settings/McpDialog"
-import { loadPromptSettings } from "@/lib/prompts/store"
 import { loadWebAccess } from "@/lib/mcp/settings"
 import type { WebAccessConfig } from "@/lib/mcp/types"
 
@@ -33,17 +32,6 @@ function App() {
   const [webAccess, setWebAccess] = useState<WebAccessConfig>({ enabled: false, configured: false })
   const [sidebarWidth, setSidebarWidth] = useState(DEFAULT_SIDEBAR_WIDTH)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
-
-  // System prompt — chargé depuis les réglages
-  const [systemPrompt, setSystemPrompt] = useState("")
-
-  // Charge le system prompt au montage
-  useEffect(() => {
-    void (async () => {
-      const settings = await loadPromptSettings()
-      setSystemPrompt(settings.general + "\n\n" + settings.profile)
-    })()
-  }, [])
 
   const refetchWebAccess = useCallback(() => {
     void loadWebAccess().then(setWebAccess).catch(console.error)
@@ -130,7 +118,6 @@ function App() {
     ? {
         provider: activeModel.provider,
         modelId: activeModel.modelId,
-        label: `${activeModel.provider} › ${activeModel.modelId}`,
         supportsImages: modelOptions.find((o) => o.isDefault)?.supportsImages ?? false,
       }
     : null
@@ -142,10 +129,8 @@ function App() {
     void load(activeId).catch(console.error)
   }, [activeId, load])
 
-  // Reload post-stream (done/erreur/interruption) : le useChat ne réordonne pas
-  // les inserts async (onDone/onError s'exécutent en tâche de fond après la
-  // résolution du stream) — on recharge la conversation active depuis la DB
-  // dès que busy repasse à false pour garantir affiché = persisté.
+  // Après la persistance attendue par useChat, ce rechargement réconcilie la
+  // vue avec l'état canonique de la conversation stocké dans SQLite.
   useEffect(() => {
     if (!busy && activeId) void load(activeId).catch(console.error)
   }, [busy])
@@ -270,9 +255,6 @@ function App() {
             options: modelOptions,
             onSelect: onModelSelect,
           }}
-          activeModel={modelSelection ? { provider: modelSelection.provider.name, modelId: modelSelection.modelId, modelLabel: modelSelection.label } : null}
-          systemPrompt={systemPrompt}
-          conversationId={activeId}
         />
         <InputBar
           disabled={activeId === null || modelSelection === null}

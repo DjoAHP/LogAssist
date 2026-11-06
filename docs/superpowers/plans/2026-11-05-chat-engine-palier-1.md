@@ -1616,6 +1616,7 @@ git commit -m "refactor: delegue les tours au moteur de chat"
 - Modify: `src/i18n/fr.ts:20-47`
 - Modify: `src/lib/token/index.ts`
 - Delete: `src/lib/token/useTokenCount.ts`
+- Delete: `src/lib/token/useTokenCount.test.tsx` (test legacy ajouté temporairement en Task 5)
 
 - [ ] **Step 1: Écrire les tests rouges des métriques par message**
 
@@ -1648,6 +1649,7 @@ it("marque visuellement une estimation", () => {
     usageSource: "estimated",
   })]} />)
   expect(screen.getByText("≈ 120 tokens")).toBeTruthy()
+  expect(screen.getByTitle("Estimation locale des tokens")).toBeTruthy()
 })
 
 it("n'affiche aucun faux coût quand il est inconnu", () => {
@@ -1663,6 +1665,9 @@ it("n'affiche aucun faux coût quand il est inconnu", () => {
 ```
 
 Retirer `systemPrompt`, `activeModel` et `conversationId` de l'objet `base` si ces props ne servent plus après le refactor.
+Ajouter aussi les régressions TTFT/i18n et cardinalité des boutons copier : un
+bouton par assistant non vide, aucun pour un assistant vide, et conservation du
+bouton utilisateur.
 
 - [ ] **Step 2: Confirmer l'échec de l'ancien compteur cumulatif**
 
@@ -1781,9 +1786,12 @@ Dans `App.tsx` :
 
 Le prompt réellement envoyé reste chargé dans `useChat` à chaque envoi ; ce retrait supprime seulement une seconde lecture devenue inutile pour l'ancien compteur.
 
-- [ ] **Step 7: Supprimer le hook cumulatif**
+- [ ] **Step 7: Supprimer le hook cumulatif et son test legacy**
 
-Supprimer `src/lib/token/useTokenCount.ts`. Vérifier que `src/lib/token/index.ts` n'exporte plus ce fichier et que `grep` ne trouve aucun import :
+Supprimer `src/lib/token/useTokenCount.ts` ainsi que
+`src/lib/token/useTokenCount.test.tsx`, ajouté temporairement en Task 5 pour
+figer le comportement historique avant son retrait. Vérifier que
+`src/lib/token/index.ts` n'exporte plus ce fichier et que `grep` ne trouve aucun import :
 
 Run:
 
@@ -1806,8 +1814,9 @@ Expected: PASS. Le nombre de boutons Copier reste exactement celui attendu par l
 - [ ] **Step 9: Committer la correction d'affichage**
 
 ```bash
-git add src/components/chat/ChatView.tsx src/components/chat/ChatView.test.tsx src/App.tsx src/App.test.tsx src/i18n/fr.ts src/lib/token/index.ts src/lib/token/format.ts
-git rm src/lib/token/useTokenCount.ts
+git add src/components/chat/ChatView.tsx src/components/chat/ChatView.test.tsx src/App.tsx src/App.test.tsx src/i18n/fr.ts src/lib/token/index.ts
+git rm src/lib/token/useTokenCount.ts src/lib/token/useTokenCount.test.tsx
+git add -f docs/superpowers/plans/2026-11-05-chat-engine-palier-1.md
 git commit -m "fix: affiche les métriques propres a chaque réponse"
 ```
 

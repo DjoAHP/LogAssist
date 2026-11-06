@@ -15,9 +15,6 @@ afterEach(cleanup)
 const base = {
   hasModel: true,
   showConversation: true,
-  systemPrompt: "test prompt",
-  activeModel: null,
-  conversationId: null,
 }
 
 const msg = (over: Partial<ChatMessageVM>): ChatMessageVM => ({
@@ -43,6 +40,95 @@ describe("ChatView — latence en secondes", () => {
       <ChatView {...base} vm={[msg({ role: "assistant", content: "réponse", latencyMs: 420 })]} />,
     )
     expect(screen.getByText("0,4 s")).toBeTruthy()
+  })
+
+  it("affiche le TTFT au format français avec son libellé i18n", () => {
+    render(
+      <ChatView {...base} vm={[msg({ role: "assistant", content: "réponse", firstTokenMs: 1250 })]} />,
+    )
+    expect(screen.getByText("1,3 s premier token")).toBeTruthy()
+  })
+})
+
+describe("ChatView — métriques propres à chaque réponse", () => {
+  it("affiche uniquement les métriques du message assistant concerné", () => {
+    render(<ChatView {...base} vm={[
+      msg({
+        role: "assistant",
+        content: "réponse A",
+        inputTokens: 1_000,
+        outputTokens: 200,
+        usageSource: "provider",
+        costMicrousd: 450,
+      }),
+      msg({ role: "assistant", content: "réponse B" }),
+    ]} />)
+    expect(screen.getByText("1.2k tokens")).toBeTruthy()
+    expect(screen.getByText("$0.0005")).toBeTruthy()
+    expect(screen.getAllByText(/tokens/)).toHaveLength(1)
+  })
+
+  it("marque visuellement une estimation", () => {
+    render(<ChatView {...base} vm={[msg({
+      role: "assistant",
+      content: "réponse",
+      inputTokens: 100,
+      outputTokens: 20,
+      usageSource: "estimated",
+    })]} />)
+    expect(screen.getByText("≈ 120 tokens")).toBeTruthy()
+    expect(screen.getByTitle("Estimation locale des tokens")).toBeTruthy()
+    const accessibleLabel = screen.getByText("Estimation locale des tokens", { selector: ".sr-only" })
+    expect(accessibleLabel).toBeTruthy()
+  })
+
+  it("affiche un usage fournisseur exact sans marque d'estimation", () => {
+    render(<ChatView {...base} vm={[msg({
+      role: "assistant",
+      content: "réponse",
+      inputTokens: 100,
+      outputTokens: 20,
+      usageSource: "provider",
+    })]} />)
+    expect(screen.getByText("120 tokens")).toBeTruthy()
+    expect(screen.queryByText(/≈ 120 tokens/)).toBeNull()
+  })
+
+  it("affiche un coût nul lorsqu'il est explicitement fourni", () => {
+    render(<ChatView {...base} vm={[msg({
+      role: "assistant",
+      content: "réponse",
+      costMicrousd: 0,
+    })]} />)
+    expect(screen.getByText("< $0.0001")).toBeTruthy()
+  })
+
+  it("autorise la rangée de métriques à revenir à la ligne sans réduire le bouton copier", () => {
+    render(<ChatView {...base} vm={[msg({
+      role: "assistant",
+      content: "réponse",
+      inputTokens: 100,
+      outputTokens: 20,
+    })]} />)
+    const copyButton = screen.getByRole("button", { name: "Copier le message" })
+    expect(copyButton.parentElement?.classList.contains("flex-wrap")).toBe(true)
+    expect(copyButton.classList.contains("shrink-0")).toBe(true)
+  })
+
+  it("n'affiche aucun faux coût quand il est inconnu", () => {
+    render(<ChatView {...base} vm={[msg({
+      role: "assistant",
+      content: "réponse",
+      inputTokens: 100,
+      outputTokens: 20,
+      usageSource: "estimated",
+    })]} />)
+    expect(screen.queryByText(/\$/)).toBeNull()
+  })
+
+  it("se rend sans les anciennes props du compteur cumulatif", () => {
+    render(<ChatView {...base} vm={[msg({ role: "assistant", content: "réponse" })]} />)
+    expect(screen.getByText("réponse")).toBeTruthy()
   })
 })
 
@@ -241,26 +327,27 @@ describe("ChatView — bouton copier du message", () => {
     expect(screen.getByRole("button", { name: "Copier le message" })).toBeTruthy()
   })
 
-  it("pas de bouton copier sur un message sans contenu", () => {
+  it("un message assistant vide garde zéro bouton copier", () => {
     render(<ChatView {...base} vm={[msg({ role: "assistant", content: "" })]} />)
     expect(screen.queryByRole("button", { name: "Copier le message" })).toBeNull()
   })
 
-  it("l'icône copier vit dans la rangée des tokens (dernière ligne de la bulle)", () => {
-    // useTokenCount est 100 % local (tiktoken WASM) : activer le modèle
-    // fait rendre la rangée « X tokens · coût » — le bouton doit y être
-    // poussé à droite (ml-auto) plutôt que dans sa rangée séparée.
-    render(
-      <ChatView
-        {...base}
-        activeModel={{ provider: "test", modelId: "gpt-4o", modelLabel: "Test" }}
-        vm={[msg({ role: "assistant", content: "réponse" })]}
-      />,
-    )
-    const bouton = screen.getByRole("button", { name: "Copier le message" })
-    const rangée = bouton.parentElement?.textContent ?? ""
-    expect(rangée).toContain("tokens")
-    expect(screen.getAllByRole("button", { name: /Copier/ }).length).toBe(1)
+  it("un assistant avec contenu mais sans métrique garde un seul bouton copier", () => {
+    render(<ChatView {...base} vm={[msg({ role: "assistant", content: "réponse" })]} />)
+    expect(screen.getAllByRole("button", { name: "Copier le message" })).toHaveLength(1)
+  })
+
+  it("deux assistants donnent exactement deux boutons copier", () => {
+    render(<ChatView {...base} vm={[
+      msg({ role: "assistant", content: "réponse A", inputTokens: 10, outputTokens: 5 }),
+      msg({ role: "assistant", content: "réponse B" }),
+    ]} />)
+    expect(screen.getAllByRole("button", { name: "Copier le message" })).toHaveLength(2)
+  })
+
+  it("un message utilisateur garde son bouton copier", () => {
+    render(<ChatView {...base} vm={[msg({ role: "user", content: "question" })]} />)
+    expect(screen.getAllByRole("button", { name: "Copier le message" })).toHaveLength(1)
   })
 
   it("un second clic réinitialise le minuteur de fin de feedback", async () => {
@@ -337,6 +424,40 @@ describe("ChatView — bouton copier du message", () => {
     } finally {
       setTimeoutSpy.mockRestore()
       clearTimeoutSpy.mockRestore()
+    }
+  })
+
+  it("ignore la résolution différée du presse-papiers après démontage", async () => {
+    const user = userEvent.setup()
+    let resolveClipboard!: () => void
+    const clipboardPromise = new Promise<void>((resolve) => {
+      resolveClipboard = resolve
+    })
+    vi.spyOn(navigator.clipboard, "writeText").mockReturnValue(clipboardPromise)
+    const originalSetTimeout = window.setTimeout.bind(window)
+    const setTimeoutSpy = vi
+      .spyOn(window, "setTimeout")
+      .mockImplementation(((callback: TimerHandler, ms?: number) =>
+        originalSetTimeout(callback, ms)) as typeof window.setTimeout)
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+
+    try {
+      const { unmount } = render(
+        <ChatView {...base} vm={[msg({ role: "assistant", content: "réponse" })]} />,
+      )
+      await user.click(screen.getByRole("button", { name: "Copier le message" }))
+      unmount()
+
+      resolveClipboard()
+      await clipboardPromise
+      await Promise.resolve()
+
+      const feedbackTimers = setTimeoutSpy.mock.calls.filter(([, ms]) => ms === 1500)
+      expect(feedbackTimers).toHaveLength(0)
+      expect(consoleErrorSpy).not.toHaveBeenCalled()
+    } finally {
+      setTimeoutSpy.mockRestore()
+      consoleErrorSpy.mockRestore()
     }
   })
 })

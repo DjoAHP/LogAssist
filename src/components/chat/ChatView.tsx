@@ -4,9 +4,7 @@ import { t } from "@/i18n/fr"
 import { logger } from "@/lib/logger"
 import { KIND_TO_KEY } from "@/lib/ai/errors"
 import type { ChatMessageVM } from "@/hooks/useChat"
-import { useTokenCount, formatCost, formatTokens } from "@/lib/token"
-import { knowledge as knowledgeDb } from "@/lib/db/knowledge"
-import { conversationKnowledge } from "@/lib/db/conversationKnowledge"
+import { formatCostMicrousd, formatTokens } from "@/lib/token"
 import { MarkdownMessage } from "./MarkdownMessage"
 
 // Latence en secondes (format français : virgule décimale) — les ms
@@ -25,10 +23,6 @@ interface Props {
   hasModel: boolean
   showConversation: boolean
   modelSelector?: ModelSelectorProps | null
-  // Token counting
-  activeModel?: { provider: string; modelId: string; modelLabel: string } | null
-  systemPrompt: string
-  conversationId?: string | null
 }
 
 export function ChatView({
@@ -36,43 +30,10 @@ export function ChatView({
   hasModel,
   showConversation,
   modelSelector,
-  activeModel,
-  systemPrompt,
-  conversationId,
 }: Props) {
   const bottomRef = useRef<HTMLDivElement>(null)
   const last = vm[vm.length - 1]
   const [expandedImage, setExpandedImage] = useState<{ src: string; alt: string } | null>(null)
-
-  // Chargement des connaissances pour le comptage de tokens
-  const [knowledgeContent, setKnowledgeContent] = useState("")
-  useEffect(() => {
-    if (!conversationId) return
-    void (async () => {
-      const knowledgeIds = await conversationKnowledge.listOn(conversationId)
-      if (knowledgeIds.length === 0) {
-        setKnowledgeContent("")
-        return
-      }
-      const allKnowledge = await knowledgeDb.list()
-      const activeKnowledge = allKnowledge
-        .filter((k) => knowledgeIds.includes(k.id))
-        .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
-      const combined = activeKnowledge.map((k) => k.content).join("\n\n---\n\n")
-      setKnowledgeContent(combined)
-    })()
-  }, [conversationId])
-
-  // Comptage tokens + coût
-  const activeProvider = activeModel?.provider ?? ""
-  const activeModelId = activeModel?.modelId ?? ""
-  const tokenInfo = useTokenCount(
-    activeProvider,
-    activeModelId,
-    vm.map((m) => ({ role: m.role, content: m.content })),
-    systemPrompt,
-    knowledgeContent
-  )
 
   // Auto-scroll à chaque nouveau message ET pendant le streaming du dernier.
   // "auto" partout : "smooth" pendant le streaming (mises à jour ~10 Hz) crée
@@ -100,8 +61,6 @@ export function ChatView({
             key={m.id ?? `local-${i}`}
             m={m}
             onImageClick={setExpandedImage}
-            tokenInfo={tokenInfo}
-            activeModel={activeModel}
           />
         ))}
         <div ref={bottomRef} />
@@ -168,13 +127,9 @@ function ModelSelectorFooter({ options, onSelect }: ModelSelectorProps) {
 function MessageBubble({
   m,
   onImageClick,
-  tokenInfo,
-  activeModel,
 }: {
   m: ChatMessageVM
   onImageClick: (img: { src: string; alt: string }) => void
-  tokenInfo: { inputTokens: number; outputTokens: number; totalTokens: number; estimatedCost: number }
-  activeModel: { provider: string; modelId: string; modelLabel: string } | null | undefined
 }) {
   const isUser = m.role === "user"
   const attachments = m.attachments ?? []
@@ -183,14 +138,22 @@ function MessageBubble({
   // brut pour l'utilisateur ; jamais le HTML rendu.
   const [copied, setCopied] = useState(false)
   const copyTimer = useRef<number | undefined>(undefined)
+  const mountedRef = useRef(true)
   // Nettoyage du timer : pas de setState sur composant démonté
   // (changement de conversation pendant le feedback).
-  useEffect(() => () => window.clearTimeout(copyTimer.current), [])
+  useEffect(() => {
+    mountedRef.current = true
+    return () => {
+      mountedRef.current = false
+      window.clearTimeout(copyTimer.current)
+    }
+  }, [])
 
   const onCopyMessage = () => {
     navigator.clipboard
       .writeText(m.content)
       .then(() => {
+        if (!mountedRef.current) return
         // Second clic rapproché : annule le timer du premier — le feedback
         // reste plein 1,5 s après le DERNIER clic, jamais expiré en avance.
         if (copyTimer.current !== undefined) window.clearTimeout(copyTimer.current)
@@ -217,6 +180,12 @@ function MessageBubble({
     : m.webStatus === "fetching"
       ? t.chat.webFetching
       : undefined
+  const totalTokens = m.inputTokens !== undefined && m.outputTokens !== undefined
+    ? m.inputTokens + m.outputTokens
+    : undefined
+  const tokenLabel = totalTokens === undefined
+    ? undefined
+    : `${m.usageSource === "estimated" ? "≈ " : ""}${formatTokens(totalTokens)} ${t.chat.tokens}`
 
   return (
     <div className={`flex ${isUser ? "justify-end" : "justify-start"}`}>
@@ -275,9 +244,8 @@ function MessageBubble({
         ) : (
           <pre className="whitespace-pre-wrap font-sans text-sm">{m.content}</pre>
         )}
-        {m.content && !(activeModel && !isUser) && (
-          // Icône copier autonome (rôle user, ou assistant sans rangée token) :
-          // toujours visible (choix utilisateur), en fin de bulle à droite.
+        {m.content && isUser && (
+          // Le bouton utilisateur reste autonome et toujours visible.
           <div className="mt-1 flex justify-end">
             <button
               type="button"
@@ -332,26 +300,30 @@ function MessageBubble({
             </div>
           </div>
         )}
-        {(m.modelLabel || m.latencyMs !== undefined) && !isUser && (
-          <div className="mt-1 flex items-center gap-2 text-xs text-muted-foreground">
+        {!isUser && m.content && (
+          <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
             {m.modelLabel && <span>{m.modelLabel}</span>}
+            {m.firstTokenMs !== undefined && <span>{formatLatency(m.firstTokenMs)} {t.chat.firstToken}</span>}
             {m.latencyMs !== undefined && <span>{formatLatency(m.latencyMs)}</span>}
-          </div>
-        )}
-
-{/* Token count + cost pour les messages assistant (si modèle actif) — l'icône
-    copier vit dans cette même rangée, poussée à droite (code bas de bulle). */}
-        {!isUser && activeModel && m.content && (
-          <div className="mt-1 flex items-center gap-2 text-xs text-muted-foreground">
-            <span>{formatTokens(tokenInfo.totalTokens)} tokens</span>
-            <span>·</span>
-            <span>{formatCost(tokenInfo.estimatedCost)}</span>
-            <span className="text-[10px] opacity-60">(in: {formatTokens(tokenInfo.inputTokens)} / out: {formatTokens(tokenInfo.outputTokens)})</span>
+            {tokenLabel && (
+              <span title={m.usageSource === "estimated" ? t.chat.estimatedUsage : undefined}>
+                <span>{tokenLabel}</span>
+                {m.usageSource === "estimated" && (
+                  <span className="sr-only"> {t.chat.estimatedUsage}</span>
+                )}
+              </span>
+            )}
+            {m.costMicrousd !== undefined && <span>{formatCostMicrousd(m.costMicrousd)}</span>}
+            {m.inputTokens !== undefined && m.outputTokens !== undefined && (
+              <span className="text-[10px] opacity-60">
+                ({t.chat.inputShort}: {formatTokens(m.inputTokens)} / {t.chat.outputShort}: {formatTokens(m.outputTokens)})
+              </span>
+            )}
             <button
               type="button"
               onClick={onCopyMessage}
               aria-label={copied ? t.chat.messageCopied : t.chat.copyMessage}
-              className="ml-auto rounded-md p-1 text-muted-foreground hover:text-foreground focus-visible:text-foreground"
+              className="ml-auto shrink-0 rounded-md p-1 text-muted-foreground hover:text-foreground focus-visible:text-foreground"
             >
               {copied ? (
                 <Check className="size-3.5 text-[var(--brand-to)]" aria-hidden="true" />
