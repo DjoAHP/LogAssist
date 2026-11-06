@@ -177,10 +177,6 @@ Priorisés dans l'ordre du rapport d'audit :
    ✅ **ModelPickerModal** — remplace `ModelDropdown` (modal recherche/ajout/clic-activer).
 4. **Tooling** : ESLint/Prettier/CI absents ; tests hooks à élargir.
 
-Historique des livraisons : `docs/release-notes/` (détails par version : markdown,
-compteur tokens, arrière-plans, sync:version BOM…). Consulter la conversation d'audit
-pour le détail fichier/ligne avant de commenter.
-
 ### Livraison v2.5.0
 
 - Intégration MCP TinyFish (`search`, `fetch_content`) avec transport `rmcp` côté Rust.
@@ -202,4 +198,3 @@ pour le détail fichier/ligne avant de commenter.
 - Redaction renforcée des clés dans les erreurs, logs, réglages et données historiques.
 - Migrations V6 à V8 ; comportement éphémère des captures conservé.
 - 496 tests TypeScript validés dans le worktree de release ; build Vite Windows validé.
-- Feuille de route de reprise : `docs/superpowers/plans/paliers-restant.md`.
