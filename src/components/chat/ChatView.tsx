@@ -1,10 +1,11 @@
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useLayoutEffect, useRef, useState } from "react"
 import { AlertTriangle, Check, Copy, ExternalLink, FileText, Maximize2, Search, X } from "lucide-react"
 import { t } from "@/i18n/fr"
 import { logger } from "@/lib/logger"
 import { KIND_TO_KEY } from "@/lib/ai/errors"
 import type { ChatMessageVM } from "@/hooks/useChat"
 import { formatCostMicrousd, formatTokens } from "@/lib/token"
+import { isNearChatBottom } from "@/lib/chat/scrollPolicy"
 import { MarkdownMessage } from "./MarkdownMessage"
 
 // Latence en secondes (format français : virgule décimale) — les ms
@@ -22,6 +23,7 @@ interface Props {
   vm: ChatMessageVM[]
   hasModel: boolean
   showConversation: boolean
+  conversationId?: string | null
   modelSelector?: ModelSelectorProps | null
 }
 
@@ -29,18 +31,70 @@ export function ChatView({
   vm,
   hasModel,
   showConversation,
+  conversationId,
   modelSelector,
 }: Props) {
-  const bottomRef = useRef<HTMLDivElement>(null)
-  const last = vm[vm.length - 1]
+  const scrollRef = useRef<HTMLDivElement>(null)
+  const contentRef = useRef<HTMLDivElement>(null)
+  const shouldFollowRef = useRef(true)
+  const [hasUnreadContent, setHasUnreadContent] = useState(false)
   const [expandedImage, setExpandedImage] = useState<{ src: string; alt: string } | null>(null)
 
-  // Auto-scroll à chaque nouveau message ET pendant le streaming du dernier.
-  // "auto" partout : "smooth" pendant le streaming (mises à jour ~10 Hz) crée
-  // des animations concurrentes qui ratent le bas de page.
+  const scrollToBottom = (behavior: ScrollBehavior): void => {
+    const element = scrollRef.current
+    if (!element) return
+    element.scrollTo({ top: element.scrollHeight, behavior })
+  }
+
+  const onScroll = (): void => {
+    const element = scrollRef.current
+    if (!element) return
+    const follows = isNearChatBottom(element)
+    shouldFollowRef.current = follows
+    if (follows) setHasUnreadContent(false)
+  }
+
+  const jumpToBottom = (): void => {
+    shouldFollowRef.current = true
+    setHasUnreadContent(false)
+    const reduced = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false
+    scrollToBottom(reduced ? "auto" : "smooth")
+  }
+
+  // Le reset précède volontairement la synchronisation VM : lors d'un
+  // changement de conversation, l'ancienne VM transitoire repart déjà du bas.
+  useLayoutEffect(() => {
+    shouldFollowRef.current = true
+    setHasUnreadContent(false)
+  }, [conversationId])
+
+  // La référence VM entière est significative : un historique nouvellement
+  // chargé peut avoir la même taille et le même dernier contenu que l'ancien.
+  useLayoutEffect(() => {
+    if (shouldFollowRef.current) scrollToBottom("auto")
+    else if (vm.length > 0) setHasUnreadContent(true)
+  }, [conversationId, vm])
+
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "auto", block: "end" })
-  }, [vm.length, last?.content])
+    if (typeof ResizeObserver === "undefined") return
+    const element = contentRef.current
+    if (!element) return
+
+    let previousHeight = element.scrollHeight
+    const observer = new ResizeObserver((entries) => {
+      const entry = entries[0]
+      if (!entry) return
+      const nextHeight = entry.contentRect.height || element.scrollHeight
+      const grew = nextHeight > previousHeight
+      previousHeight = nextHeight
+      if (!grew) return
+
+      if (shouldFollowRef.current) scrollToBottom("auto")
+      else setHasUnreadContent(true)
+    })
+    observer.observe(element)
+    return () => observer.disconnect()
+  }, [showConversation])
 
   if (!showConversation) {
     return (
@@ -52,18 +106,40 @@ export function ChatView({
 
   return (
     <div className="flex flex-1 flex-col overflow-hidden">
-      <div role="log" aria-live="polite" className="flex-1 space-y-4 overflow-y-auto p-4">
-        {vm.length === 0 && !hasModel && (
-          <p className="text-sm text-muted-foreground">{t.chat.configureProvider}</p>
+      <div className="relative flex-1 overflow-hidden">
+        <div
+          ref={scrollRef}
+          role="log"
+          aria-live="polite"
+          onScroll={onScroll}
+          className={`h-full overflow-y-auto p-4${hasUnreadContent ? " pb-16" : ""}`}
+        >
+          <div ref={contentRef} className="mx-auto w-full max-w-5xl space-y-4">
+            {vm.length === 0 && !hasModel && (
+              <p className="text-sm text-muted-foreground">{t.chat.configureProvider}</p>
+            )}
+            {vm.map((m, i) => (
+              <MessageBubble
+                key={m.id ?? `local-${i}`}
+                m={m}
+                onImageClick={setExpandedImage}
+              />
+            ))}
+          </div>
+        </div>
+        <span className="sr-only" role="status" aria-live="polite">
+          {hasUnreadContent ? t.chat.newResponse : ""}
+        </span>
+        {hasUnreadContent && (
+          <button
+            type="button"
+            onClick={jumpToBottom}
+            aria-label={t.chat.backToBottom}
+            className="absolute bottom-3 left-1/2 -translate-x-1/2 rounded-full border border-[var(--brand-to)] bg-background/95 px-3 py-1.5 text-xs text-foreground shadow-lg hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--brand-to)]"
+          >
+            ↓ {t.chat.newResponse}
+          </button>
         )}
-        {vm.map((m, i) => (
-          <MessageBubble
-            key={m.id ?? `local-${i}`}
-            m={m}
-            onImageClick={setExpandedImage}
-          />
-        ))}
-        <div ref={bottomRef} />
       </div>
       {modelSelector && modelSelector.options.length > 0 && <ModelSelectorFooter {...modelSelector} />}
 

@@ -49,6 +49,8 @@ export const fr = {
     firstToken: "premier token",
     inputShort: "in",
     outputShort: "out",
+    newResponse: "Nouvelle réponse",
+    backToBottom: "Revenir en bas de la conversation",
   },
   settings: {
     title: "Réglages",

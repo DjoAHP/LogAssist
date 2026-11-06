@@ -251,6 +251,7 @@ function App() {
           vm={vm}
           hasModel={modelSelection !== null}
           showConversation={activeId !== null}
+          conversationId={activeId}
           modelSelector={{
             options: modelOptions,
             onSelect: onModelSelect,
