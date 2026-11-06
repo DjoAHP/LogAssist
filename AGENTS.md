@@ -82,6 +82,7 @@ src/
 ├── hooks/             # useChat (streaming + persist), useConversations
 ├── lib/
 │   ├── ai/            # IProvider, openai-compat, sse.ts, errors.ts, factory
+│   ├── chat/          # contexte pur, TurnRunner, récupération et politique de scroll
 │   ├── db/            # repos SQL (migrations.ts, providers, messages, conversations…)
 │   ├── secrets/       # pont Credential Manager (invoke Rust)
 │   ├── prompts/       # system prompt composé + defaults
@@ -103,11 +104,20 @@ src-tauri/
   flush final — ne pas réimplémenter côté consommateur.
 - **Abort** : un `AbortController` par stream ; l'interruption utilisateur persiste le
   contenu accumulé et marque `interrupted: true` (différent d'une erreur API).
+- **Relances** : `Retenter` et `Régénérer` ciblent uniquement la dernière réponse
+  admissible. Le message utilisateur n'est jamais dupliqué et l'ancienne réponse reste
+  intacte tant que le remplacement SQLite n'a pas réussi.
+- **Métriques** : elles appartiennent à chaque réponse. Un coût n'est affiché que si
+  l'endpoint, le modèle, l'usage et les tokens cachés permettent un calcul fiable.
 - **MCP TinyFish** : `runWebAgent` autorise deux tours d'outils et quatre appels MCP
   maximum. Le modèle reçoit les résultats dans un bloc externe non fiable. Le repli
   sans outils ne s'exécute qu'une fois et l'incompatibilité est mémorisée par session.
 - **Sources** : la migration V5 ajoute `messages.sources`. Les URL sont validées côté
   Rust avant le retour vers React puis filtrées à nouveau avant rendu.
+- **Schéma courant** : V8. V6 ajoute les métriques, V7 nettoie les anciennes erreurs
+  potentiellement sensibles, V8 répare les assistants historiques vides.
+- **Images** : le base64 n'est jamais persisté. Après rechargement, seule la puce de
+  métadonnées reste visible ; ne pas introduire de cache binaire durable.
 
 ### Conventions
 
@@ -158,7 +168,9 @@ Priorisés dans l'ordre du rapport d'audit :
    restent le HTTP LLM à déplacer, le format `secret_ref` générique à valider et la
    CSP `connect-src https:` à restreindre en prod.
 3. **Cluster UI** : focus clavier invisible (`--ring` absent), palette de tokens
-   incomplète, auto-scroll forcé pendant le stream.
+   incomplète.
+   ✅ **Auto-scroll respectueux** (v3.0.0) — suivi au bas, lecture figée après remontée,
+   bouton de retour et gestion des reflows/images tardives.
    ✅ **Dark mode toggle** implémenté (v2.1.2) — défaut dark, toggle header + persistance localStorage.
    ✅ **Fenêtre maximisée au lancement** (v2.1.2) — `maximized: true` dans `tauri.conf.json`.
    ✅ **Icônes unifiées** (v2.1.2) — régénérées depuis `logo3.png` (script `scripts/generate-icons.js`).
@@ -176,3 +188,18 @@ pour le détail fichier/ligne avant de commenter.
 - Orchestrateur Web automatique/forcé, repli sans outils, annulation et limites bornées.
 - Sources persistées et rendues comme liens React sûrs ; contenu Web brut non persisté.
 - Gates validées : 217 tests TypeScript, 21 tests Rust, Clippy et build Windows.
+
+### Livraison v3.0.0
+
+- Moteur de tour extrait (`TurnRunner`) et construction du contexte isolée.
+- Verrou synchrone contre les doubles envois et persistance assistant attendue.
+- Métriques par réponse : TTFT, latence, tokens, usage exact/estimé et coût nullable.
+- Tarification OpenAI officielle avec prise en compte des tokens cachés ; aucun faux
+  coût pour OpenRouter, les endpoints personnalisés ou les modèles inconnus.
+- Présentation hybride, largeur de lecture étendue et fond translucide des réponses.
+- Auto-scroll intelligent avec bouton **Nouvelle réponse** et accessibilité clavier.
+- Actions **Retenter** et **Régénérer** sans doublon utilisateur ni perte de réponse.
+- Redaction renforcée des clés dans les erreurs, logs, réglages et données historiques.
+- Migrations V6 à V8 ; comportement éphémère des captures conservé.
+- 496 tests TypeScript validés dans le worktree de release ; build Vite Windows validé.
+- Feuille de route de reprise : `docs/superpowers/plans/paliers-restant.md`.

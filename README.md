@@ -15,13 +15,17 @@ LogAssist est un assistant IA de bureau pour Windows conçu pour apprendre des l
 - Conversations et sources persistées dans SQLite, avec export Markdown.
 - Fournisseurs OpenAI-compatible configurables, notamment OpenAI, OpenRouter et NVIDIA NIM.
 - Streaming SSE avec rendu Markdown, tableaux GFM, coloration syntaxique et copie des blocs de code.
+- Présentation hybride : questions compactes et réponses assistant ouvertes avec suivi de lecture intelligent.
+- Auto-scroll respectueux : la lecture reste figée lorsque l'utilisateur remonte, avec retour explicite au nouveau contenu.
+- Actions **Retenter** et **Régénérer** sur la dernière réponse admissible, sans dupliquer le message utilisateur.
 - System prompt modulaire et bases de connaissances Markdown par conversation.
 - Sélecteur de modèles avec recherche, ajout et activation directe.
-- Compteur de tokens et estimation du coût avec tiktoken WASM.
+- Métriques par réponse : premier token, latence, tokens d'entrée/sortie et coût uniquement lorsqu'il est vérifiable.
 - Thèmes sombre et clair, arrière-plans dédiés et fenêtre maximisée au lancement.
 - Accès Web MCP TinyFish limité à `search` et `fetch_content`.
 - Recherche automatique, lecture d'URL et forçage Web pour le prochain message.
 - Sources cliquables conservées avec les réponses, sans persister le contenu Web brut.
+- Captures éphémères : le binaire d'une image n'est jamais archivé par LogAssist après la session.
 - Clés API stockées dans le Credential Manager Windows, jamais dans SQLite ou `localStorage`.
 
 ## Prérequis
@@ -59,6 +63,13 @@ Dans LogAssist :
 4. Activez l'accès Web.
 5. Demandez une recherche récente, fournissez une URL ou activez le bouton Web pour le prochain message.
 
+Dans une conversation :
+
+- remontez pendant un streaming pour figer la lecture, puis utilisez **Nouvelle réponse** pour revenir au bas ;
+- utilisez **Retenter** sur la dernière erreur fournisseur ;
+- utilisez **Régénérer** sur la dernière réponse réussie ;
+- interrompez une relance avec **Stop** sans perdre la réponse précédente.
+
 TinyFish reçoit la requête de recherche ou les URL à lire, avec les paramètres bornés nécessaires. Sa propre clé sert à authentifier l'appel côté Rust ; la clé du fournisseur LLM et l'historique complet de la conversation ne lui sont pas transmis.
 
 ## Développement
@@ -94,7 +105,7 @@ cargo check
 Pop-Location
 ```
 
-La version 2.5.0 est couverte par 217 tests TypeScript et 21 tests Rust.
+La version 3.0.0 est couverte par 496 tests TypeScript et 21 tests Rust. TypeScript, le bundle Vite et Clippy sans avertissement sont également validés avant publication.
 
 ## Sécurité
 
@@ -103,6 +114,7 @@ La version 2.5.0 est couverte par 217 tests TypeScript et 21 tests Rust.
 - Les résultats Web sont traités comme des données externes non fiables.
 - React échappe le contenu distant et n'utilise jamais `innerHTML` ou `dangerouslySetInnerHTML`.
 - Le Credential Manager Windows reste le seul stockage des clés API.
+- Les erreurs fournisseur sont expurgées avant affichage, journalisation ou persistance.
 - Toutes les requêtes SQL utilisent des paramètres liés.
 
 ## Contribution
