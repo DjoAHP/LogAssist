@@ -19,6 +19,7 @@ import { tinyfish } from "@/lib/mcp/client"
 import { resolveWebChoice } from "@/lib/mcp/webIntent"
 import type { WebAccessConfig, WebSource, WebStatus, WebToolRequest } from "@/lib/mcp/types"
 import { buildChatMessages } from "@/lib/chat/contextBuilder"
+import { createRecoveryPlan, type RecoveryMode } from "@/lib/chat/recoveryPolicy"
 import { runAssistantTurn, type AssistantTurnResult } from "@/lib/chat/turnRunner"
 import {
   estimateTurnMetrics,
@@ -64,6 +65,8 @@ export interface ChatMessageVM {
   webWarning?: string
   conversationId?: string
   persistenceFailed?: boolean
+  recoveryMode?: RecoveryMode
+  recoveryFailed?: boolean
 }
 
 export interface SendOptions {
@@ -461,6 +464,195 @@ export function useChat(
     [modelSelection, webAccess],
   )
 
+  const recoverLast = useCallback(
+    async (
+      conversationId: string,
+      targetId: string,
+      mode: RecoveryMode,
+    ): Promise<boolean> => {
+      if (inFlightRef.current || !modelSelection) return false
+      inFlightRef.current = true
+      setBusy(true)
+      const controller = new AbortController()
+      abortRef.current = controller
+      mcpRequestRef.current = null
+      let activeApiKey = ""
+      let recoveryAcc = ""
+      const safeRecoveryError = (error: unknown) =>
+        safeErrorMessage(error, [activeApiKey])
+      const upsertTarget = (patch: Partial<ChatMessageVM>) => {
+        setVm((current) => current.map((message) =>
+          message.id === targetId ? { ...message, ...patch } : message,
+        ))
+      }
+
+      try {
+        const rows = await messagesDb.listByConversation(conversationId)
+        const plan = createRecoveryPlan(rows, targetId, mode)
+        if (!plan) return false
+
+        upsertTarget({
+          recoveryMode: mode,
+          recoveryFailed: undefined,
+          webStatus: undefined,
+        })
+
+        const { provider, modelId } = modelSelection
+        const label = buildPreview(provider.name, modelId)
+        const [promptSettings, enabledKnowledge] = await Promise.all([
+          loadPromptSettings(),
+          (async () => {
+            const overrideIds = await conversationKnowledge.listOn(conversationId)
+            if (overrideIds.length > 0) {
+              const knowledgeRows = await knowledgeDb.list()
+              const byId = new Map(knowledgeRows.map((knowledge) => [knowledge.id, knowledge]))
+              return overrideIds
+                .map((id) => byId.get(id))
+                .filter((knowledge): knowledge is typeof knowledgeRows[0] =>
+                  !!knowledge && knowledge.enabled === 1)
+            }
+            return knowledgeDb.listEnabled()
+          })(),
+        ])
+        const system = buildSystemPrompt({
+          general: promptSettings.general,
+          profile: promptSettings.profile,
+          knowledge: enabledKnowledge.map((knowledge) => ({
+            name: knowledge.name,
+            content: knowledge.content,
+          })),
+          webEnabled: webAccess.enabled && webAccess.configured,
+        })
+        const apiMessages = buildChatMessages({
+          system,
+          history: plan.history.map((message) => ({
+            role: message.role,
+            content: message.content,
+          })),
+          currentImages: [],
+        })
+        const apiProvider = createProvider(provider)
+        activeApiKey = (await secrets.get(provider.secretRef)) ?? ""
+        const callbacks = {
+          onFirstToken: () => { /* métrique remontée par le runner */ },
+          onDelta: (delta: string) => {
+            recoveryAcc += delta
+          },
+        }
+        const requestId = crypto.randomUUID()
+        const web = webAccess.enabled && webAccess.configured
+          ? {
+              webClient: {
+                call: async (mcpRequestId: string, request: WebToolRequest) => {
+                  mcpRequestRef.current = mcpRequestId
+                  try {
+                    return await tinyfish.call(mcpRequestId, request)
+                  } finally {
+                    if (mcpRequestRef.current === mcpRequestId) mcpRequestRef.current = null
+                  }
+                },
+              },
+              toolChoice: resolveWebChoice(plan.triggerUserContent, false),
+              requestId,
+              compatibilityKey: `${provider.id}/${modelId}`,
+              unsupportedTools: unsupportedToolsRef.current,
+              onStatus: (webStatus: WebStatus | undefined) => upsertTarget({ webStatus }),
+            }
+          : undefined
+        const result = await runAssistantTurn({
+          provider: apiProvider,
+          request: { messages: apiMessages },
+          apiKey: activeApiKey,
+          modelId,
+          callbacks,
+          signal: controller.signal,
+          ...(web ? { web } : {}),
+        })
+        if (controller.signal.aborted) throw controller.signal.reason
+        const finalContent = result.text || recoveryAcc
+        if (finalContent.trim() === "") throw new Error("Réponse vide du fournisseur")
+
+        let metrics: TurnMetrics | null = null
+        try {
+          const pricingProvider = resolvePricingProvider(provider.baseUrl) ?? ""
+          const providerMetrics = result.usage
+            ? metricsFromProviderUsage(result.usage, pricingProvider, modelId)
+            : null
+          metrics = providerMetrics ?? (web
+            ? null
+            : estimateTurnMetrics(apiMessages, finalContent, pricingProvider, modelId))
+        } catch (metricsError) {
+          logger.error({ kind: "chat_recovery_metrics", message: safeRecoveryError(metricsError) })
+        }
+
+        const latencyMs = normalizeDuration(result.totalMs)
+        const firstTokenMs = normalizeDuration(result.firstTokenMs)
+        await messagesDb.updateAssistant(targetId, {
+          content: finalContent,
+          model_label: label,
+          latency_ms: latencyMs,
+          error: null,
+          sources: JSON.stringify(result.sources),
+          first_token_ms: firstTokenMs,
+          input_tokens: metrics?.inputTokens ?? null,
+          output_tokens: metrics?.outputTokens ?? null,
+          usage_source: metrics?.usageSource ?? null,
+          cost_microusd: metrics?.costMicrousd ?? null,
+        })
+        upsertTarget({
+          content: finalContent,
+          modelLabel: label,
+          latencyMs: latencyMs ?? undefined,
+          firstTokenMs: firstTokenMs ?? undefined,
+          inputTokens: metrics?.inputTokens,
+          outputTokens: metrics?.outputTokens,
+          usageSource: metrics?.usageSource,
+          costMicrousd: metrics?.costMicrousd ?? undefined,
+          apiError: undefined,
+          interrupted: undefined,
+          sources: result.sources,
+          webWarning: result.warning,
+          webStatus: undefined,
+          recoveryMode: undefined,
+          recoveryFailed: undefined,
+        })
+        if (web) {
+          setWebToolsUnsupported(unsupportedToolsRef.current.has(`${provider.id}/${modelId}`))
+        }
+        await conversations.touch(conversationId).catch((error) => {
+          logger.error({ kind: "conversation_touch", message: safeRecoveryError(error) })
+        })
+        return true
+      } catch (error) {
+        logger.error({ kind: "chat_recovery", message: safeRecoveryError(error) })
+        upsertTarget({
+          recoveryMode: undefined,
+          recoveryFailed: true,
+          webStatus: undefined,
+        })
+        return false
+      } finally {
+        inFlightRef.current = false
+        setBusy(false)
+        abortRef.current = null
+        mcpRequestRef.current = null
+      }
+    },
+    [modelSelection, webAccess],
+  )
+
+  const retryLast = useCallback(
+    (conversationId: string, targetId: string) =>
+      recoverLast(conversationId, targetId, "retry"),
+    [recoverLast],
+  )
+
+  const regenerateLast = useCallback(
+    (conversationId: string, targetId: string) =>
+      recoverLast(conversationId, targetId, "regenerate"),
+    [recoverLast],
+  )
+
   const interrupt = useCallback(() => {
     abortRef.current?.abort()
     const requestId = mcpRequestRef.current
@@ -470,7 +662,16 @@ export function useChat(
       })
     }
   }, [])
-  return { vm, busy, send, interrupt, load, webToolsUnsupported }
+  return {
+    vm,
+    busy,
+    send,
+    retryLast,
+    regenerateLast,
+    interrupt,
+    load,
+    webToolsUnsupported,
+  }
 }
 
 function mapRow(r: MessageRow): ChatMessageVM {

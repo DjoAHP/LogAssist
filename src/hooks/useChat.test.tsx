@@ -34,7 +34,13 @@ const metricsFromProviderUsageMock = vi.hoisted(() => vi.fn<
 })))
 
 vi.mock("@/lib/db/messages", () => ({
-  messages: { insert: vi.fn(), listByConversation: vi.fn(), updateError: vi.fn(), removeByConversation: vi.fn() },
+  messages: {
+    insert: vi.fn(),
+    updateAssistant: vi.fn(),
+    listByConversation: vi.fn(),
+    updateError: vi.fn(),
+    removeByConversation: vi.fn(),
+  },
 }))
 vi.mock("@/lib/db/images", () => ({ images: { create: vi.fn(), get: vi.fn(), remove: vi.fn() } }))
 vi.mock("@/lib/db/conversations", () => ({ conversations: { touch: vi.fn(), create: vi.fn(), rename: vi.fn(), remove: vi.fn() } }))
@@ -119,6 +125,7 @@ beforeEach(() => {
   systemPromptMock.mockReturnValue("")
   resolveWebChoiceMock.mockReturnValue("auto")
   vi.mocked(messagesDb.insert).mockReset().mockResolvedValue("row-1")
+  vi.mocked(messagesDb.updateAssistant).mockReset().mockResolvedValue(undefined)
   vi.mocked(messagesDb.listByConversation).mockReset().mockResolvedValue([])
   vi.mocked(conversations.touch).mockReset().mockResolvedValue(undefined)
   vi.mocked(secrets.get).mockReset().mockResolvedValue("sk-test")
@@ -1186,5 +1193,240 @@ describe("useChat.send — contract anti-perte", () => {
     const apiReq = runTurnMock.mock.calls[0][0] as { messages: { role: string; content: string; images?: unknown[] }[] }
     const lastMsg = apiReq.messages[apiReq.messages.length - 1]
     expect(lastMsg.images).toEqual([{ base64: "AAAA", mimeType: "image/png" }])
+  })
+})
+
+describe("useChat — récupération de la dernière réponse", () => {
+  const userRow = messageRow({
+    id: "user-1",
+    role: "user",
+    content: "Question d'origine",
+  })
+  const failedRow = messageRow({
+    id: "assistant-error",
+    role: "assistant",
+    content: "",
+    error: JSON.stringify({ kind: "network", message: "Échec" }),
+  })
+  const answeredRow = messageRow({
+    id: "assistant-ok",
+    role: "assistant",
+    content: "Ancienne réponse",
+  })
+
+  it("retente la dernière erreur sans insérer un nouveau message utilisateur", async () => {
+    vi.mocked(messagesDb.listByConversation).mockResolvedValue([userRow, failedRow])
+    const { result } = renderHook(() => useChat(modelSelection))
+    await act(async () => result.current.load("conv-1"))
+
+    await act(async () => {
+      expect(await result.current.retryLast("conv-1", failedRow.id)).toBe(true)
+    })
+
+    expect(messagesDb.insert).not.toHaveBeenCalled()
+    expect(messagesDb.updateAssistant).toHaveBeenCalledWith(
+      failedRow.id,
+      expect.objectContaining({ content: "Réponse", error: null }),
+    )
+    expect(result.current.vm.find((message) => message.id === failedRow.id)).toMatchObject({
+      content: "Réponse",
+      apiError: undefined,
+      recoveryMode: undefined,
+      recoveryFailed: undefined,
+    })
+  })
+
+  it("conserve l'ancienne réponse pendant la régénération puis la remplace", async () => {
+    vi.mocked(messagesDb.listByConversation).mockResolvedValue([userRow, answeredRow])
+    let finish: ((value: {
+      text: string
+      toolCalls: never[]
+      firstTokenMs: number
+      totalMs: number
+      usage: { inputTokens: number; outputTokens: number }
+    }) => void) | undefined
+    runTurnMock.mockImplementationOnce(() => new Promise((resolve) => { finish = resolve }))
+    const { result } = renderHook(() => useChat(modelSelection))
+    await act(async () => result.current.load("conv-1"))
+
+    let recovery: Promise<boolean>
+    act(() => {
+      recovery = result.current.regenerateLast("conv-1", answeredRow.id)
+    })
+    await vi.waitFor(() => expect(finish).toBeDefined())
+    expect(result.current.vm.find((message) => message.id === answeredRow.id)).toMatchObject({
+      content: "Ancienne réponse",
+      recoveryMode: "regenerate",
+    })
+
+    await act(async () => {
+      finish?.({
+        text: "Nouvelle réponse",
+        toolCalls: [],
+        firstTokenMs: 10,
+        totalMs: 50,
+        usage: { inputTokens: 20, outputTokens: 5 },
+      })
+      expect(await recovery!).toBe(true)
+    })
+    expect(result.current.vm.find((message) => message.id === answeredRow.id)).toMatchObject({
+      content: "Nouvelle réponse",
+      recoveryMode: undefined,
+      recoveryFailed: undefined,
+    })
+  })
+
+  it("conserve l'ancienne réponse si la régénération échoue", async () => {
+    vi.mocked(messagesDb.listByConversation).mockResolvedValue([userRow, answeredRow])
+    runTurnMock.mockRejectedValueOnce(new Error("provider down"))
+    const { result } = renderHook(() => useChat(modelSelection))
+    await act(async () => result.current.load("conv-1"))
+
+    await act(async () => {
+      expect(await result.current.regenerateLast("conv-1", answeredRow.id)).toBe(false)
+    })
+
+    expect(messagesDb.updateAssistant).not.toHaveBeenCalled()
+    expect(result.current.vm.find((message) => message.id === answeredRow.id)).toMatchObject({
+      content: "Ancienne réponse",
+      recoveryMode: undefined,
+      recoveryFailed: true,
+    })
+  })
+
+  it("ne remplace pas l'ancienne réponse par un résultat vide", async () => {
+    vi.mocked(messagesDb.listByConversation).mockResolvedValue([userRow, answeredRow])
+    runTurnMock.mockResolvedValueOnce({
+      text: "",
+      toolCalls: [],
+      firstTokenMs: 10,
+      totalMs: 20,
+    })
+    const { result } = renderHook(() => useChat(modelSelection))
+    await act(async () => result.current.load("conv-1"))
+
+    await act(async () => {
+      expect(await result.current.regenerateLast("conv-1", answeredRow.id)).toBe(false)
+    })
+
+    expect(messagesDb.updateAssistant).not.toHaveBeenCalled()
+    expect(result.current.vm.find((message) => message.id === answeredRow.id)).toMatchObject({
+      content: "Ancienne réponse",
+      recoveryFailed: true,
+    })
+  })
+
+  it("conserve l'ancienne réponse si sa mise à jour SQLite échoue", async () => {
+    vi.mocked(messagesDb.listByConversation).mockResolvedValue([userRow, answeredRow])
+    vi.mocked(messagesDb.updateAssistant).mockRejectedValueOnce(new Error("sqlite locked"))
+    const { result } = renderHook(() => useChat(modelSelection))
+    await act(async () => result.current.load("conv-1"))
+
+    await act(async () => {
+      expect(await result.current.regenerateLast("conv-1", answeredRow.id)).toBe(false)
+    })
+
+    expect(result.current.vm.find((message) => message.id === answeredRow.id)).toMatchObject({
+      content: "Ancienne réponse",
+      recoveryFailed: true,
+    })
+  })
+
+  it("refuse une cible non finale sans appeler le fournisseur", async () => {
+    const trailingUser = messageRow({ id: "user-2", role: "user", content: "Suite" })
+    vi.mocked(messagesDb.listByConversation).mockResolvedValue([userRow, answeredRow, trailingUser])
+    const { result } = renderHook(() => useChat(modelSelection))
+
+    await act(async () => {
+      expect(await result.current.regenerateLast("conv-1", answeredRow.id)).toBe(false)
+    })
+
+    expect(runTurnMock).not.toHaveBeenCalled()
+    expect(messagesDb.updateAssistant).not.toHaveBeenCalled()
+  })
+
+  it("partage le verrou avec send pendant une régénération", async () => {
+    vi.mocked(messagesDb.listByConversation).mockResolvedValue([userRow, answeredRow])
+    let finish: ((value: {
+      text: string
+      toolCalls: never[]
+      firstTokenMs: number
+      totalMs: number
+      usage: { inputTokens: number; outputTokens: number }
+    }) => void) | undefined
+    runTurnMock.mockImplementationOnce(() => new Promise((resolve) => { finish = resolve }))
+    const { result } = renderHook(() => useChat(modelSelection))
+
+    let recovery: Promise<boolean>
+    let concurrentSend: Promise<boolean>
+    act(() => {
+      recovery = result.current.regenerateLast("conv-1", answeredRow.id)
+      concurrentSend = result.current.send("conv-1", "Nouveau message")
+    })
+
+    await expect(concurrentSend!).resolves.toBe(false)
+    await vi.waitFor(() => expect(finish).toBeDefined())
+    expect(messagesDb.insert).not.toHaveBeenCalled()
+
+    await act(async () => {
+      finish?.({
+        text: "Nouvelle réponse",
+        toolCalls: [],
+        firstTokenMs: 10,
+        totalMs: 50,
+        usage: { inputTokens: 20, outputTokens: 5 },
+      })
+      expect(await recovery!).toBe(true)
+    })
+  })
+
+  it("interrompt une régénération sans remplacer l'ancienne réponse", async () => {
+    vi.mocked(messagesDb.listByConversation).mockResolvedValue([userRow, answeredRow])
+    runTurnMock.mockImplementationOnce(async (_request, _key, _model, _options, _callbacks, signal) =>
+      new Promise((_resolve, reject) => {
+        signal.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")))
+      }))
+    const { result } = renderHook(() => useChat(modelSelection))
+    await act(async () => result.current.load("conv-1"))
+
+    let recovery: Promise<boolean>
+    act(() => {
+      recovery = result.current.regenerateLast("conv-1", answeredRow.id)
+    })
+    await vi.waitFor(() => expect(runTurnMock).toHaveBeenCalled())
+    act(() => result.current.interrupt())
+
+    await act(async () => expect(await recovery!).toBe(false))
+    expect(messagesDb.updateAssistant).not.toHaveBeenCalled()
+    expect(result.current.vm.find((message) => message.id === answeredRow.id)).toMatchObject({
+      content: "Ancienne réponse",
+      recoveryFailed: true,
+    })
+  })
+
+  it("réutilise le Web automatique et remplace les sources après un retry", async () => {
+    const sources = [{ url: "https://example.com", title: "Source", origin: "search" as const }]
+    vi.mocked(messagesDb.listByConversation).mockResolvedValue([userRow, failedRow])
+    runWebAgentMock.mockResolvedValueOnce({
+      text: "Réponse Web",
+      firstTokenMs: 12,
+      totalMs: 80,
+      sources,
+    })
+    const { result } = renderHook(() =>
+      useChat(modelSelection, { enabled: true, configured: true }),
+    )
+    await act(async () => result.current.load("conv-1"))
+
+    await act(async () => {
+      expect(await result.current.retryLast("conv-1", failedRow.id)).toBe(true)
+    })
+
+    expect(resolveWebChoiceMock).toHaveBeenCalledWith("Question d'origine", false)
+    expect(runTurnMock).not.toHaveBeenCalled()
+    expect(messagesDb.updateAssistant).toHaveBeenCalledWith(
+      failedRow.id,
+      expect.objectContaining({ content: "Réponse Web", sources: JSON.stringify(sources) }),
+    )
   })
 })
