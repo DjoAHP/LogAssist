@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { createProvider, buildPreview } from "@/lib/ai/factory"
 import { logger } from "@/lib/logger"
-import type { ApiError } from "@/lib/ai/errors"
+import { redactSensitiveDetail, type ApiError } from "@/lib/ai/errors"
 import type { ApiErrorKind, ProviderConfig, ChatMessage } from "@/lib/ai/types"
 import { buildSystemPrompt } from "@/lib/prompts/compose"
 import { loadPromptSettings } from "@/lib/prompts/store"
@@ -13,8 +13,10 @@ import { conversations } from "@/lib/db/conversations"
 import { secrets } from "@/lib/secrets/service"
 import { tinyfish } from "@/lib/mcp/client"
 import { resolveWebChoice } from "@/lib/mcp/webIntent"
-import { runWebAgent } from "@/lib/mcp/webAgent"
-import type { WebAccessConfig, WebSource, WebStatus } from "@/lib/mcp/types"
+import type { WebAccessConfig, WebSource, WebStatus, WebToolRequest } from "@/lib/mcp/types"
+import { buildChatMessages } from "@/lib/chat/contextBuilder"
+import { runAssistantTurn, type AssistantTurnResult } from "@/lib/chat/turnRunner"
+import { estimateTurnMetrics, metricsFromProviderUsage, type TurnMetrics } from "@/lib/token"
 
 export interface Attachment {
   id: string
@@ -41,11 +43,18 @@ export interface ChatMessageVM {
   attachments?: Attachment[]
   modelLabel?: string
   latencyMs?: number
+  firstTokenMs?: number
+  inputTokens?: number
+  outputTokens?: number
+  usageSource?: "provider" | "estimated"
+  costMicrousd?: number
   apiError?: ApiErrorPayload
   interrupted?: boolean
   sources?: WebSource[]
   webStatus?: WebStatus
   webWarning?: string
+  conversationId?: string
+  persistenceFailed?: boolean
 }
 
 export interface SendOptions {
@@ -53,6 +62,15 @@ export interface SendOptions {
 }
 
 const WEB_DISABLED: WebAccessConfig = { enabled: false, configured: false }
+const PERSISTENCE_ERROR_MESSAGE = "La réponse n'a pas pu être enregistrée."
+
+function safeErrorMessage(error: unknown): string {
+  const message = typeof error === "object" && error !== null &&
+      "message" in error && typeof error.message === "string"
+    ? error.message
+    : "Erreur inattendue"
+  return redactSensitiveDetail(message)
+}
 
 export function useChat(
   modelSelection: { provider: ProviderConfig; modelId: string; supportsImages: boolean } | null,
@@ -62,7 +80,7 @@ export function useChat(
   const [busy, setBusy] = useState(false)
   const [webToolsUnsupported, setWebToolsUnsupported] = useState(false)
   // Hoistés au niveau du hook : useRef dans une callback violerait les règles
-  // des hooks. Un seul stream actif à la fois (gate busy) → un ref partagé sûr.
+  // des hooks. Un seul tour actif à la fois (gate busy) → un ref partagé sûr.
   const accRef = useRef("")
   const abortRef = useRef<AbortController | null>(null)
   const mcpRequestRef = useRef<string | null>(null)
@@ -82,7 +100,24 @@ export function useChat(
     const seq = ++loadSeqRef.current
     const rows = await messagesDb.listByConversation(conversationId)
     if (seq !== loadSeqRef.current) return
-    setVm(rows.map((r): ChatMessageVM => mapRow(r)))
+    setVm((current) => {
+      const warningsById = new Map(
+        current
+          .filter((message) => message.id && message.webWarning)
+          .map((message) => [message.id as string, message.webWarning as string]),
+      )
+      const persisted = rows.map((row): ChatMessageVM => ({
+        ...mapRow(row),
+        ...(warningsById.has(row.id) ? { webWarning: warningsById.get(row.id) } : {}),
+      }))
+      const persistedIds = new Set(persisted.map((message) => message.id))
+      const transients = current.filter((message) =>
+        message.persistenceFailed === true &&
+        message.conversationId === conversationId &&
+        !persistedIds.has(message.id),
+      )
+      return [...persisted, ...transients]
+    })
   }, [])
 
   const send = useCallback(
@@ -101,8 +136,8 @@ export function useChat(
       accRef.current = ""
       // Contrat anti-perte avec InputBar : false = échec AVANT persistence du
       // message utilisateur (l'input sera restauré) ; true = message
-      // utilisateur persisté (les pannes ultérieures du stream sont traitées
-      // dans la bulle par onError).
+      // utilisateur persisté (toute panne ultérieure est matérialisée dans la
+      // bulle assistant par persistError).
       let userPersisted = false
       // id client de la bulle optimiste (retirée si l'insert échoue)
       let localUserId: string | undefined = undefined
@@ -141,68 +176,23 @@ export function useChat(
           latency_ms: null,
           error: null,
         })
-        await conversations.touch(conversationId)
         userPersisted = true
-
-        // 3. Historique APRÈS l'insert user : le message fait partie du contexte API.
-        // Prompt reconstruit à CHAQUE envoi : modifs des réglages / interrupteurs
-        // de connaissances prennent effet au prochain message.
-        const [promptSettings, enabledKnowledge] = await Promise.all([
-          loadPromptSettings(),
-          // Overrides par conversation : si la conversation a des knowledge_id explicites,
-          // on les utilise (respectant l'ordre sort_order), sinon fallback global listEnabled.
-          (async () => {
-            const overrideIds = await conversationKnowledge.listOn(conversationId)
-            if (overrideIds.length > 0) {
-              const rows = await knowledgeDb.list()
-              const byId = new Map(rows.map((k) => [k.id, k]))
-              return overrideIds.map((id) => byId.get(id)).filter((k): k is typeof rows[0] => !!k && k.enabled === 1)
-            }
-            return knowledgeDb.listEnabled()
-          })(),
-        ])
-        const system = buildSystemPrompt({
-          general: promptSettings.general,
-          profile: promptSettings.profile,
-          knowledge: enabledKnowledge.map((k) => ({ name: k.name, content: k.content })),
-          webEnabled: webAccess.enabled && webAccess.configured,
+        await conversations.touch(conversationId).catch((error) => {
+          logger.error({ kind: "conversation_touch", message: safeErrorMessage(error) })
         })
-        const history = await messagesDb.listByConversation(conversationId)
-        const apiMessages: ChatMessage[] = [
-          ...(system ? [{ role: "system" as const, content: system }] : []),
-          ...history.map((h) => {
-            let images: ChatMessage["images"] = undefined
-            if (h.attachments) {
-              try {
-                const atts = JSON.parse(h.attachments) as { id: string; name: string; mimeType: string }[]
-                if (atts.length > 0) {
-                  // Note: on ne peut pas récupérer le base64 depuis la DB ici (pas stocké)
-                  // Pour l'historique, on n'envoie pas les images pour économiser les tokens
-                  // (optionnel : on pourrait stocker le base64 en base si nécessaire)
-                }
-              } catch {
-                // ignore
-              }
-            }
-            return { role: h.role, content: h.content, images }
-          }),
-        ]
 
-        // 4. Ajouter les images du message courant au dernier message user de l'historique
-        if (apiImages.length > 0 && apiMessages.length > 0) {
-          const lastUserMsg = apiMessages[apiMessages.length - 1]
-          if (lastUserMsg.role === "user") {
-            lastUserMsg.images = apiImages
-          }
-        }
-
-        // 5. Placeholder assistant : bulle de streaming visible dès le départ.
+        // Dès que le message user est committé, la bulle assistant et sa voie
+        // d'erreur existent avant toute préparation susceptible d'échouer.
         const { provider, modelId, supportsImages } = modelSelection
-        const apiProvider = createProvider(provider)
-        const apiKey = (await secrets.get(provider.secretRef)) ?? ""
         const label = buildPreview(provider.name, modelId)
         const assistantId = crypto.randomUUID()
-        setVm((s) => [...s, { id: assistantId, role: "assistant", content: "", modelLabel: label }])
+        setVm((s) => [...s, {
+          id: assistantId,
+          role: "assistant",
+          content: "",
+          modelLabel: label,
+          conversationId,
+        }])
 
         const upsertLast = (patch: Partial<ChatMessageVM>) =>
           setVm((s) => s.map((m) => (m.id === assistantId ? { ...m, ...patch } : m)))
@@ -213,51 +203,70 @@ export function useChat(
             ("message" in e && e.message === "Request cancelled"))
 
         const persistDone = (
-          result: { text: string; totalMs: number },
-          sources: WebSource[] = [],
-          webWarning?: string,
+          result: AssistantTurnResult,
+          metrics: TurnMetrics | null,
         ) => {
           const acc = accRef.current
-          return (async () => {
+          return (async (): Promise<void> => {
             const finalContent = result.text || acc
+            const latencyMs = Math.round(result.totalMs)
+            const firstTokenMs = metrics ? Math.round(result.firstTokenMs) : null
             const id = await messagesDb.insert({
               conversation_id: conversationId,
               role: "assistant",
               content: finalContent,
               attachments: "[]",
               model_label: label,
-              latency_ms: Math.round(result.totalMs),
+              latency_ms: latencyMs,
               error: null,
-              sources: JSON.stringify(sources),
+              sources: JSON.stringify(result.sources),
+              first_token_ms: firstTokenMs,
+              input_tokens: metrics?.inputTokens ?? null,
+              output_tokens: metrics?.outputTokens ?? null,
+              usage_source: metrics?.usageSource ?? null,
+              cost_microusd: metrics?.costMicrousd ?? null,
             })
             upsertLast({
               id,
               content: finalContent,
-              latencyMs: Math.round(result.totalMs),
-              sources,
-              webWarning,
+              latencyMs,
+              firstTokenMs: firstTokenMs ?? undefined,
+              inputTokens: metrics?.inputTokens,
+              outputTokens: metrics?.outputTokens,
+              usageSource: metrics?.usageSource,
+              costMicrousd: metrics?.costMicrousd ?? undefined,
+              sources: result.sources,
+              webWarning: result.warning,
               webStatus: undefined,
+              persistenceFailed: undefined,
             })
-          })().catch(logger.error)
+          })()
         }
 
-        const persistError = (e: unknown) => {
+        const persistError = async (e: unknown): Promise<void> => {
           const acc = accRef.current
-          return (async () => {
+          try {
             if (isAbort(e)) {
+              upsertLast({ content: acc, interrupted: true, webStatus: undefined })
               const id = await messagesDb.insert({
                 conversation_id: conversationId, role: "assistant", content: acc,
                 attachments: "[]", model_label: label, latency_ms: null,
                 error: JSON.stringify({ interrupted: true }), sources: "[]",
               })
-              upsertLast({ id, content: acc, interrupted: true, webStatus: undefined })
+              upsertLast({
+                id,
+                content: acc,
+                interrupted: true,
+                webStatus: undefined,
+                persistenceFailed: undefined,
+              })
               return
             }
             const api = e as Partial<ApiError>
             const payload: ApiErrorPayload = {
               kind: api.kind ?? "unknown",
-              message: api.message ?? "Erreur inattendue",
-              ...(api.detail ? { detail: api.detail } : {}),
+              message: redactSensitiveDetail(api.message ?? "Erreur inattendue"),
+              ...(api.detail ? { detail: redactSensitiveDetail(api.detail) } : {}),
             }
             upsertLast({ apiError: payload, interrupted: false, webStatus: undefined })
             const id = await messagesDb.insert({
@@ -265,8 +274,24 @@ export function useChat(
               attachments: "[]", model_label: label, latency_ms: null,
               error: JSON.stringify(payload), sources: "[]",
             })
-            upsertLast({ id, content: acc })
-          })().catch(logger.error)
+            upsertLast({ id, content: acc, persistenceFailed: undefined })
+          } catch (persistenceError) {
+            const payload: ApiErrorPayload = {
+              kind: "unknown",
+              message: PERSISTENCE_ERROR_MESSAGE,
+            }
+            upsertLast({
+              content: acc,
+              apiError: payload,
+              interrupted: false,
+              webStatus: undefined,
+              persistenceFailed: true,
+            })
+            logger.error({
+              kind: "assistant_error_persistence",
+              message: safeErrorMessage(persistenceError),
+            })
+          }
         }
 
         const turnCallbacks = {
@@ -277,78 +302,108 @@ export function useChat(
           },
         }
 
-        // DEBUG: log ce qui part vers l'API (no-op en production)
-        logger.debug("[useChat] Envoi à l'API:", {
-          modelId,
-          supportsImages,
-          apiImagesLength: apiImages.length,
-          lastUserMsgImages: apiMessages[apiMessages.length - 1]?.images?.length ?? 0,
-          messagesCount: apiMessages.length,
-        })
+        try {
+          // Historique APRÈS l'insert user : le message fait partie du contexte API.
+          // Le prompt est reconstruit à chaque envoi pour appliquer les réglages
+          // et les connaissances actifs au moment du tour.
+          const [promptSettings, enabledKnowledge] = await Promise.all([
+            loadPromptSettings(),
+            (async () => {
+              const overrideIds = await conversationKnowledge.listOn(conversationId)
+              if (overrideIds.length > 0) {
+                const rows = await knowledgeDb.list()
+                const byId = new Map(rows.map((knowledge) => [knowledge.id, knowledge]))
+                return overrideIds
+                  .map((id) => byId.get(id))
+                  .filter((knowledge): knowledge is typeof rows[0] =>
+                    !!knowledge && knowledge.enabled === 1)
+              }
+              return knowledgeDb.listEnabled()
+            })(),
+          ])
+          const system = buildSystemPrompt({
+            general: promptSettings.general,
+            profile: promptSettings.profile,
+            knowledge: enabledKnowledge.map((knowledge) => ({
+              name: knowledge.name,
+              content: knowledge.content,
+            })),
+            webEnabled: webAccess.enabled && webAccess.configured,
+          })
+          const history = await messagesDb.listByConversation(conversationId)
+          const apiMessages = buildChatMessages({
+            system,
+            history: history.map((message) => ({ role: message.role, content: message.content })),
+            currentImages: apiImages,
+          })
+          const apiProvider = createProvider(provider)
+          const apiKey = (await secrets.get(provider.secretRef)) ?? ""
 
-        if (webAccess.enabled && webAccess.configured) {
-          try {
-            const webResult = await runWebAgent({
-              provider: apiProvider,
-              webClient: {
-                call: async (requestId, request) => {
-                  mcpRequestRef.current = requestId
-                  try {
-                    return await tinyfish.call(requestId, request)
-                  } finally {
-                    if (mcpRequestRef.current === requestId) mcpRequestRef.current = null
-                  }
+          // DEBUG: uniquement des métadonnées non sensibles (no-op en production).
+          logger.debug("[useChat] Envoi à l'API:", {
+            modelId,
+            supportsImages,
+            apiImagesLength: apiImages.length,
+            lastUserMsgImages: apiMessages[apiMessages.length - 1]?.images?.length ?? 0,
+            messagesCount: apiMessages.length,
+          })
+
+          const web = webAccess.enabled && webAccess.configured
+            ? {
+                webClient: {
+                  call: async (requestId: string, request: WebToolRequest) => {
+                    mcpRequestRef.current = requestId
+                    try {
+                      return await tinyfish.call(requestId, request)
+                    } finally {
+                      if (mcpRequestRef.current === requestId) mcpRequestRef.current = null
+                    }
+                  },
                 },
-              },
-              request: { messages: apiMessages },
-              apiKey,
-              modelId,
-              toolChoice: resolveWebChoice(fullContent, options.forceWeb ?? false),
-              callbacks: turnCallbacks,
-              signal: controller.signal,
-              requestId: assistantId,
-              compatibilityKey: `${provider.id}/${modelId}`,
-              unsupportedTools: unsupportedToolsRef.current,
-              onStatus: (webStatus) => upsertLast({ webStatus }),
-            })
-            setWebToolsUnsupported(unsupportedToolsRef.current.has(`${provider.id}/${modelId}`))
-            if (controller.signal.aborted) throw controller.signal.reason
-            accRef.current = webResult.text
-            await persistDone(webResult, webResult.sources, webResult.warning)
-          } catch (e) {
-            await persistError(e)
-          }
-        } else {
-          await apiProvider.stream(
-            { messages: apiMessages },
+                toolChoice: resolveWebChoice(fullContent, options.forceWeb ?? false),
+                requestId: assistantId,
+                compatibilityKey: `${provider.id}/${modelId}`,
+                unsupportedTools: unsupportedToolsRef.current,
+                onStatus: (webStatus: WebStatus | undefined) => upsertLast({ webStatus }),
+              }
+            : undefined
+
+          const result = await runAssistantTurn({
+            provider: apiProvider,
+            request: { messages: apiMessages },
             apiKey,
             modelId,
-            {
-              ...turnCallbacks,
-            // Insertions persistance : ON RETOURNE la promesse (contrat fix
-            // 85acc6b) — stream() l'attend (openai-compat.ts) avant de se
-            // résoudre. Si on fait `void`, stream résout avant committance →
-            // busy=false → refetch App sans le message (disparition).
-            // Cap défensif : on lit accRef une seule fois (une interruption
-            // simultanée ne peut plus muter le cap).
-              onDone: persistDone,
-              onError: persistError,
-            },
-            controller.signal,
-          )
+            callbacks: turnCallbacks,
+            signal: controller.signal,
+            ...(web ? { web } : {}),
+          })
+          if (controller.signal.aborted) throw controller.signal.reason
+          accRef.current = result.text
+          if (web) {
+            setWebToolsUnsupported(unsupportedToolsRef.current.has(`${provider.id}/${modelId}`))
+          }
+          const providerMetrics = result.usage
+            ? metricsFromProviderUsage(result.usage, provider.name, modelId)
+            : null
+          const metrics = providerMetrics ?? (web
+            ? null
+            : estimateTurnMetrics(apiMessages, result.text, provider.name, modelId))
+          await persistDone(result, metrics)
+        } catch (e) {
+          await persistError(e)
         }
         return true
       } catch (e) {
         // Contrat anti-perte : !userPersisted → false (contenu restauré par
         // InputBar) et retrait de la bulle optimiste (sinon doublon au renvoi).
-        // Sinon : message utilisateur déjà persisté, le problème du stream
-        // est déjà matérialisé dans la bulle par onError.
-        logger.error(e)
+        // Le cas post-insert est un dernier filet : le inner catch matérialise
+        // normalement déjà toute erreur dans la bulle assistant.
+        logger.error({ kind: "chat_send", message: safeErrorMessage(e) })
         if (!userPersisted) setVm((s) => s.filter((m) => m.id !== localUserId))
         return userPersisted
       } finally {
-        // stream() résout quand le flux est fini (ou après onError) : toujours
-        // réactivé, y compris en cas d'exception du consommateur.
+        // Le runner et la persistance assistant sont terminés avant de rendre
+        // l'input, y compris après erreur ou interruption.
         setBusy(false)
         abortRef.current = null
         mcpRequestRef.current = null
@@ -360,7 +415,11 @@ export function useChat(
   const interrupt = useCallback(() => {
     abortRef.current?.abort()
     const requestId = mcpRequestRef.current
-    if (requestId) void tinyfish.cancel(requestId).catch(logger.error)
+    if (requestId) {
+      void tinyfish.cancel(requestId).catch((error) => {
+        logger.error({ kind: "mcp_cancel", message: safeErrorMessage(error) })
+      })
+    }
   }, [])
   return { vm, busy, send, interrupt, load, webToolsUnsupported }
 }
@@ -374,7 +433,17 @@ function mapRow(r: MessageRow): ChatMessageVM {
     try {
       const parsed = JSON.parse(r.error) as ApiErrorPayload & { interrupted?: boolean }
       if (parsed.interrupted) interrupted = true
-      else if (parsed.kind) apiError = parsed
+      else if (parsed.kind) {
+        apiError = {
+          kind: parsed.kind,
+          message: typeof parsed.message === "string"
+            ? redactSensitiveDetail(parsed.message)
+            : "Erreur inattendue",
+          ...(typeof parsed.detail === "string"
+            ? { detail: redactSensitiveDetail(parsed.detail) }
+            : {}),
+        }
+      }
     } catch {
       // error non-JSON (legacy) : ignoré
     }
@@ -411,6 +480,11 @@ function mapRow(r: MessageRow): ChatMessageVM {
     id: r.id, role: r.role, content: r.content, attachments,
     modelLabel: r.model_label ?? undefined,
     latencyMs: r.latency_ms ?? undefined,
+    firstTokenMs: r.first_token_ms ?? undefined,
+    inputTokens: r.input_tokens ?? undefined,
+    outputTokens: r.output_tokens ?? undefined,
+    usageSource: r.usage_source ?? undefined,
+    costMicrousd: r.cost_microusd ?? undefined,
     apiError, interrupted, sources,
   }
 }

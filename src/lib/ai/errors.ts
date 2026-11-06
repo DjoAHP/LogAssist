@@ -29,6 +29,19 @@ export class ApiError extends Error {
   }
 }
 
+const JSON_NAMED_SECRET = /("(?:authorization|api[_-]?key|token)"\s*:\s*")(?:Bearer\s+)?[^"]*(")/gi
+const AUTHORIZATION_SECRET = /(\bAuthorization\s*:\s*)(?:Bearer\s+)?[^\s,;]+/gi
+const NAMED_SECRET = /(\b(?:api[_-]?key|token)\s*[:=]\s*)[^\s,;&]+/gi
+const BEARER_SECRET = /(\bBearer)\s+[^\s,;"']+/gi
+
+export function redactSensitiveDetail(value: string): string {
+  return value
+    .replace(JSON_NAMED_SECRET, "$1[REDACTED]$2")
+    .replace(AUTHORIZATION_SECRET, "$1[REDACTED]")
+    .replace(NAMED_SECRET, "$1[REDACTED]")
+    .replace(BEARER_SECRET, "$1 [REDACTED]")
+}
+
 // Le suffixe (?:\b|_) étend \b : snake_case (insufficient_quota) et codes réseau
 // (EAI_AGAIN) n'ont pas de \b devant un underscore, l'underscore est un caractère de mot.
 const QUOTA_HINTS = /\b(quota|credit|billing|insufficient)(?:\b|_)/i

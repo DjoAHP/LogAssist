@@ -1260,6 +1260,8 @@ git commit -m "refactor: extrait l execution d un tour chat"
 **Files:**
 - Modify: `src/hooks/useChat.ts:1-416`
 - Modify: `src/hooks/useChat.test.tsx:8-386`
+- Modify: `src/lib/ai/errors.ts`
+- Modify: `src/lib/ai/errors.test.ts`
 - Uses: `src/lib/chat/contextBuilder.ts`
 - Uses: `src/lib/chat/turnRunner.ts`
 - Uses: `src/lib/token/estimate.ts`
@@ -1432,7 +1434,7 @@ Remplacer la fonction complète par :
 ```ts
 const persistDone = (
   result: AssistantTurnResult,
-  metrics: ReturnType<typeof estimateTurnMetrics>,
+  metrics: TurnMetrics | null,
 ) => {
   const finalContent = result.text || accRef.current
   return (async () => {
@@ -1445,28 +1447,31 @@ const persistDone = (
       latency_ms: Math.round(result.totalMs),
       error: null,
       sources: JSON.stringify(result.sources),
-      first_token_ms: Math.round(result.firstTokenMs),
-      input_tokens: metrics.inputTokens,
-      output_tokens: metrics.outputTokens,
-      usage_source: metrics.usageSource,
-      cost_microusd: metrics.costMicrousd,
+      first_token_ms: metrics ? Math.round(result.firstTokenMs) : null,
+      input_tokens: metrics?.inputTokens ?? null,
+      output_tokens: metrics?.outputTokens ?? null,
+      usage_source: metrics?.usageSource ?? null,
+      cost_microusd: metrics?.costMicrousd ?? null,
     })
     upsertLast({
       id,
       content: finalContent,
       latencyMs: Math.round(result.totalMs),
-      firstTokenMs: Math.round(result.firstTokenMs),
-      inputTokens: metrics.inputTokens,
-      outputTokens: metrics.outputTokens,
-      usageSource: metrics.usageSource,
-      costMicrousd: metrics.costMicrousd ?? undefined,
+      firstTokenMs: metrics ? Math.round(result.firstTokenMs) : undefined,
+      inputTokens: metrics?.inputTokens,
+      outputTokens: metrics?.outputTokens,
+      usageSource: metrics?.usageSource,
+      costMicrousd: metrics?.costMicrousd ?? undefined,
       sources: result.sources,
       webWarning: result.warning,
       webStatus: undefined,
     })
-  })().catch(logger.error)
+  })()
 }
 ```
+
+`persistDone` doit rejeter vers le `inner catch`. Il ne doit jamais absorber un
+échec d'insert : ce dernier est matérialisé par `persistError`.
 
 - [ ] **Step 6: Unifier l'exécution directe et Web**
 
@@ -1508,16 +1513,45 @@ try {
   setWebToolsUnsupported(
     unsupportedToolsRef.current.has(`${provider.id}/${modelId}`),
   )
-  const metrics = result.usage
+  const providerMetrics = result.usage
     ? metricsFromProviderUsage(result.usage, provider.name, modelId)
-    : estimateTurnMetrics(apiMessages, result.text, provider.name, modelId)
+    : null
+  const metrics = providerMetrics ?? (web
+    ? null
+    : estimateTurnMetrics(apiMessages, result.text, provider.name, modelId))
   await persistDone(result, metrics)
 } catch (error) {
   await persistError(error)
 }
 ```
 
-Laisser l'outer `try/catch/finally` et son contrat `return userPersisted` inchangés.
+Politique de métriques corrigée : un tour direct sans usage valide peut être
+estimé localement. Un tour Web multi-tour sans usage complet et valide ne doit
+jamais être estimé depuis le seul prompt initial et le texte final ; ses cinq
+colonnes de métriques restent à `NULL`.
+
+Après l'insert user, créer immédiatement le placeholder assistant, `upsertLast`
+et `persistError`, avant le prompt, les connaissances, l'historique, le provider
+et le secret. Toute erreur post-insert est ainsi visible et persistée, tandis que
+l'outer catch reste le filet du chemin pré-insert. Les messages et détails API
+sont passés par `redactSensitiveDetail` avant la VM, SQLite ou les logs. Les
+payloads d'erreur historiques sont également reconstruits et redacted dans
+`mapRow` avant leur exposition à la VM, sans réécriture de SQLite.
+
+Si l'insert d'erreur échoue à son tour, conserver une erreur explicite et non
+sensible dans la VM, journaliser uniquement un objet reconstruit et redacted,
+puis terminer `send()` avec `true` sans nouvelle tentative de persistance.
+
+Enfin, `load()` réapplique uniquement les warnings Web en mémoire dont l'id
+persistant correspond exactement à une row rechargée ; aucun warning n'est
+transféré vers un autre message et aucune migration n'est ajoutée.
+
+Une bulle dont l'insert final puis l'insert d'erreur ont tous deux échoué reste
+marquée `persistenceFailed` avec son `conversationId` pendant la session. Au
+reload, `load()` place d'abord les rows persistées, puis ajoute uniquement les
+transients de la conversation demandée dont l'id n'existe pas déjà en base. Un
+transient n'est donc ni perdu au reload immédiat, ni transféré vers une autre
+conversation, ni dupliqué si sa ligne existe finalement.
 
 - [ ] **Step 7: Étendre le VM et son mapping**
 

@@ -1,5 +1,41 @@
 import { describe, it, expect } from "vitest"
-import { normalizeHttpStatus, normalizeNetworkError, ApiError } from "@/lib/ai/errors"
+import {
+  normalizeHttpStatus,
+  normalizeNetworkError,
+  redactSensitiveDetail,
+  ApiError,
+} from "@/lib/ai/errors"
+
+describe("redactSensitiveDetail", () => {
+  it("masque un bearer token", () => {
+    expect(redactSensitiveDetail("Bearer sk-secret-value"))
+      .toBe("Bearer [REDACTED]")
+  })
+
+  it.each([
+    ["Authorization: abc123", "Authorization: [REDACTED]"],
+    ["api_key=abc123", "api_key=[REDACTED]"],
+    ["api-key: abc123", "api-key: [REDACTED]"],
+    ["token=abc123", "token=[REDACTED]"],
+  ])("masque %s", (input, expected) => {
+    expect(redactSensitiveDetail(input)).toBe(expected)
+  })
+
+  it.each([
+    ['{"api_key":"sk-secret"}', '{"api_key":"[REDACTED]"}'],
+    ['{"token":"abc"}', '{"token":"[REDACTED]"}'],
+    ['{"Authorization":"abc"}', '{"Authorization":"[REDACTED]"}'],
+    ['{"Authorization":"Bearer sk-secret"}', '{"Authorization":"[REDACTED]"}'],
+    ['{"api-key"  :  "abc123"}', '{"api-key"  :  "[REDACTED]"}'],
+  ])("masque exactement le secret JSON dans %s", (input, expected) => {
+    expect(redactSensitiveDetail(input)).toBe(expected)
+  })
+
+  it("conserve un message ordinaire utile", () => {
+    const message = "Le fournisseur a refusé le modèle demandé"
+    expect(redactSensitiveDetail(message)).toBe(message)
+  })
+})
 
 describe("normalizeHttpStatus", () => {
   it("401 → auth", () => {
