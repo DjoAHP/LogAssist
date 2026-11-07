@@ -56,7 +56,7 @@ function ActionButton({
         hover:bg-brand-from/10 hover:text-brand-to
         focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-to
         disabled:opacity-50 disabled:cursor-not-allowed
-        @media (prefers-reduced-motion: reduce) { transition: none; }
+        motion-reduce:transition-none
         ${className}
       `}
     >
@@ -83,11 +83,11 @@ export function ProviderCard({
     <article
       data-testid="provider-card"
       className="
-        group relative rounded-lg border border-border bg-background p-3
+        relative rounded-lg border border-border bg-background p-3
         flex flex-col
         hover:border-brand-from/50 hover:shadow-md
         transition-colors duration-200
-        @media (prefers-reduced-motion: reduce) { transition: none; }
+        motion-reduce:transition-none
       "
     >
       {/* En-tête : nom + URL, poubelle en haut à droite */}
@@ -112,7 +112,7 @@ export function ProviderCard({
             hover:bg-destructive/10 hover:text-destructive
             focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-destructive
             transition-colors
-            @media (prefers-reduced-motion: reduce) { transition: none; }
+            motion-reduce:transition-none
           "
         >
           <Trash2 className="size-4" />
@@ -123,7 +123,7 @@ export function ProviderCard({
       <hr className="border-border my-2" aria-hidden="true" />
 
       {/* 3 actions égales : RadioTower (test), CloudDownload (fetch), Wrench (edit) */}
-      <div className="flex gap-1.5 mb-3" role="group" aria-label={t.settings.test}>
+      <div className="flex gap-1.5 mb-3" role="group" aria-label="Actions du fournisseur">
         <ActionButton
           onClick={onTest}
           disabled={isTesting}
@@ -169,7 +169,7 @@ export function ProviderCard({
           hover:bg-brand-from/10 hover:text-brand-to hover:border-brand-from/50
           focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-to
           transition-colors
-          @media (prefers-reduced-motion: reduce) { transition: none; }
+          motion-reduce:transition-none
         "
       >
         {t.settings.browseModels}
