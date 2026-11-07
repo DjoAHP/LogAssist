@@ -145,6 +145,23 @@ describe("SettingsDialog — recherche des fournisseurs", () => {
   })
 })
 
+describe("SettingsDialog — cartes fournisseur", () => {
+  it("présente les commandes sans afficher la liste des modèles dans la carte", async () => {
+    renderDialog()
+
+    const providerName = await screen.findByText("OpenRouter")
+    const card = providerName.closest('[data-testid="provider-card"]') as HTMLElement
+
+    expect(within(card).getByRole("button", { name: t.settings.test })).not.toBeNull()
+    expect(within(card).getByRole("button", { name: t.settings.fetchModels })).not.toBeNull()
+    expect(within(card).getByRole("button", { name: t.settings.edit })).not.toBeNull()
+    expect(within(card).getByRole("button", {
+      name: `${t.settings.browseModels} (1)`,
+    })).not.toBeNull()
+    expect(within(card).queryByText("existing/model")).toBeNull()
+  })
+})
+
 describe("SettingsDialog — récupération des modèles", () => {
   it("sans clé API : statut fail noKey, aucun appel réseau", async () => {
     mockSecretsGet.mockResolvedValue(null)
@@ -152,7 +169,7 @@ describe("SettingsDialog — récupération des modèles", () => {
     fireEvent.click(await fetchButton())
     await waitFor(() => {
       const row = screen.getByText("OpenRouter").closest('[data-testid="provider-card"]')!
-      expect(row.querySelector('[data-fetch-status]')?.textContent).toContain("Aucune clé")
+      expect(row.querySelector('[data-testid="fetch-models-status"]')?.textContent).toContain("Aucune clé")
     })
     expect(mockListRemoteModels).not.toHaveBeenCalled()
   })
@@ -176,7 +193,7 @@ describe("SettingsDialog — récupération des modèles", () => {
     await waitFor(() => expect(mockListRemoteModels).toHaveBeenCalled())
     await waitFor(() => {
       const row = screen.getByText("OpenRouter").closest('[data-testid="provider-card"]')!
-      expect(row.querySelector('[data-fetch-status]')?.textContent).toContain("Clé API invalide")
+      expect(row.querySelector('[data-testid="fetch-models-status"]')?.textContent).toContain("Clé API invalide")
     })
   })
 
@@ -192,7 +209,7 @@ describe("SettingsDialog — récupération des modèles", () => {
 
     await waitFor(() => {
       const row = screen.getByText("OpenRouter").closest('[data-testid="provider-card"]')!
-      expect(row.querySelector('[data-fetch-status]')?.textContent).toContain(t.settings.fetchFail)
+      expect(row.querySelector('[data-testid="fetch-models-status"]')?.textContent).toContain(t.settings.fetchFail)
     })
     const sinks = JSON.stringify({ ui: document.body.textContent, logs: mockLoggerError.mock.calls })
     expect(sinks).not.toContain(opaqueKey)
@@ -205,7 +222,7 @@ describe("SettingsDialog — récupération des modèles", () => {
     fireEvent.click(await fetchButton())
     await waitFor(() => {
       const row = screen.getByText("OpenRouter").closest('[data-testid="provider-card"]')!
-      expect(row.querySelector('[data-fetch-status]')?.textContent).toContain("1")
+      expect(row.querySelector('[data-testid="fetch-models-status"]')?.textContent).toContain("1")
     }, { timeout: 3000 })
   })
 

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react"
-import { Check, Plus, Search, Trash2, X } from "lucide-react"
+import { Plus, Search, X } from "lucide-react"
 import { confirm as dialogConfirm } from "@tauri-apps/plugin-dialog"
 import { t } from "@/i18n/fr"
 import { logger } from "@/lib/logger"
@@ -10,12 +10,11 @@ import { secrets } from "@/lib/secrets/service"
 import { ProviderForm } from "./ProviderForm"
 import { LocalModelsPanel } from "./LocalModelsPanel"
 import { ModelPickerModal } from "./ModelPickerModal"
-
-type TestStatus = { state: "idle" } | { state: "testing" } | { state: "ok" } | { state: "fail"; message: string }
-type FetchStatus =
-  | { state: "fetching" }
-  | { state: "ok"; added: number }
-  | { state: "fail"; message: string }
+import {
+  ProviderCard,
+  type ProviderConnectionStatus,
+  type ProviderFetchStatus,
+} from "./ProviderCard"
 
 interface Props {
   onClose: () => void
@@ -53,8 +52,8 @@ export function SettingsDialog({ onClose, onChanged }: Props) {
   const [rows, setRows] = useState<ProviderRow[]>([])
   const [models, setModels] = useState<Record<string, ModelRow[]>>({})
   const [editing, setEditing] = useState<ProviderRow | "new" | null>(null)
-  const [testStatus, setTestStatus] = useState<Record<string, TestStatus>>({})
-  const [fetchStatus, setFetchStatus] = useState<Record<string, FetchStatus | undefined>>({})
+  const [testStatus, setTestStatus] = useState<Record<string, ProviderConnectionStatus>>({})
+  const [fetchStatus, setFetchStatus] = useState<Record<string, ProviderFetchStatus | undefined>>({})
   const [browsing, setBrowsing] = useState<ProviderRow | null>(null)
   const [providerQuery, setProviderQuery] = useState("")
   // Onglet par défaut = « Fournisseurs » : le comportement historique reste
@@ -240,18 +239,20 @@ export function SettingsDialog({ onClose, onChanged }: Props) {
                 className="w-full rounded-md border border-border bg-background py-2 pl-9 pr-3 text-sm outline-none placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-brand-to"
               />
             </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-              {/* Carte « + Ajouter un nouveau fournisseur » en première position */}
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
               <button
+                type="button"
                 onClick={() => setEditing("new")}
-                className="aspect-[16/9] rounded-md border-2 border-dashed border-border bg-background/50 flex flex-col items-center justify-center gap-2 p-4 hover:bg-foreground/5 transition-colors"
+                className="flex min-h-80 flex-col items-center justify-center gap-3 rounded-xl border-2 border-dashed border-border bg-background/50 p-5 outline-none transition-[border-color,background-color] hover:border-brand-to hover:bg-foreground/5 focus-visible:ring-2 focus-visible:ring-brand-to motion-reduce:transition-none"
               >
-                <Plus className="size-6" />
-                <p className="text-sm text-muted-foreground text-center">{t.settings.addProvider}</p>
+                <Plus aria-hidden="true" className="size-7 text-muted-foreground" />
+                <span className="text-center text-sm font-medium text-muted-foreground">
+                  {t.settings.addProvider}
+                </span>
               </button>
 
               {rows.length === 0 && (
-                <p className="col-span-full text-sm text-muted-foreground text-center">
+                <p className="col-span-full text-center text-sm text-muted-foreground">
                   {t.settings.noProviders}
                 </p>
               )}
@@ -262,106 +263,21 @@ export function SettingsDialog({ onClose, onChanged }: Props) {
                 </p>
               )}
 
-              {filteredRows.map((p) => {
-                const status = testStatus[p.id] ?? { state: "idle" as const }
-                const fetchSt = fetchStatus[p.id]
-                const providerModels = models[p.id] ?? []
-                return (
-                  <div key={p.id} data-testid="provider-card" className="aspect-[16/9] rounded-md border border-border p-3 flex flex-col">
-                    {/* En-tête : nom + URL */}
-                    <div className="min-w-0 mb-2">
-                      <p className="truncate text-sm font-medium">{p.name}</p>
-                      <p className="truncate text-xs text-muted-foreground">{p.base_url}</p>
-                    </div>
-
-                    {/* Corps : compteur + liste des modèles (overflow interne pour respecter le 16:9) */}
-                    <div className="flex-1 overflow-y-auto mb-2">
-                      <p className="mb-1 text-xs font-semibold">
-                        {providerModels.length} {t.settings.modelsAvailable}
-                      </p>
-                      {providerModels.length > 0 ? (
-                        <ul className="space-y-1">
-                          {providerModels.map((m) => (
-                            <li key={m.id} className="flex items-center gap-1">
-                              <span className="text-[10px] text-muted-foreground">•</span>
-                              <p className="truncate text-xs">{m.model_id}</p>
-                            </li>
-                          ))}
-                        </ul>
-                      ) : (
-                        <p className="text-xs text-muted-foreground">{t.settings.noModels}</p>
-                      )}
-                    </div>
-
-                    {/* Pied : boutons d'action + statuts */}
-                    <div className="flex flex-wrap items-center gap-1 mt-auto">
-                      <button
-                        onClick={() => void test(p)}
-                        disabled={status.state === "testing"}
-                        className="rounded-md border border-border px-2 py-1 text-xs hover:bg-foreground/5 disabled:opacity-50"
-                      >
-                        {status.state === "testing" ? t.settings.testing : t.settings.test}
-                      </button>
-                      <button
-                        data-action="fetch-models"
-                        onClick={() => void fetchModels(p)}
-                        disabled={fetchStatus[p.id]?.state === "fetching"}
-                        className="rounded-md border border-border px-2 py-1 text-xs hover:bg-foreground/5 disabled:opacity-50"
-                      >
-                        {fetchStatus[p.id]?.state === "fetching" ? t.settings.fetchingModels : t.settings.fetchModels}
-                      </button>
-                      <button
-                        onClick={() => setEditing(p)}
-                        className="rounded-md px-2 py-1 text-xs underline hover:opacity-80"
-                      >
-                        {t.settings.edit}
-                      </button>
-                      <button
-                        aria-label={t.settings.delete}
-                        onClick={() => void removeProvider(p).catch((error) =>
-                          logSettingsError("settings.removeProvider", error))}
-                        className="rounded-md p-1 hover:bg-foreground/5"
-                      >
-                        <Trash2 className="size-3.5" />
-                      </button>
-                    </div>
-
-                    {/* Indicateurs de statut (sous le pied, sans dépasser la carte) */}
-                    <div className="mt-1">
-                      {status.state === "ok" && (
-                        <p className="flex items-center gap-1 text-xs text-green-600">
-                          <Check className="size-3.5" /> {t.settings.ok}
-                        </p>
-                      )}
-                      {status.state === "fail" && (
-                        <p className="text-xs text-destructive">
-                          {t.settings.fail} — {status.message}
-                        </p>
-                      )}
-                      {fetchSt?.state === "ok" && (
-                        <p data-fetch-status className="text-xs text-green-600">
-                          {fetchSt.added} {t.settings.fetchOkAdded}
-                        </p>
-                      )}
-                      {fetchSt?.state === "fail" && (
-                        <p data-fetch-status className="text-xs text-destructive">
-                          {t.settings.fetchFail} — {fetchSt.message}
-                        </p>
-                      )}
-                    </div>
-
-                    {/* Bouton parcourir les modèles (largeur pleine, en bas de carte) */}
-                    <button
-                      data-action="browse-models"
-                      onClick={() => setBrowsing(p)}
-                      className="mt-1 w-full flex items-center justify-center gap-1.5 rounded-md border border-border px-2 py-1.5 text-xs hover:bg-foreground/5"
-                    >
-                      {t.settings.browseModels}
-                      <span className="text-muted-foreground">({providerModels.length})</span>
-                    </button>
-                  </div>
-                )
-              })}
+              {filteredRows.map((provider) => (
+                <ProviderCard
+                  key={provider.id}
+                  provider={provider}
+                  modelCount={(models[provider.id] ?? []).length}
+                  connectionStatus={testStatus[provider.id] ?? { state: "idle" }}
+                  fetchStatus={fetchStatus[provider.id]}
+                  onTest={() => void test(provider)}
+                  onFetchModels={() => void fetchModels(provider)}
+                  onEdit={() => setEditing(provider)}
+                  onDelete={() => void removeProvider(provider).catch((error) =>
+                    logSettingsError("settings.removeProvider", error))}
+                  onBrowseModels={() => setBrowsing(provider)}
+                />
+              ))}
             </div>
           </>
         )}
