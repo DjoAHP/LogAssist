@@ -247,14 +247,17 @@ export function SettingsDialog({ onClose, onChanged }: Props) {
                 className="w-full rounded-md border border-border bg-background py-2 pl-9 pr-3 text-sm outline-none placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-brand-to"
               />
             </div>
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            <div
+              data-testid="provider-gallery"
+              className="grid grid-cols-1 gap-3 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4"
+            >
               <button
                 type="button"
                 onClick={() => setEditing("new")}
-                className="flex min-h-64 flex-col items-center justify-center gap-3 rounded-xl border-2 border-dashed border-border bg-background/50 p-5 outline-none transition-[border-color,background-color] hover:border-brand-to hover:bg-foreground/5 focus-visible:ring-2 focus-visible:ring-brand-to motion-reduce:transition-none"
+                className="flex min-h-56 flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed border-border bg-background/50 p-4 outline-none transition-[border-color,background-color] hover:border-brand-to hover:bg-foreground/5 focus-visible:ring-2 focus-visible:ring-brand-to motion-reduce:transition-none"
               >
-                <Plus aria-hidden="true" className="size-7 text-muted-foreground" />
-                <span className="text-center text-sm font-medium text-muted-foreground">
+                <Plus aria-hidden="true" className="size-6 text-muted-foreground" />
+                <span className="text-center text-xs font-medium text-muted-foreground">
                   {t.settings.addProvider}
                 </span>
               </button>

@@ -174,15 +174,21 @@ describe("SettingsDialog — cartes fournisseur", () => {
       name: `${t.settings.browseModels} (1)`,
     })).not.toBeNull()
     expect(within(card).queryByText("existing/model")).toBeNull()
+
+    const gallery = screen.getByTestId("provider-gallery")
+    expect(hasClass(gallery, "lg:grid-cols-4")).toBe(true)
+    expect(hasClass(gallery, "lg:grid-cols-3")).toBe(false)
+    expect(hasClass(gallery, "gap-3")).toBe(true)
   })
 
   it("aligne la hauteur de la carte d'ajout sur le format compact", async () => {
     renderDialog()
 
     const addButton = screen.getByRole("button", { name: t.settings.addProvider })
-    expect(hasClass(addButton, "min-h-64")).toBe(true)
-    expect(hasClass(addButton, "min-h-72")).toBe(false)
-    expect(hasClass(addButton, "min-h-80")).toBe(false)
+    expect(hasClass(addButton, "min-h-56")).toBe(true)
+    expect(hasClass(addButton, "min-h-64")).toBe(false)
+    expect(hasClass(addButton, "gap-2")).toBe(true)
+    expect(hasClass(addButton, "p-4")).toBe(true)
   })
 })
 

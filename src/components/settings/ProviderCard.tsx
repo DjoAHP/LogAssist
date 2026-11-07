@@ -89,16 +89,16 @@ function ProviderAction({
         aria-describedby={feedback.text ? statusId : undefined}
         disabled={disabled}
         onClick={onClick}
-        className="group/action flex min-h-28 w-full flex-col items-center px-2 pb-10 pt-3 text-center outline-none disabled:cursor-wait disabled:opacity-70"
+        className="group/action flex min-h-24 w-full flex-col items-center px-1 pb-8 pt-2.5 text-center outline-none disabled:cursor-wait disabled:opacity-70"
       >
         <span
           data-testid={`${action}-icon-frame`}
-          className="flex size-7 shrink-0 items-center justify-center"
+          className="flex size-6 shrink-0 items-center justify-center"
         >
           <StateIcon
             aria-hidden="true"
             strokeWidth={2}
-            className={`size-6 transition-colors motion-reduce:transition-none ${
+            className={`size-5 transition-colors motion-reduce:transition-none ${
               loading
                 ? "animate-spin text-brand-to motion-reduce:animate-none"
                 : feedback.tone === "idle"
@@ -107,13 +107,13 @@ function ProviderAction({
             }`}
           />
         </span>
-        <span className="mt-1.5 text-xs font-medium leading-tight">{label}</span>
+        <span className="mt-1 text-[11px] font-medium leading-tight">{label}</span>
       </button>
       <span
         id={statusId}
         data-testid={`${action}-status`}
         aria-live="polite"
-        className={`pointer-events-none absolute inset-x-1 bottom-1.5 min-h-7 text-center text-[10px] leading-tight line-clamp-2 ${statusToneClass[feedback.tone]}`}
+        className={`pointer-events-none absolute inset-x-1 bottom-1 min-h-6 text-center text-[9px] leading-tight line-clamp-2 ${statusToneClass[feedback.tone]}`}
       >
         {feedback.text}
       </span>
@@ -166,19 +166,19 @@ export function ProviderCard({
     <article
       data-testid="provider-card"
       className="
-        relative rounded-lg border border-border bg-background p-3
-        flex flex-col min-h-64
+        relative rounded-lg border border-border bg-background p-2.5
+        flex flex-col min-h-56
         hover:border-brand-from/50 hover:shadow-md
         transition-colors duration-200
         motion-reduce:transition-none
       "
     >
       {/* En-tête : nom + URL, poubelle en haut à droite */}
-      <header className="flex items-start justify-between gap-2 mb-3">
+      <header className="mb-2 flex items-start justify-between gap-1.5">
         <div className="min-w-0 flex-1">
-          <h3 className="truncate text-sm font-semibold text-foreground">{provider.name}</h3>
+          <h3 className="truncate text-[13px] font-semibold text-foreground">{provider.name}</h3>
           <p
-            className="truncate text-xs text-muted-foreground mt-0.5"
+            className="mt-0.5 truncate text-[11px] text-muted-foreground"
             title={provider.base_url}
           >
             {provider.base_url}
@@ -191,24 +191,24 @@ export function ProviderCard({
           aria-label={t.settings.delete}
           title={t.settings.delete}
           className="
-            flex-shrink-0 rounded-md p-1.5 text-muted-foreground
+            flex-shrink-0 rounded-md p-1 text-muted-foreground
             hover:bg-destructive/10 hover:text-destructive
             focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-destructive
             transition-colors
             motion-reduce:transition-none
           "
         >
-          <Trash2 className="size-4" />
+          <Trash2 className="size-3.5" />
         </button>
       </header>
 
       {/* Séparateur */}
-      <hr className="border-border my-2" aria-hidden="true" />
+      <hr className="my-1.5 border-border" aria-hidden="true" />
 
       {/* 3 actions égales avec états : RadioTower (test), CloudDownload (fetch), Wrench (edit) */}
       <div
         data-testid="provider-actions"
-        className="grid grid-cols-3 gap-1.5 mb-1.5"
+        className="mb-1 grid grid-cols-3 gap-1"
         role="group"
         aria-label="Actions du fournisseur"
       >
@@ -248,8 +248,8 @@ export function ProviderCard({
         data-action="browse-models"
         aria-label={`${t.settings.browseModels} (${modelCount})`}
         className="
-          w-full flex items-center justify-center gap-1.5 rounded-md border border-border px-3 py-2
-          text-sm font-medium text-foreground
+          w-full flex items-center justify-center gap-1 rounded-md border border-border px-2 py-1.5
+          text-xs font-medium text-foreground
           hover:bg-foreground/5 hover:text-brand-to hover:border-brand-to
           focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-to
           transition-colors

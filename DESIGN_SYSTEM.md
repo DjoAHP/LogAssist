@@ -41,3 +41,16 @@ Ce standard s’applique aux modales principales, notamment :
 
 Les sous-modales contextuelles, comme le sélecteur de modèles ou le formulaire
 d’une connaissance, conservent une taille adaptée à leur contenu.
+
+## Galerie des fournisseurs
+
+La galerie affiche quatre cartes par ligne dans le gabarit desktop des outils
+du header. Elle passe à trois, deux puis une colonne lorsque la largeur diminue.
+
+Les cartes utilisent le format compact de référence :
+
+- hauteur minimale : `14rem` (`min-h-56`) ;
+- grille interne des actions : trois colonnes égales ;
+- icônes d’action : `1.25rem` dans une empreinte de `1.5rem` ;
+- libellés d’action : `11px` ;
+- bouton inférieur : taille `text-xs` et padding vertical compact.

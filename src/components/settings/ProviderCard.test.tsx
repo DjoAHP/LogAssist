@@ -170,24 +170,24 @@ describe("ProviderCard — proportions et couleurs (TDD)", () => {
     const fetchIconFrame = screen.getByTestId("fetch-models-icon-frame")
     const editIconFrame = screen.getByTestId("edit-provider-icon-frame")
 
-    // Wrapper : size-7, items-center, justify-center
-    expect(hasClass(testIconFrame, "size-7")).toBe(true)
+    // Wrapper compact : size-6, items-center, justify-center
+    expect(hasClass(testIconFrame, "size-6")).toBe(true)
     expect(hasClass(testIconFrame, "items-center")).toBe(true)
     expect(hasClass(testIconFrame, "justify-center")).toBe(true)
-    expect(hasClass(fetchIconFrame, "size-7")).toBe(true)
+    expect(hasClass(fetchIconFrame, "size-6")).toBe(true)
     expect(hasClass(fetchIconFrame, "items-center")).toBe(true)
     expect(hasClass(fetchIconFrame, "justify-center")).toBe(true)
-    expect(hasClass(editIconFrame, "size-7")).toBe(true)
+    expect(hasClass(editIconFrame, "size-6")).toBe(true)
     expect(hasClass(editIconFrame, "items-center")).toBe(true)
     expect(hasClass(editIconFrame, "justify-center")).toBe(true)
 
-    // SVG à l'intérieur : size-6, strokeWidth=2
+    // SVG à l'intérieur : size-5, strokeWidth=2
     const testSvg = testIconFrame.querySelector("svg")
     const fetchSvg = fetchIconFrame.querySelector("svg")
     const editSvg = editIconFrame.querySelector("svg")
-    expect(hasClass(testSvg, "size-6")).toBe(true)
-    expect(hasClass(fetchSvg, "size-6")).toBe(true)
-    expect(hasClass(editSvg, "size-6")).toBe(true)
+    expect(hasClass(testSvg, "size-5")).toBe(true)
+    expect(hasClass(fetchSvg, "size-5")).toBe(true)
+    expect(hasClass(editSvg, "size-5")).toBe(true)
   })
 
   it("répartit les trois conteneurs d'action sur des colonnes identiques", () => {
@@ -211,31 +211,34 @@ describe("ProviderCard — proportions et couleurs (TDD)", () => {
   it("compacte la zone d'action sans sacrifier la zone de statut", () => {
     render(<ProviderCard {...defaultProps} />)
 
-    // Bouton test : min-h-28, pb-10, pt-3 (pas min-h-32, pb-12, pt-4)
+    // Bouton test compact pour une carte sur quatre colonnes.
     const testButton = screen.getByRole("button", { name: t.settings.test })
-    expect(hasClass(testButton, "min-h-28")).toBe(true)
-    expect(hasClass(testButton, "pb-10")).toBe(true)
-    expect(hasClass(testButton, "pt-3")).toBe(true)
-    expect(hasClass(testButton, "min-h-32")).toBe(false)
-    expect(hasClass(testButton, "pb-12")).toBe(false)
-    expect(hasClass(testButton, "pt-4")).toBe(false)
+    expect(hasClass(testButton, "min-h-24")).toBe(true)
+    expect(hasClass(testButton, "pb-8")).toBe(true)
+    expect(hasClass(testButton, "pt-2.5")).toBe(true)
+    expect(hasClass(testButton, "min-h-28")).toBe(false)
+    expect(hasClass(testButton, "pb-10")).toBe(false)
+    expect(hasClass(testButton, "pt-3")).toBe(false)
 
     // Statut test : min-h-7, bottom-1.5, line-clamp-2 (pas min-h-8, line-clamp-3)
     const testStatus = screen.getByTestId("test-connection-status")
-    expect(hasClass(testStatus, "min-h-7")).toBe(true)
-    expect(hasClass(testStatus, "bottom-1.5")).toBe(true)
+    expect(hasClass(testStatus, "min-h-6")).toBe(true)
+    expect(hasClass(testStatus, "bottom-1")).toBe(true)
     expect(hasClass(testStatus, "line-clamp-2")).toBe(true)
-    expect(hasClass(testStatus, "min-h-8")).toBe(false)
+    expect(hasClass(testStatus, "min-h-7")).toBe(false)
     expect(hasClass(testStatus, "line-clamp-3")).toBe(false)
 
-    // Carte : min-h-64 (pas min-h-72)
+    // Carte et CTA compactés.
     const card = screen.getByTestId("provider-card")
-    expect(hasClass(card, "min-h-64")).toBe(true)
-    expect(hasClass(card, "min-h-72")).toBe(false)
+    expect(hasClass(card, "min-h-56")).toBe(true)
+    expect(hasClass(card, "p-2.5")).toBe(true)
+    expect(hasClass(card, "min-h-64")).toBe(false)
 
     // Bouton browse : absence de mt-auto
     const browseButton = screen.getByRole("button", { name: `${t.settings.browseModels} (5)` })
     expect(hasClass(browseButton, "mt-auto")).toBe(false)
+    expect(hasClass(browseButton, "py-1.5")).toBe(true)
+    expect(hasClass(browseButton, "text-xs")).toBe(true)
   })
 
   it("conserve un texte lisible sur le bouton modèles dans les deux thèmes", () => {
