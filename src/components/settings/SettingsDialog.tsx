@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react"
-import { Check, Plus, Trash2, X } from "lucide-react"
+import { Check, Plus, Search, Trash2, X } from "lucide-react"
 import { confirm as dialogConfirm } from "@tauri-apps/plugin-dialog"
 import { t } from "@/i18n/fr"
 import { logger } from "@/lib/logger"
@@ -56,6 +56,7 @@ export function SettingsDialog({ onClose, onChanged }: Props) {
   const [testStatus, setTestStatus] = useState<Record<string, TestStatus>>({})
   const [fetchStatus, setFetchStatus] = useState<Record<string, FetchStatus | undefined>>({})
   const [browsing, setBrowsing] = useState<ProviderRow | null>(null)
+  const [providerQuery, setProviderQuery] = useState("")
   // Onglet par défaut = « Fournisseurs » : le comportement historique reste
   // identique (tests existants inchangés) ; « Modèles local » est à côté.
   const [tab, setTab] = useState<"providers" | "local">("providers")
@@ -183,6 +184,13 @@ export function SettingsDialog({ onClose, onChanged }: Props) {
     }
   }
 
+  const normalizedProviderQuery = providerQuery.trim().toLocaleLowerCase("fr")
+  const filteredRows = normalizedProviderQuery
+    ? rows.filter((provider) =>
+        provider.name.toLocaleLowerCase("fr").includes(normalizedProviderQuery)
+        || provider.base_url.toLocaleLowerCase("fr").includes(normalizedProviderQuery))
+    : rows
+
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
@@ -218,6 +226,20 @@ export function SettingsDialog({ onClose, onChanged }: Props) {
           <LocalModelsPanel rows={rows} onChanged={afterChange} />
         ) : (
           <>
+            <div className="relative mb-3">
+              <Search
+                aria-hidden="true"
+                className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
+              />
+              <input
+                type="search"
+                value={providerQuery}
+                onChange={(event) => setProviderQuery(event.target.value)}
+                aria-label={t.settings.searchProviders}
+                placeholder={t.settings.searchProvidersPlaceholder}
+                className="w-full rounded-md border border-border bg-background py-2 pl-9 pr-3 text-sm outline-none placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-brand-to"
+              />
+            </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
               {/* Carte « + Ajouter un nouveau fournisseur » en première position */}
               <button
@@ -234,7 +256,13 @@ export function SettingsDialog({ onClose, onChanged }: Props) {
                 </p>
               )}
 
-              {rows.map((p) => {
+              {rows.length > 0 && filteredRows.length === 0 && (
+                <p className="col-span-full text-center text-sm text-muted-foreground">
+                  {t.settings.noProviderResults}
+                </p>
+              )}
+
+              {filteredRows.map((p) => {
                 const status = testStatus[p.id] ?? { state: "idle" as const }
                 const fetchSt = fetchStatus[p.id]
                 const providerModels = models[p.id] ?? []
