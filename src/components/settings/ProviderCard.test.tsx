@@ -66,7 +66,7 @@ describe("ProviderCard", () => {
     // Vérifie les 4 boutons d'action avec type="button"
     const testButton = screen.getByRole("button", { name: t.settings.test })
     expect(testButton.getAttribute("type")).toBe("button")
-    expect(testButton.getAttribute("data-action")).toBe("test")
+    expect(testButton.getAttribute("data-action")).toBe("test-connection")
 
     const fetchButton = screen.getByRole("button", { name: t.settings.fetchModels })
     expect(fetchButton.getAttribute("type")).toBe("button")
@@ -74,7 +74,7 @@ describe("ProviderCard", () => {
 
     const editButton = screen.getByRole("button", { name: t.settings.edit })
     expect(editButton.getAttribute("type")).toBe("button")
-    expect(editButton.getAttribute("data-action")).toBe("edit")
+    expect(editButton.getAttribute("data-action")).toBe("edit-provider")
 
     const deleteButton = screen.getByRole("button", { name: t.settings.delete })
     expect(deleteButton.getAttribute("type")).toBe("button")
@@ -108,5 +108,51 @@ describe("ProviderCard", () => {
     // Clic sur Parcourir les modèles
     fireEvent.click(screen.getByRole("button", { name: `${t.settings.browseModels} (5)` }))
     expect(mockOnBrowseModels).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe("ProviderCard — états des actions", () => {
+  it("désactive et annonce uniquement le test pendant la connexion", () => {
+    render(<ProviderCard {...defaultProps} connectionStatus={{ state: "testing" }} />)
+
+    const testButton = screen.getByRole("button", { name: t.settings.test }) as HTMLButtonElement
+    const fetchButton = screen.getByRole("button", { name: t.settings.fetchModels }) as HTMLButtonElement
+    const status = screen.getByTestId("test-connection-status")
+
+    expect(testButton.disabled).toBe(true)
+    expect(testButton.getAttribute("aria-busy")).toBe("true")
+    expect(fetchButton.disabled).toBe(false)
+    expect(status.textContent).toBe(t.settings.testing)
+    expect(status.getAttribute("aria-live")).toBe("polite")
+  })
+
+  it("affiche le succès de connexion dans la cellule de test", () => {
+    render(<ProviderCard {...defaultProps} connectionStatus={{ state: "ok" }} />)
+
+    const status = screen.getByTestId("test-connection-status")
+    expect(status.textContent).toBe(t.settings.ok)
+    expect(status.closest('[data-state="success"]')).not.toBeNull()
+  })
+
+  it("affiche l'échec de récupération sans désactiver les autres actions", () => {
+    render(<ProviderCard
+      {...defaultProps}
+      fetchStatus={{ state: "fail", message: t.settings.noKey }}
+    />)
+
+    const status = screen.getByTestId("fetch-models-status")
+    const testButton = screen.getByRole("button", { name: t.settings.test }) as HTMLButtonElement
+
+    expect(status.textContent).toContain(t.settings.fetchFail)
+    expect(status.textContent).toContain(t.settings.noKey)
+    expect(status.closest('[data-state="error"]')).not.toBeNull()
+    expect(testButton.disabled).toBe(false)
+  })
+
+  it("annonce le nombre de modèles récupérés", () => {
+    render(<ProviderCard {...defaultProps} fetchStatus={{ state: "ok", added: 2 }} />)
+
+    expect(screen.getByTestId("fetch-models-status").textContent)
+      .toBe(`2 ${t.settings.fetchOkAdded}`)
   })
 })

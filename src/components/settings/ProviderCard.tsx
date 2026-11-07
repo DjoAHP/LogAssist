@@ -1,4 +1,13 @@
-import { RadioTower, CloudDownload, Wrench, Trash2 } from "lucide-react"
+import {
+  CircleAlert,
+  CircleCheck,
+  CloudDownload,
+  LoaderCircle,
+  RadioTower,
+  Trash2,
+  Wrench,
+  type LucideIcon,
+} from "lucide-react"
 import { t } from "@/i18n/fr"
 import { type ProviderRow } from "@/lib/db/providers"
 
@@ -25,44 +34,110 @@ export interface ProviderCardProps {
   onBrowseModels: () => void
 }
 
-function ActionButton({
-  children,
-  onClick,
-  disabled = false,
-  "data-action": dataAction,
-  "aria-label": ariaLabel,
-  title,
-  className = "",
-}: {
-  children: React.ReactNode
+type ActionTone = "idle" | "loading" | "success" | "error"
+
+interface ActionFeedback {
+  text: string
+  tone: ActionTone
+}
+
+interface ProviderActionProps {
+  action: string
+  statusId: string
+  label: string
+  Icon: LucideIcon
+  feedback: ActionFeedback
+  disabled: boolean
   onClick: () => void
-  disabled?: boolean
-  "data-action": string
-  "aria-label"?: string
-  title?: string
-  className?: string
-}) {
+}
+
+const statusToneClass: Record<ActionTone, string> = {
+  idle: "text-muted-foreground",
+  loading: "text-muted-foreground",
+  success: "text-green-600 dark:text-green-400",
+  error: "text-destructive",
+}
+
+function ProviderAction({
+  action,
+  statusId,
+  label,
+  Icon,
+  feedback,
+  disabled,
+  onClick,
+}: ProviderActionProps) {
+  const loading = feedback.tone === "loading"
+  const StateIcon = loading
+    ? LoaderCircle
+    : feedback.tone === "success"
+      ? CircleCheck
+      : feedback.tone === "error"
+        ? CircleAlert
+        : Icon
+
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={disabled}
-      data-action={dataAction}
-      aria-label={ariaLabel}
-      title={title}
-      className={`
-        flex-1 flex items-center justify-center gap-1.5 rounded-md border border-border px-2 py-2
-        text-xs font-medium transition-colors
-        hover:bg-brand-from/10 hover:text-brand-to
-        focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-to
-        disabled:opacity-50 disabled:cursor-not-allowed
-        motion-reduce:transition-none
-        ${className}
-      `}
+    <div
+      data-state={feedback.tone}
+      className="relative min-w-0 rounded-lg transition-colors hover:bg-foreground/5 focus-within:ring-2 focus-within:ring-brand-to motion-reduce:transition-none"
     >
-      {children}
-    </button>
+      <button
+        type="button"
+        data-action={action}
+        aria-label={label}
+        aria-busy={loading}
+        aria-describedby={feedback.text ? statusId : undefined}
+        disabled={disabled}
+        onClick={onClick}
+        className="group/action flex min-h-40 w-full flex-col items-center px-2 pb-16 pt-4 text-center outline-none disabled:cursor-wait disabled:opacity-70"
+      >
+        <StateIcon
+          aria-hidden="true"
+          className={`size-7 transition-colors motion-reduce:transition-none ${
+            loading
+              ? "animate-spin text-brand-to motion-reduce:animate-none"
+              : feedback.tone === "idle"
+                ? "text-muted-foreground group-hover/action:text-brand-to"
+                : statusToneClass[feedback.tone]
+          }`}
+        />
+        <span className="mt-2 text-xs font-medium leading-tight">{label}</span>
+      </button>
+      <span
+        id={statusId}
+        data-testid={`${action}-status`}
+        aria-live="polite"
+        className={`pointer-events-none absolute inset-x-1 bottom-3 min-h-12 text-center text-[10px] leading-tight ${statusToneClass[feedback.tone]}`}
+      >
+        {feedback.text}
+      </span>
+    </div>
   )
+}
+
+function connectionFeedback(status: ProviderConnectionStatus): ActionFeedback {
+  switch (status.state) {
+    case "testing":
+      return { text: t.settings.testing, tone: "loading" }
+    case "ok":
+      return { text: t.settings.ok, tone: "success" }
+    case "fail":
+      return { text: `${t.settings.fail} — ${status.message}`, tone: "error" }
+    case "idle":
+      return { text: "", tone: "idle" }
+  }
+}
+
+function fetchFeedback(status: ProviderFetchStatus | undefined): ActionFeedback {
+  if (!status) return { text: "", tone: "idle" }
+  switch (status.state) {
+    case "fetching":
+      return { text: t.settings.fetchingModels, tone: "loading" }
+    case "ok":
+      return { text: `${status.added} ${t.settings.fetchOkAdded}`, tone: "success" }
+    case "fail":
+      return { text: `${t.settings.fetchFail} — ${status.message}`, tone: "error" }
+  }
 }
 
 export function ProviderCard({
@@ -76,8 +151,10 @@ export function ProviderCard({
   onDelete,
   onBrowseModels,
 }: ProviderCardProps) {
-  const isTesting = connectionStatus.state === "testing"
-  const isFetching = fetchStatus?.state === "fetching"
+  const connection = connectionFeedback(connectionStatus)
+  const fetch = fetchFeedback(fetchStatus)
+  const testStatusId = `${provider.id}-test-status`
+  const fetchStatusId = `${provider.id}-fetch-status`
 
   return (
     <article
@@ -122,39 +199,35 @@ export function ProviderCard({
       {/* Séparateur */}
       <hr className="border-border my-2" aria-hidden="true" />
 
-      {/* 3 actions égales : RadioTower (test), CloudDownload (fetch), Wrench (edit) */}
+      {/* 3 actions égales avec états : RadioTower (test), CloudDownload (fetch), Wrench (edit) */}
       <div className="flex gap-1.5 mb-3" role="group" aria-label="Actions du fournisseur">
-        <ActionButton
+        <ProviderAction
+          action="test-connection"
+          statusId={testStatusId}
+          label={t.settings.test}
+          Icon={RadioTower}
+          feedback={connection}
+          disabled={connectionStatus.state === "testing"}
           onClick={onTest}
-          disabled={isTesting}
-          data-action="test"
-          aria-label={t.settings.test}
-          title={t.settings.test}
-        >
-          <RadioTower className="size-4" aria-hidden="true" />
-          <span>{isTesting ? t.settings.testing : t.settings.test}</span>
-        </ActionButton>
-
-        <ActionButton
+        />
+        <ProviderAction
+          action="fetch-models"
+          statusId={fetchStatusId}
+          label={t.settings.fetchModels}
+          Icon={CloudDownload}
+          feedback={fetch}
+          disabled={fetchStatus?.state === "fetching"}
           onClick={onFetchModels}
-          disabled={isFetching}
-          data-action="fetch-models"
-          aria-label={t.settings.fetchModels}
-          title={t.settings.fetchModels}
-        >
-          <CloudDownload className="size-4" aria-hidden="true" />
-          <span>{isFetching ? t.settings.fetchingModels : t.settings.fetchModels}</span>
-        </ActionButton>
-
-        <ActionButton
+        />
+        <ProviderAction
+          action="edit-provider"
+          statusId={`${provider.id}-edit-status`}
+          label={t.settings.edit}
+          Icon={Wrench}
+          feedback={{ text: "", tone: "idle" }}
+          disabled={false}
           onClick={onEdit}
-          data-action="edit"
-          aria-label={t.settings.edit}
-          title={t.settings.edit}
-        >
-          <Wrench className="size-4" aria-hidden="true" />
-          <span>{t.settings.edit}</span>
-        </ActionButton>
+        />
       </div>
 
       {/* Bouton principal : "Parcourir les modèles (n)" pleine largeur */}
