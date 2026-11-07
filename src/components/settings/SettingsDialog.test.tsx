@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
-import { render, screen, fireEvent, waitFor, cleanup } from "@testing-library/react"
+import { render, screen, fireEvent, waitFor, cleanup, within } from "@testing-library/react"
 import { SettingsDialog } from "./SettingsDialog"
 
 const mockExecute = vi.hoisted(() => vi.fn())
@@ -57,23 +57,29 @@ beforeEach(() => {
   vi.clearAllMocks()
   mockDialogConfirm.mockResolvedValue(false)
   dbState.reset()
-  mockSelect.mockImplementation((sql) => {
+  mockSelect.mockImplementation((sql, bind) => {
     const s = String(sql)
-    return s.includes("FROM models")
-      ? Promise.resolve(dbState.models)
-      : Promise.resolve(dbState.providers)
+    const firstBind = (bind as unknown[] | undefined)?.[0]
+    if (s.includes("FROM models WHERE provider_id = ?")) {
+      return Promise.resolve(dbState.models.filter((model) => model.provider_id === firstBind))
+    }
+    if (s.includes("FROM models WHERE id = ?")) {
+      return Promise.resolve(dbState.models.filter((model) => model.id === firstBind))
+    }
+    return Promise.resolve(dbState.providers)
   })
   mockExecute.mockImplementation((sql, bind) => {
     const s = String(sql)
     if (s.includes("INSERT INTO models")) {
       dbState.models = [...dbState.models, {
-        id: `new-${(bind as unknown[])[2]}`, provider_id: (bind as unknown[])[0] as string,
+        id: (bind as unknown[])[0] as string, provider_id: (bind as unknown[])[1] as string,
         model_id: (bind as unknown[])[2] as string, supports_images: 0, is_default: 0,
       }]
     }
     if (s.includes("DELETE FROM providers")) {
-      dbState.providers = []
-      dbState.models = []
+      const providerId = (bind as unknown[])[0]
+      dbState.providers = dbState.providers.filter((provider) => provider.id !== providerId)
+      dbState.models = dbState.models.filter((model) => model.provider_id !== providerId)
     }
     return Promise.resolve(undefined)
   })
@@ -96,10 +102,9 @@ async function fetchButton(): Promise<HTMLElement> {
 
 async function testButton(): Promise<HTMLElement> {
   const providerName = await screen.findByText("OpenRouter")
-  const card = providerName.closest('[data-testid="provider-card"]')!
-  const button = card.querySelector("button")
-  expect(button).not.toBeNull()
-  return button as HTMLElement
+  const card = providerName.closest('[data-testid="provider-card"]')
+  expect(card).not.toBeNull()
+  return within(card as HTMLElement).getByRole("button", { name: t.settings.test })
 }
 
 describe("SettingsDialog — recherche des fournisseurs", () => {
