@@ -54,3 +54,17 @@ Les cartes utilisent le format compact de référence :
 - icônes d’action : `1.25rem` dans une empreinte de `1.5rem` ;
 - libellés d’action : `11px` ;
 - bouton inférieur : taille `text-xs` et padding vertical compact.
+
+## Messages du chat
+
+Les questions utilisateur et les réponses assistant partagent la même surface
+glassmorphism légère :
+
+- rayon : `rounded-xl` ;
+- fond : `bg-background/40` ;
+- flou : `backdrop-blur-sm` ;
+- bordure : `border-border/50` ;
+- aucune ombre ajoutée, afin de garder l’effet discret.
+
+La réponse assistant conserve son accent cyan à gauche. Les erreurs utilisent
+le même rayon, avec leur fond et leur bordure destructifs.

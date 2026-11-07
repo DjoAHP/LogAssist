@@ -393,11 +393,12 @@ function MessageBubble({
     Boolean(m.content) && !m.apiError && !m.interrupted && Boolean(onRegenerate)
   const recoveryDisabled = isGenerating || Boolean(m.recoveryMode)
   const showAssistantActions = !isUser && (Boolean(m.content) || canRetry || Boolean(m.recoveryMode))
+  const glassSurfaceClass = "rounded-xl border border-border/50 bg-background/40 backdrop-blur-sm"
   const bubbleClass = m.apiError
-    ? "max-w-[88%] rounded-lg border border-destructive bg-destructive/10 px-3 py-2"
+    ? "max-w-[88%] rounded-xl border border-destructive bg-destructive/10 px-3 py-2"
     : isUser
-      ? "max-w-[80%] rounded-lg border border-border bg-foreground/5 px-3 py-2"
-      : "w-full max-w-[56rem] border-l-2 border-l-[var(--brand-to)] bg-foreground/5 px-4 py-2"
+      ? `max-w-[80%] px-3 py-2 ${glassSurfaceClass}`
+      : `w-full max-w-[56rem] border-l-2 border-l-[var(--brand-to)] px-4 py-2 ${glassSurfaceClass}`
 
   return (
     <div className={`flex ${isUser ? "justify-end" : "justify-start"}`}>
