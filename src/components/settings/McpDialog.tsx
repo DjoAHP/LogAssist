@@ -4,6 +4,7 @@ import { Search, FileText, X } from "lucide-react"
 import { t } from "@/i18n/fr"
 import { tinyfish } from "@/lib/mcp/client"
 import { loadWebAccess, setWebEnabled } from "@/lib/mcp/settings"
+import { HEADER_TOOL_DIALOG_SIZE_CLASS } from "./headerToolDialog"
 
 interface Props {
   onClose: () => void
@@ -77,7 +78,7 @@ export function McpDialog({ onClose, onChanged }: Props) {
         role="dialog"
         aria-modal="true"
         aria-labelledby="mcp-title"
-        className="w-full max-w-lg rounded-xl border border-border bg-background shadow-2xl"
+        className={`${HEADER_TOOL_DIALOG_SIZE_CLASS} flex flex-col overflow-hidden rounded-lg border border-border bg-background shadow-2xl`}
         onClick={(event) => event.stopPropagation()}
       >
         <header className="flex items-start justify-between border-b border-border px-5 py-4">
@@ -88,7 +89,7 @@ export function McpDialog({ onClose, onChanged }: Props) {
           <button aria-label={t.mcp.close} onClick={onClose} className="rounded-md p-1.5 hover:bg-foreground/5"><X className="size-4" /></button>
         </header>
 
-        <div className="space-y-4 p-5">
+        <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-5">
           {CONNECTIONS.map((connection) => (
             <article key={connection.id} className="rounded-lg border border-border bg-foreground/[0.025] p-4">
               <div className="flex items-center justify-between">

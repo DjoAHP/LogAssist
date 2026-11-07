@@ -6,6 +6,7 @@ import { loadPromptSettings, savePromptSettings } from "@/lib/prompts/store"
 import { DEFAULT_GENERAL_INSTRUCTIONS, PROFILE_APPRENTISSAGE } from "@/lib/prompts/defaults"
 import { knowledge, type KnowledgeRow } from "@/lib/db/knowledge"
 import { conversationKnowledge } from "@/lib/db/conversationKnowledge"
+import { HEADER_TOOL_DIALOG_SIZE_CLASS } from "./headerToolDialog"
 
 interface Props {
   onClose: () => void
@@ -154,7 +155,7 @@ export function AssistantDialog({ onClose, conversationId }: Props) {
         role="dialog"
         aria-modal="true"
         aria-label={t.assistant.title}
-        className="max-h-[85vh] w-[640px] max-w-[92vw] overflow-y-auto rounded-lg border border-border bg-background p-4"
+        className={`${HEADER_TOOL_DIALOG_SIZE_CLASS} overflow-y-auto rounded-lg border border-border bg-background p-4`}
         onClick={(e) => e.stopPropagation()}
       >
         <header className="mb-3 flex items-center justify-between">

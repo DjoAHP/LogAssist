@@ -10,6 +10,7 @@ import { secrets } from "@/lib/secrets/service"
 import { ProviderForm } from "./ProviderForm"
 import { LocalModelsPanel } from "./LocalModelsPanel"
 import { ModelPickerModal } from "./ModelPickerModal"
+import { HEADER_TOOL_DIALOG_SIZE_CLASS } from "./headerToolDialog"
 import {
   ProviderCard,
   type ProviderConnectionStatus,
@@ -200,7 +201,7 @@ export function SettingsDialog({ onClose, onChanged }: Props) {
         role="dialog"
         aria-modal="true"
         aria-label={t.settings.title}
-        className="max-h-[75vh] w-[1100px] max-w-[96vw] overflow-y-auto rounded-lg border border-border bg-background p-4"
+        className={`${HEADER_TOOL_DIALOG_SIZE_CLASS} overflow-y-auto rounded-lg border border-border bg-background p-4`}
         onClick={(e) => e.stopPropagation()}
       >
         <header className="mb-3 flex items-center justify-between">

@@ -150,6 +150,15 @@ describe("SettingsDialog — recherche des fournisseurs", () => {
 })
 
 describe("SettingsDialog — cartes fournisseur", () => {
+  it("utilise le gabarit standard des outils du header", () => {
+    renderDialog()
+
+    const dialog = screen.getByRole("dialog", { name: t.settings.title })
+    expect(hasClass(dialog, "h-[75vh]")).toBe(true)
+    expect(hasClass(dialog, "w-[1100px]")).toBe(true)
+    expect(hasClass(dialog, "max-w-[96vw]")).toBe(true)
+  })
+
   it("présente les commandes sans afficher la liste des modèles dans la carte", async () => {
     renderDialog()
 

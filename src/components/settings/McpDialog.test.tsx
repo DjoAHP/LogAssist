@@ -15,6 +15,10 @@ vi.mock("@/lib/mcp/settings", () => ({ loadWebAccess, setWebEnabled }))
 
 import { McpDialog } from "@/components/settings/McpDialog"
 
+function hasClass(element: HTMLElement | null, className: string): boolean {
+  return element?.classList.contains(className) ?? false
+}
+
 beforeEach(() => {
   vi.clearAllMocks()
   loadWebAccess.mockResolvedValue({ enabled: false, configured: false })
@@ -26,6 +30,15 @@ afterEach(() => {
 })
 
 describe("McpDialog", () => {
+  it("utilise le gabarit standard des outils du header", () => {
+    render(<McpDialog onClose={vi.fn()} onChanged={vi.fn()} />)
+
+    const dialog = screen.getByRole("dialog")
+    expect(hasClass(dialog, "h-[75vh]")).toBe(true)
+    expect(hasClass(dialog, "w-[1100px]")).toBe(true)
+    expect(hasClass(dialog, "max-w-[96vw]")).toBe(true)
+  })
+
   it("ferme la modale quand on clique sur l'overlay", () => {
     const onClose = vi.fn()
     render(<McpDialog onClose={onClose} onChanged={vi.fn()} />)
