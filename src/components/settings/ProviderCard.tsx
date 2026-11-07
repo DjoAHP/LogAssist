@@ -79,7 +79,7 @@ function ProviderAction({
   return (
     <div
       data-state={feedback.tone}
-      className="relative min-w-0 rounded-lg transition-colors hover:bg-foreground/5 focus-within:ring-2 focus-within:ring-brand-to motion-reduce:transition-none"
+      className="relative w-full min-w-0 rounded-lg transition-colors hover:bg-foreground/5 focus-within:ring-2 focus-within:ring-brand-to motion-reduce:transition-none"
     >
       <button
         type="button"
@@ -89,7 +89,7 @@ function ProviderAction({
         aria-describedby={feedback.text ? statusId : undefined}
         disabled={disabled}
         onClick={onClick}
-        className="group/action flex min-h-32 w-full flex-col items-center px-2 pb-12 pt-4 text-center outline-none disabled:cursor-wait disabled:opacity-70"
+        className="group/action flex min-h-28 w-full flex-col items-center px-2 pb-10 pt-3 text-center outline-none disabled:cursor-wait disabled:opacity-70"
       >
         <span
           data-testid={`${action}-icon-frame`}
@@ -107,13 +107,13 @@ function ProviderAction({
             }`}
           />
         </span>
-        <span className="mt-2 text-xs font-medium leading-tight">{label}</span>
+        <span className="mt-1.5 text-xs font-medium leading-tight">{label}</span>
       </button>
       <span
         id={statusId}
         data-testid={`${action}-status`}
         aria-live="polite"
-        className={`pointer-events-none absolute inset-x-1 bottom-2 min-h-8 text-center text-[10px] leading-tight line-clamp-3 ${statusToneClass[feedback.tone]}`}
+        className={`pointer-events-none absolute inset-x-1 bottom-1.5 min-h-7 text-center text-[10px] leading-tight line-clamp-2 ${statusToneClass[feedback.tone]}`}
       >
         {feedback.text}
       </span>
@@ -167,7 +167,7 @@ export function ProviderCard({
       data-testid="provider-card"
       className="
         relative rounded-lg border border-border bg-background p-3
-        flex flex-col min-h-72
+        flex flex-col min-h-64
         hover:border-brand-from/50 hover:shadow-md
         transition-colors duration-200
         motion-reduce:transition-none
@@ -206,7 +206,12 @@ export function ProviderCard({
       <hr className="border-border my-2" aria-hidden="true" />
 
       {/* 3 actions égales avec états : RadioTower (test), CloudDownload (fetch), Wrench (edit) */}
-      <div className="flex gap-1.5 mb-2" role="group" aria-label="Actions du fournisseur">
+      <div
+        data-testid="provider-actions"
+        className="grid grid-cols-3 gap-1.5 mb-1.5"
+        role="group"
+        aria-label="Actions du fournisseur"
+      >
         <ProviderAction
           action="test-connection"
           statusId={testStatusId}
@@ -249,7 +254,6 @@ export function ProviderCard({
           focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-to
           transition-colors
           motion-reduce:transition-none
-          mt-auto
         "
       >
         {t.settings.browseModels}

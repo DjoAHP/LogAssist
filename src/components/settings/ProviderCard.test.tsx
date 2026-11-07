@@ -190,25 +190,52 @@ describe("ProviderCard — proportions et couleurs (TDD)", () => {
     expect(hasClass(editSvg, "size-6")).toBe(true)
   })
 
+  it("répartit les trois conteneurs d'action sur des colonnes identiques", () => {
+    render(<ProviderCard {...defaultProps} />)
+
+    // Le groupe d'actions doit être une grille 3 colonnes
+    const actionsGroup = screen.getByTestId("provider-actions")
+    expect(hasClass(actionsGroup, "grid")).toBe(true)
+    expect(hasClass(actionsGroup, "grid-cols-3")).toBe(true)
+    expect(hasClass(actionsGroup, "flex")).toBe(false)
+
+    // Chaque conteneur d'action (parent [data-state]) doit être w-full
+    const testContainer = screen.getByRole("button", { name: t.settings.test }).closest("[data-state]") as HTMLElement
+    const fetchContainer = screen.getByRole("button", { name: t.settings.fetchModels }).closest("[data-state]") as HTMLElement
+    const editContainer = screen.getByRole("button", { name: t.settings.edit }).closest("[data-state]") as HTMLElement
+    expect(hasClass(testContainer, "w-full")).toBe(true)
+    expect(hasClass(fetchContainer, "w-full")).toBe(true)
+    expect(hasClass(editContainer, "w-full")).toBe(true)
+  })
+
   it("compacte la zone d'action sans sacrifier la zone de statut", () => {
     render(<ProviderCard {...defaultProps} />)
 
-    // Bouton test : min-h-32, pb-12 (pas min-h-40, pb-16)
+    // Bouton test : min-h-28, pb-10, pt-3 (pas min-h-32, pb-12, pt-4)
     const testButton = screen.getByRole("button", { name: t.settings.test })
-    expect(hasClass(testButton, "min-h-32")).toBe(true)
-    expect(hasClass(testButton, "pb-12")).toBe(true)
-    expect(hasClass(testButton, "min-h-40")).toBe(false)
-    expect(hasClass(testButton, "pb-16")).toBe(false)
+    expect(hasClass(testButton, "min-h-28")).toBe(true)
+    expect(hasClass(testButton, "pb-10")).toBe(true)
+    expect(hasClass(testButton, "pt-3")).toBe(true)
+    expect(hasClass(testButton, "min-h-32")).toBe(false)
+    expect(hasClass(testButton, "pb-12")).toBe(false)
+    expect(hasClass(testButton, "pt-4")).toBe(false)
 
-    // Statut test : min-h-8 (pas min-h-12), line-clamp-3
+    // Statut test : min-h-7, bottom-1.5, line-clamp-2 (pas min-h-8, line-clamp-3)
     const testStatus = screen.getByTestId("test-connection-status")
-    expect(hasClass(testStatus, "min-h-8")).toBe(true)
-    expect(hasClass(testStatus, "min-h-12")).toBe(false)
-    expect(hasClass(testStatus, "line-clamp-3")).toBe(true)
+    expect(hasClass(testStatus, "min-h-7")).toBe(true)
+    expect(hasClass(testStatus, "bottom-1.5")).toBe(true)
+    expect(hasClass(testStatus, "line-clamp-2")).toBe(true)
+    expect(hasClass(testStatus, "min-h-8")).toBe(false)
+    expect(hasClass(testStatus, "line-clamp-3")).toBe(false)
 
-    // Carte : min-h-72
+    // Carte : min-h-64 (pas min-h-72)
     const card = screen.getByTestId("provider-card")
-    expect(hasClass(card, "min-h-72")).toBe(true)
+    expect(hasClass(card, "min-h-64")).toBe(true)
+    expect(hasClass(card, "min-h-72")).toBe(false)
+
+    // Bouton browse : absence de mt-auto
+    const browseButton = screen.getByRole("button", { name: `${t.settings.browseModels} (5)` })
+    expect(hasClass(browseButton, "mt-auto")).toBe(false)
   })
 
   it("conserve un texte lisible sur le bouton modèles dans les deux thèmes", () => {

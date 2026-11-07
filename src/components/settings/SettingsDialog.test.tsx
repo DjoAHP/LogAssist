@@ -169,7 +169,8 @@ describe("SettingsDialog — cartes fournisseur", () => {
     renderDialog()
 
     const addButton = screen.getByRole("button", { name: t.settings.addProvider })
-    expect(hasClass(addButton, "min-h-72")).toBe(true)
+    expect(hasClass(addButton, "min-h-64")).toBe(true)
+    expect(hasClass(addButton, "min-h-72")).toBe(false)
     expect(hasClass(addButton, "min-h-80")).toBe(false)
   })
 })
