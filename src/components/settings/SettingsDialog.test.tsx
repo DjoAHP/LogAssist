@@ -81,7 +81,7 @@ function renderDialog() {
 
 async function fetchButton(): Promise<HTMLElement> {
   const el = await screen.findByText("OpenRouter")
-  const row = el.closest("li")!
+  const row = el.closest('[data-testid="provider-card"]')!
   const btn = row.querySelector('[data-action="fetch-models"]')
   expect(btn).not.toBeNull()
   return btn as HTMLElement
@@ -98,7 +98,7 @@ describe("SettingsDialog — récupération des modèles", () => {
     renderDialog()
     fireEvent.click(await fetchButton())
     await waitFor(() => {
-      const row = screen.getByText("OpenRouter").closest("li")!
+      const row = screen.getByText("OpenRouter").closest('[data-testid="provider-card"]')!
       expect(row.querySelector('[data-fetch-status]')?.textContent).toContain("Aucune clé")
     })
     expect(mockListRemoteModels).not.toHaveBeenCalled()
@@ -122,7 +122,7 @@ describe("SettingsDialog — récupération des modèles", () => {
     fireEvent.click(await fetchButton())
     await waitFor(() => expect(mockListRemoteModels).toHaveBeenCalled())
     await waitFor(() => {
-      const row = screen.getByText("OpenRouter").closest("li")!
+      const row = screen.getByText("OpenRouter").closest('[data-testid="provider-card"]')!
       expect(row.querySelector('[data-fetch-status]')?.textContent).toContain("Clé API invalide")
     })
   })
@@ -138,7 +138,7 @@ describe("SettingsDialog — récupération des modèles", () => {
     fireEvent.click(await fetchButton())
 
     await waitFor(() => {
-      const row = screen.getByText("OpenRouter").closest("li")!
+      const row = screen.getByText("OpenRouter").closest('[data-testid="provider-card"]')!
       expect(row.querySelector('[data-fetch-status]')?.textContent).toContain(t.settings.fetchFail)
     })
     const sinks = JSON.stringify({ ui: document.body.textContent, logs: mockLoggerError.mock.calls })
@@ -151,25 +151,25 @@ describe("SettingsDialog — récupération des modèles", () => {
     renderDialog()
     fireEvent.click(await fetchButton())
     await waitFor(() => {
-      const row = screen.getByText("OpenRouter").closest("li")!
+      const row = screen.getByText("OpenRouter").closest('[data-testid="provider-card"]')!
       expect(row.querySelector('[data-fetch-status]')?.textContent).toContain("1")
     }, { timeout: 3000 })
   })
 
   it("Parcourir les modèles : ouvre le modal listant les modèles de la base", async () => {
     renderDialog()
-    const row = (await screen.findByText("OpenRouter")).closest("li")!
+    const row = (await screen.findByText("OpenRouter")).closest('[data-testid="provider-card"]')!
     fireEvent.click(row.querySelector('[data-action="browse-models"]') as HTMLElement)
     await waitFor(() => expect(screen.getByTestId("model-picker-modal")).not.toBeNull())
-    expect(screen.getByText("existing/model")).not.toBeNull()
+    expect(screen.queryAllByText("existing/model").length).toBeGreaterThan(0)
   })
 
   it("Parcourir les modèles : clic sur un modèle → setDefaultModel + modal fermé", async () => {
     renderDialog()
-    const row = (await screen.findByText("OpenRouter")).closest("li")!
+    const row = (await screen.findByText("OpenRouter")).closest('[data-testid="provider-card"]')!
     fireEvent.click(row.querySelector('[data-action="browse-models"]') as HTMLElement)
     await waitFor(() => expect(screen.getByTestId("model-picker-modal")).not.toBeNull())
-    fireEvent.click(screen.getByText("existing/model"))
+    fireEvent.click(screen.getByText("existing/model", { selector: "span" }))
     await waitFor(() => {
       const updates = mockExecute.mock.calls.filter(([sql]) =>
         String(sql).includes("UPDATE models SET is_default = 1"),
@@ -182,7 +182,7 @@ describe("SettingsDialog — récupération des modèles", () => {
 
   it("Parcourir les modèles : ajout textuel dans le modal → INSERT INTO models", async () => {
     renderDialog()
-    const row = (await screen.findByText("OpenRouter")).closest("li")!
+    const row = (await screen.findByText("OpenRouter")).closest('[data-testid="provider-card"]')!
     fireEvent.click(row.querySelector('[data-action="browse-models"]') as HTMLElement)
     const modal = await screen.findByTestId("model-picker-modal")
     const input = screen.getByLabelText("Ajouter un modèle") as HTMLInputElement
@@ -193,7 +193,7 @@ describe("SettingsDialog — récupération des modèles", () => {
       expect(inserts.some(([, bind]) => (bind as unknown[])[2] === "openai/nouveau-modele")).toBe(true)
     })
     // le modèle nouvellement ajouté apparaît ensuite dans la liste du modal
-    expect(screen.getByText("openai/nouveau-modele")).not.toBeNull()
+    expect(screen.queryAllByText("openai/nouveau-modele").length).toBeGreaterThan(0)
   })
 })
 
@@ -220,7 +220,7 @@ describe("SettingsDialog — suppression fournisseur", () => {
 
   async function trashButton(): Promise<HTMLElement> {
     await screen.findByText("OpenRouter")
-    const row = screen.getByText("OpenRouter").closest("li")!
+    const row = screen.getByText("OpenRouter").closest('[data-testid="provider-card"]')!
     const btn = row.querySelector(`[aria-label="${t.settings.delete}"]`)
     expect(btn).not.toBeNull()
     return btn as HTMLElement

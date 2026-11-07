@@ -86,6 +86,7 @@ export const fr = {
     fail: "Échec de connexion",
     noKey: "Aucune clé — configurez-en une pour tester",
     models: "Modèles",
+    modelsAvailable: "Modèles disponibles",
     addModel: "Ajouter un modèle",
     addModelSubmit: "Ajouter le modèle",
     addModelPlaceholder: "ex. openai/gpt-4o",

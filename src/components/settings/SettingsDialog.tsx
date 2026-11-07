@@ -193,7 +193,7 @@ export function SettingsDialog({ onClose, onChanged }: Props) {
         role="dialog"
         aria-modal="true"
         aria-label={t.settings.title}
-        className="max-h-[85vh] w-[560px] max-w-[92vw] overflow-y-auto rounded-lg border border-border bg-background p-4"
+        className="max-h-[85vh] w-[900px] max-w-[96vw] overflow-y-auto rounded-lg border border-border bg-background p-4"
         onClick={(e) => e.stopPropagation()}
       >
         <header className="mb-3 flex items-center justify-between">
@@ -218,92 +218,123 @@ export function SettingsDialog({ onClose, onChanged }: Props) {
           <LocalModelsPanel rows={rows} onChanged={afterChange} />
         ) : (
           <>
-            <button
-              onClick={() => setEditing("new")}
-              className="mb-3 flex items-center gap-2 rounded-md border border-border px-3 py-1.5 text-sm hover:bg-foreground/5"
-            >
-              <Plus className="size-4" /> {t.settings.addProvider}
-            </button>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+              {/* Carte « + Ajouter un nouveau fournisseur » en première position */}
+              <button
+                onClick={() => setEditing("new")}
+                className="aspect-[16/9] rounded-md border-2 border-dashed border-border bg-background/50 flex flex-col items-center justify-center gap-2 p-4 hover:bg-foreground/5 transition-colors"
+              >
+                <Plus className="size-6" />
+                <p className="text-sm text-muted-foreground text-center">{t.settings.addProvider}</p>
+              </button>
 
-            {rows.length === 0 && <p className="text-sm text-muted-foreground">{t.settings.noProviders}</p>}
+              {rows.length === 0 && (
+                <p className="col-span-full text-sm text-muted-foreground text-center">
+                  {t.settings.noProviders}
+                </p>
+              )}
 
-            <ul className="space-y-3">
               {rows.map((p) => {
                 const status = testStatus[p.id] ?? { state: "idle" as const }
                 const fetchSt = fetchStatus[p.id]
+                const providerModels = models[p.id] ?? []
                 return (
-                  <li key={p.id} className="rounded-md border border-border p-3">
-                    <div className="flex items-center justify-between gap-2">
-                      <div className="min-w-0">
-                        <p className="truncate text-sm font-medium">{p.name}</p>
-                        <p className="truncate text-xs text-muted-foreground">{p.base_url}</p>
-                      </div>
-                      <div className="flex flex-shrink-0 items-center gap-1">
-                        <button
-                          onClick={() => void test(p)}
-                          disabled={status.state === "testing"}
-                          className="rounded-md border border-border px-2 py-1 text-xs hover:bg-foreground/5 disabled:opacity-50"
-                        >
-                          {status.state === "testing" ? t.settings.testing : t.settings.test}
-                        </button>
-                        <button
-                          data-action="fetch-models"
-                          onClick={() => void fetchModels(p)}
-                          disabled={fetchStatus[p.id]?.state === "fetching"}
-                          className="rounded-md border border-border px-2 py-1 text-xs hover:bg-foreground/5 disabled:opacity-50"
-                        >
-                          {fetchStatus[p.id]?.state === "fetching" ? t.settings.fetchingModels : t.settings.fetchModels}
-                        </button>
-                        <button
-                          onClick={() => setEditing(p)}
-                          className="rounded-md px-2 py-1 text-xs underline hover:opacity-80"
-                        >
-                          {t.settings.edit}
-                        </button>
-                        <button
-                          aria-label={t.settings.delete}
-                          onClick={() => void removeProvider(p).catch((error) =>
-                            logSettingsError("settings.removeProvider", error))}
-                          className="rounded-md p-1 hover:bg-foreground/5"
-                        >
-                          <Trash2 className="size-3.5" />
-                        </button>
-                      </div>
+                  <div key={p.id} data-testid="provider-card" className="aspect-[16/9] rounded-md border border-border p-3 flex flex-col">
+                    {/* En-tête : nom + URL */}
+                    <div className="min-w-0 mb-2">
+                      <p className="truncate text-sm font-medium">{p.name}</p>
+                      <p className="truncate text-xs text-muted-foreground">{p.base_url}</p>
                     </div>
 
-                    {status.state === "ok" && (
-                      <p className="mt-2 flex items-center gap-1 text-xs text-green-600">
-                        <Check className="size-3.5" /> {t.settings.ok}
+                    {/* Corps : compteur + liste des modèles (overflow interne pour respecter le 16:9) */}
+                    <div className="flex-1 overflow-y-auto mb-2">
+                      <p className="mb-1 text-xs font-semibold">
+                        {providerModels.length} {t.settings.modelsAvailable}
                       </p>
-                    )}
-                    {status.state === "fail" && (
-                      <p className="mt-2 text-xs text-destructive">{t.settings.fail} — {status.message}</p>
-                    )}
+                      {providerModels.length > 0 ? (
+                        <ul className="space-y-1">
+                          {providerModels.map((m) => (
+                            <li key={m.id} className="flex items-center gap-1">
+                              <span className="text-[10px] text-muted-foreground">•</span>
+                              <p className="truncate text-xs">{m.model_id}</p>
+                            </li>
+                          ))}
+                        </ul>
+                      ) : (
+                        <p className="text-xs text-muted-foreground">{t.settings.noModels}</p>
+                      )}
+                    </div>
 
-                    {fetchSt?.state === "ok" && (
-                      <p data-fetch-status className="mt-2 text-xs text-green-600">
-                        {fetchSt.added} {t.settings.fetchOkAdded}
-                      </p>
-                    )}
-                    {fetchSt?.state === "fail" && (
-                      <p data-fetch-status className="mt-2 text-xs text-destructive">
-                        {t.settings.fetchFail} — {fetchSt.message}
-                      </p>
-                    )}
+                    {/* Pied : boutons d'action + statuts */}
+                    <div className="flex flex-wrap items-center gap-1 mt-auto">
+                      <button
+                        onClick={() => void test(p)}
+                        disabled={status.state === "testing"}
+                        className="rounded-md border border-border px-2 py-1 text-xs hover:bg-foreground/5 disabled:opacity-50"
+                      >
+                        {status.state === "testing" ? t.settings.testing : t.settings.test}
+                      </button>
+                      <button
+                        data-action="fetch-models"
+                        onClick={() => void fetchModels(p)}
+                        disabled={fetchStatus[p.id]?.state === "fetching"}
+                        className="rounded-md border border-border px-2 py-1 text-xs hover:bg-foreground/5 disabled:opacity-50"
+                      >
+                        {fetchStatus[p.id]?.state === "fetching" ? t.settings.fetchingModels : t.settings.fetchModels}
+                      </button>
+                      <button
+                        onClick={() => setEditing(p)}
+                        className="rounded-md px-2 py-1 text-xs underline hover:opacity-80"
+                      >
+                        {t.settings.edit}
+                      </button>
+                      <button
+                        aria-label={t.settings.delete}
+                        onClick={() => void removeProvider(p).catch((error) =>
+                          logSettingsError("settings.removeProvider", error))}
+                        className="rounded-md p-1 hover:bg-foreground/5"
+                      >
+                        <Trash2 className="size-3.5" />
+                      </button>
+                    </div>
 
-                    {/* Parcourt des modèles : bouton compte + modal dédié */}
+                    {/* Indicateurs de statut (sous le pied, sans dépasser la carte) */}
+                    <div className="mt-1">
+                      {status.state === "ok" && (
+                        <p className="flex items-center gap-1 text-xs text-green-600">
+                          <Check className="size-3.5" /> {t.settings.ok}
+                        </p>
+                      )}
+                      {status.state === "fail" && (
+                        <p className="text-xs text-destructive">
+                          {t.settings.fail} — {status.message}
+                        </p>
+                      )}
+                      {fetchSt?.state === "ok" && (
+                        <p data-fetch-status className="text-xs text-green-600">
+                          {fetchSt.added} {t.settings.fetchOkAdded}
+                        </p>
+                      )}
+                      {fetchSt?.state === "fail" && (
+                        <p data-fetch-status className="text-xs text-destructive">
+                          {t.settings.fetchFail} — {fetchSt.message}
+                        </p>
+                      )}
+                    </div>
+
+                    {/* Bouton parcourir les modèles (largeur pleine, en bas de carte) */}
                     <button
                       data-action="browse-models"
                       onClick={() => setBrowsing(p)}
-                      className="mt-2 w-full flex items-center justify-center gap-1.5 rounded-md border border-border px-2 py-1.5 text-xs hover:bg-foreground/5"
+                      className="mt-1 w-full flex items-center justify-center gap-1.5 rounded-md border border-border px-2 py-1.5 text-xs hover:bg-foreground/5"
                     >
                       {t.settings.browseModels}
-                      <span className="text-muted-foreground">({(models[p.id] ?? []).length})</span>
+                      <span className="text-muted-foreground">({providerModels.length})</span>
                     </button>
-                  </li>
+                  </div>
                 )
               })}
-            </ul>
+            </div>
           </>
         )}
 
