@@ -243,8 +243,8 @@ function App() {
           {/* Séparateur discret */}
            <div className="w-px h-5 bg-border mx-1" aria-hidden="true" />
            <button
-             aria-label={t.mcp.open}
-             title={t.mcp.open}
+            aria-label={t.mcp.open}
+             title={t.mcp.title}
              onClick={() => setMcpOpen(true)}
              className="rounded-md p-1.5 hover:bg-foreground/5"
            >
@@ -252,14 +252,14 @@ function App() {
            </button>
            <button
             aria-label={t.assistant.title}
-            title={t.assistant.systemPrompt}
+             title={t.assistant.title}
             onClick={() => setAssistantOpen(true)}
             className="rounded-md p-1.5 hover:bg-foreground/5"
           >
             <BookIcon className="size-[22px]" />
           </button>
           <button
-            aria-label={t.settings.title}
+            aria-label={t.settings.modelsSettings}
             title={t.settings.modelsSettings}
             onClick={() => setSettingsOpen(true)}
             className="rounded-md p-1.5 hover:bg-foreground/5"

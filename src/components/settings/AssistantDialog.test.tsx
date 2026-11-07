@@ -59,6 +59,8 @@ describe("AssistantDialog", () => {
     expect(hasClass(dialog, "h-[75vh]")).toBe(true)
     expect(hasClass(dialog, "w-[1100px]")).toBe(true)
     expect(hasClass(dialog, "max-w-[96vw]")).toBe(true)
+    expect(screen.getByRole("heading", { name: "Assistant" })).not.toBeNull()
+    expect(screen.getByTestId("assistant-dialog-icon")).not.toBeNull()
   })
 
   it("affiche les 3 sections avec les valeurs chargées", async () => {

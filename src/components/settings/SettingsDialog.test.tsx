@@ -157,6 +157,8 @@ describe("SettingsDialog — cartes fournisseur", () => {
     expect(hasClass(dialog, "h-[75vh]")).toBe(true)
     expect(hasClass(dialog, "w-[1100px]")).toBe(true)
     expect(hasClass(dialog, "max-w-[96vw]")).toBe(true)
+    expect(within(dialog).getByRole("heading", { name: "Fournisseur" })).not.toBeNull()
+    expect(within(dialog).getByTestId("settings-dialog-icon")).not.toBeNull()
   })
 
   it("présente les commandes sans afficher la liste des modèles dans la carte", async () => {

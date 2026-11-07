@@ -23,6 +23,16 @@ Le token partagé se trouve dans :
 Chaque nouvel outil du header doit importer `HEADER_TOOL_DIALOG_SIZE_CLASS`.
 Il ne doit pas définir une largeur ou une hauteur locale concurrente.
 
+Le libellé du bouton et le titre du modal utilisent le même nom fonctionnel.
+Une icône `size-4`, secondaire et discrète, apparaît immédiatement à droite du
+titre :
+
+| Outil | Libellé du header | Titre du modal | Icône |
+|---|---|---|---|
+| MCP | MCP | MCP | `McpIcon` |
+| System Prompt | Assistant | Assistant | `BookIcon` |
+| Models settings | Fournisseurs | Fournisseur | `ReglageIcon` |
+
 Ce standard s’applique aux modales principales, notamment :
 
 - Fournisseurs ;

@@ -57,7 +57,7 @@ export const fr = {
     backToBottom: "Revenir en bas de la conversation",
   },
   settings: {
-    title: "Réglages",
+    title: "Fournisseur",
     addProvider: "Ajouter un fournisseur",
     editProvider: "Modifier le fournisseur",
     name: "Nom",
@@ -79,7 +79,7 @@ export const fr = {
     searchModels: "Filtrer les modèles…",
     browseModels: "Parcourir les modèles",
     activeModelBadge: "Modèle actif",
-    modelsSettings: "Models settings",
+    modelsSettings: "Fournisseurs",
     fetchOkAdded: "modèle(s) ajouté(s)",
     fetchFail: "Échec de récupération",
     ok: "Connexion réussie",
@@ -143,8 +143,8 @@ export const fr = {
     systemPrompt: "System prompt",
   },
   mcp: {
-    open: "MCP et accès Web",
-    title: "MCP et accès Web",
+    open: "MCP",
+    title: "MCP",
     description: "Connectez TinyFish pour autoriser la recherche et la lecture de pages Web.",
     tinyfish: "TinyFish",
     allowedTools: "Outils autorisés : recherche Web et lecture de pages.",

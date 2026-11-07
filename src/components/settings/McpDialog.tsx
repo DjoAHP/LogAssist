@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react"
 import { Search, FileText, X } from "lucide-react"
+import { McpIcon } from "@/icons"
 
 import { t } from "@/i18n/fr"
 import { tinyfish } from "@/lib/mcp/client"
@@ -83,7 +84,13 @@ export function McpDialog({ onClose, onChanged }: Props) {
       >
         <header className="flex items-start justify-between border-b border-border px-5 py-4">
           <div>
-            <h2 id="mcp-title" className="text-base font-semibold">{t.mcp.title}</h2>
+            <div className="flex items-center gap-2">
+              <h2 id="mcp-title" className="text-base font-semibold">{t.mcp.title}</h2>
+              <McpIcon
+                data-testid="mcp-dialog-icon"
+                className="size-4 text-muted-foreground opacity-70"
+              />
+            </div>
             <p className="mt-1 text-sm text-muted-foreground">{t.mcp.description}</p>
           </div>
           <button aria-label={t.mcp.close} onClick={onClose} className="rounded-md p-1.5 hover:bg-foreground/5"><X className="size-4" /></button>

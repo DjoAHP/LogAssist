@@ -37,6 +37,8 @@ describe("McpDialog", () => {
     expect(hasClass(dialog, "h-[75vh]")).toBe(true)
     expect(hasClass(dialog, "w-[1100px]")).toBe(true)
     expect(hasClass(dialog, "max-w-[96vw]")).toBe(true)
+    expect(screen.getByRole("heading", { name: "MCP" })).not.toBeNull()
+    expect(screen.getByTestId("mcp-dialog-icon")).not.toBeNull()
   })
 
   it("ferme la modale quand on clique sur l'overlay", () => {

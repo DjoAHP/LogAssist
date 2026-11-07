@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react"
 import { Check, Pencil, Plus, Trash2, Upload, X, ChevronUp, ChevronDown } from "lucide-react"
+import { BookIcon } from "@/icons"
 import { t } from "@/i18n/fr"
 import { logger } from "@/lib/logger"
 import { loadPromptSettings, savePromptSettings } from "@/lib/prompts/store"
@@ -159,7 +160,13 @@ export function AssistantDialog({ onClose, conversationId }: Props) {
         onClick={(e) => e.stopPropagation()}
       >
         <header className="mb-3 flex items-center justify-between">
-          <h2 className="text-base font-semibold">{t.assistant.title}</h2>
+          <div className="flex items-center gap-2">
+            <h2 className="text-base font-semibold">{t.assistant.title}</h2>
+            <BookIcon
+              data-testid="assistant-dialog-icon"
+              className="size-4 text-muted-foreground opacity-70"
+            />
+          </div>
           <button aria-label={t.assistant.close} onClick={onClose} className="rounded-md p-1 hover:bg-foreground/5">
             <X className="size-4" />
           </button>

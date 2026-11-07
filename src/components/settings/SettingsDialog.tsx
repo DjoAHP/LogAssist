@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react"
 import { Plus, Search, X } from "lucide-react"
+import { ReglageIcon } from "@/icons"
 import { confirm as dialogConfirm } from "@tauri-apps/plugin-dialog"
 import { t } from "@/i18n/fr"
 import { logger } from "@/lib/logger"
@@ -205,7 +206,13 @@ export function SettingsDialog({ onClose, onChanged }: Props) {
         onClick={(e) => e.stopPropagation()}
       >
         <header className="mb-3 flex items-center justify-between">
-          <h2 className="text-base font-semibold">{t.settings.title}</h2>
+          <div className="flex items-center gap-2">
+            <h2 className="text-base font-semibold">{t.settings.title}</h2>
+            <ReglageIcon
+              data-testid="settings-dialog-icon"
+              className="size-4 text-muted-foreground opacity-70"
+            />
+          </div>
           <button aria-label={t.settings.close} onClick={onClose} className="rounded-md p-1 hover:bg-foreground/5">
             <X className="size-4" />
           </button>
