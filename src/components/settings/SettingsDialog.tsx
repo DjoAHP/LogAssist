@@ -244,7 +244,7 @@ export function SettingsDialog({ onClose, onChanged }: Props) {
               {/* Carte « + Ajouter un nouveau fournisseur » en première position */}
               <button
                 onClick={() => setEditing("new")}
-                className="aspect-[16/9] w-full min-w-0 overflow-hidden rounded-md border-2 border-dashed border-border bg-background/50 p-4 transition-colors hover:bg-foreground/5 flex flex-col items-center justify-center gap-2"
+                className="aspect-[16/9] rounded-md border-2 border-dashed border-border bg-background/50 flex flex-col items-center justify-center gap-2 p-4 hover:bg-foreground/5 transition-colors"
               >
                 <Plus className="size-6" />
                 <p className="text-sm text-muted-foreground text-center">{t.settings.addProvider}</p>
@@ -267,7 +267,7 @@ export function SettingsDialog({ onClose, onChanged }: Props) {
                 const fetchSt = fetchStatus[p.id]
                 const providerModels = models[p.id] ?? []
                 return (
-                  <div key={p.id} data-testid="provider-card" className="aspect-[16/9] w-full min-w-0 overflow-hidden rounded-md border border-border p-3 flex flex-col">
+                  <div key={p.id} data-testid="provider-card" className="aspect-[16/9] rounded-md border border-border p-3 flex flex-col">
                     {/* En-tête : nom + URL */}
                     <div className="min-w-0 mb-2">
                       <p className="truncate text-sm font-medium">{p.name}</p>
@@ -275,7 +275,7 @@ export function SettingsDialog({ onClose, onChanged }: Props) {
                     </div>
 
                     {/* Corps : compteur + liste des modèles (overflow interne pour respecter le 16:9) */}
-                    <div className="mb-2 min-h-0 flex-1 overflow-y-auto">
+                    <div className="flex-1 overflow-y-auto mb-2">
                       <p className="mb-1 text-xs font-semibold">
                         {providerModels.length} {t.settings.modelsAvailable}
                       </p>
