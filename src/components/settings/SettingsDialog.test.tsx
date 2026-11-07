@@ -32,16 +32,23 @@ import { t } from "@/i18n/fr"
 const providerRow: ProviderRow = {
   id: "p1", name: "OpenRouter", api_family: "openai", base_url: "https://openrouter.ai/api/v1", created_at: "2026-01-01",
 }
+const secondProviderRow: ProviderRow = {
+  id: "p2",
+  name: "LM Studio",
+  api_family: "openai",
+  base_url: "http://localhost:1234/v1",
+  created_at: "2026-01-02",
+}
 const existingModel: ModelRow = {
   id: "rm1", provider_id: "p1", model_id: "existing/model", supports_images: 0, is_default: 1,
 }
 
 // Faux runtime : état SQL minimal pour refléter INSERT/DELETE entre les relectures.
 const dbState = {
-  providers: [providerRow],
+  providers: [providerRow, secondProviderRow],
   models: [existingModel] as ModelRow[],
   reset() {
-    this.providers = [providerRow]
+    this.providers = [providerRow, secondProviderRow]
     this.models = [existingModel]
   },
 }
@@ -88,9 +95,50 @@ async function fetchButton(): Promise<HTMLElement> {
 }
 
 async function testButton(): Promise<HTMLElement> {
-  await screen.findByText("OpenRouter")
-  return screen.getByText(t.settings.test, { selector: "button" })
+  const providerName = await screen.findByText("OpenRouter")
+  const card = providerName.closest('[data-testid="provider-card"]')!
+  const button = card.querySelector("button")
+  expect(button).not.toBeNull()
+  return button as HTMLElement
 }
+
+describe("SettingsDialog — recherche des fournisseurs", () => {
+  it("filtre par nom sans tenir compte de la casse", async () => {
+    renderDialog()
+    const search = await screen.findByRole("searchbox", {
+      name: t.settings.searchProviders,
+    })
+
+    fireEvent.change(search, { target: { value: "lm STUDIO" } })
+
+    expect(screen.queryByText("OpenRouter")).toBeNull()
+    expect(screen.getByText("LM Studio")).not.toBeNull()
+  })
+
+  it("filtre par URL partielle", async () => {
+    renderDialog()
+    const search = await screen.findByRole("searchbox", {
+      name: t.settings.searchProviders,
+    })
+
+    fireEvent.change(search, { target: { value: "openrouter.ai" } })
+
+    expect(screen.getByText("OpenRouter")).not.toBeNull()
+    expect(screen.queryByText("LM Studio")).toBeNull()
+  })
+
+  it("affiche un état sans résultat tout en conservant la carte d’ajout", async () => {
+    renderDialog()
+    const search = await screen.findByRole("searchbox", {
+      name: t.settings.searchProviders,
+    })
+
+    fireEvent.change(search, { target: { value: "fournisseur-inconnu" } })
+
+    expect(screen.getByText(t.settings.noProviderResults)).not.toBeNull()
+    expect(screen.getByRole("button", { name: t.settings.addProvider })).not.toBeNull()
+  })
+})
 
 describe("SettingsDialog — récupération des modèles", () => {
   it("sans clé API : statut fail noKey, aucun appel réseau", async () => {
