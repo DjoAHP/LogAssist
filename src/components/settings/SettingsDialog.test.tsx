@@ -3,6 +3,10 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 import { render, screen, fireEvent, waitFor, cleanup, within } from "@testing-library/react"
 import { SettingsDialog } from "./SettingsDialog"
 
+function hasClass(element: HTMLElement | SVGElement | null, className: string): boolean {
+  return element?.classList.contains(className) ?? false
+}
+
 const mockExecute = vi.hoisted(() => vi.fn())
 const mockSelect = vi.hoisted(() => vi.fn())
 const mockSecretsGet = vi.hoisted(() => vi.fn())
@@ -145,6 +149,49 @@ describe("SettingsDialog — recherche des fournisseurs", () => {
   })
 })
 
+describe("SettingsDialog — cartes fournisseur", () => {
+  it("utilise le gabarit standard des outils du header", () => {
+    renderDialog()
+
+    const dialog = screen.getByRole("dialog", { name: t.settings.title })
+    expect(hasClass(dialog, "h-[75vh]")).toBe(true)
+    expect(hasClass(dialog, "w-[1100px]")).toBe(true)
+    expect(hasClass(dialog, "max-w-[96vw]")).toBe(true)
+    expect(within(dialog).getByRole("heading", { name: "Fournisseur" })).not.toBeNull()
+    expect(within(dialog).getByTestId("settings-dialog-icon")).not.toBeNull()
+  })
+
+  it("présente les commandes sans afficher la liste des modèles dans la carte", async () => {
+    renderDialog()
+
+    const providerName = await screen.findByText("OpenRouter")
+    const card = providerName.closest('[data-testid="provider-card"]') as HTMLElement
+
+    expect(within(card).getByRole("button", { name: t.settings.test })).not.toBeNull()
+    expect(within(card).getByRole("button", { name: t.settings.fetchModels })).not.toBeNull()
+    expect(within(card).getByRole("button", { name: t.settings.edit })).not.toBeNull()
+    expect(within(card).getByRole("button", {
+      name: `${t.settings.browseModels} (1)`,
+    })).not.toBeNull()
+    expect(within(card).queryByText("existing/model")).toBeNull()
+
+    const gallery = screen.getByTestId("provider-gallery")
+    expect(hasClass(gallery, "lg:grid-cols-4")).toBe(true)
+    expect(hasClass(gallery, "lg:grid-cols-3")).toBe(false)
+    expect(hasClass(gallery, "gap-3")).toBe(true)
+  })
+
+  it("aligne la hauteur de la carte d'ajout sur le format compact", async () => {
+    renderDialog()
+
+    const addButton = screen.getByRole("button", { name: t.settings.addProvider })
+    expect(hasClass(addButton, "min-h-56")).toBe(true)
+    expect(hasClass(addButton, "min-h-64")).toBe(false)
+    expect(hasClass(addButton, "gap-2")).toBe(true)
+    expect(hasClass(addButton, "p-4")).toBe(true)
+  })
+})
+
 describe("SettingsDialog — récupération des modèles", () => {
   it("sans clé API : statut fail noKey, aucun appel réseau", async () => {
     mockSecretsGet.mockResolvedValue(null)
@@ -152,7 +199,7 @@ describe("SettingsDialog — récupération des modèles", () => {
     fireEvent.click(await fetchButton())
     await waitFor(() => {
       const row = screen.getByText("OpenRouter").closest('[data-testid="provider-card"]')!
-      expect(row.querySelector('[data-fetch-status]')?.textContent).toContain("Aucune clé")
+      expect(row.querySelector('[data-testid="fetch-models-status"]')?.textContent).toContain("Aucune clé")
     })
     expect(mockListRemoteModels).not.toHaveBeenCalled()
   })
@@ -176,7 +223,7 @@ describe("SettingsDialog — récupération des modèles", () => {
     await waitFor(() => expect(mockListRemoteModels).toHaveBeenCalled())
     await waitFor(() => {
       const row = screen.getByText("OpenRouter").closest('[data-testid="provider-card"]')!
-      expect(row.querySelector('[data-fetch-status]')?.textContent).toContain("Clé API invalide")
+      expect(row.querySelector('[data-testid="fetch-models-status"]')?.textContent).toContain("Clé API invalide")
     })
   })
 
@@ -192,7 +239,7 @@ describe("SettingsDialog — récupération des modèles", () => {
 
     await waitFor(() => {
       const row = screen.getByText("OpenRouter").closest('[data-testid="provider-card"]')!
-      expect(row.querySelector('[data-fetch-status]')?.textContent).toContain(t.settings.fetchFail)
+      expect(row.querySelector('[data-testid="fetch-models-status"]')?.textContent).toContain(t.settings.fetchFail)
     })
     const sinks = JSON.stringify({ ui: document.body.textContent, logs: mockLoggerError.mock.calls })
     expect(sinks).not.toContain(opaqueKey)
@@ -205,7 +252,7 @@ describe("SettingsDialog — récupération des modèles", () => {
     fireEvent.click(await fetchButton())
     await waitFor(() => {
       const row = screen.getByText("OpenRouter").closest('[data-testid="provider-card"]')!
-      expect(row.querySelector('[data-fetch-status]')?.textContent).toContain("1")
+      expect(row.querySelector('[data-testid="fetch-models-status"]')?.textContent).toContain("1")
     }, { timeout: 3000 })
   })
 

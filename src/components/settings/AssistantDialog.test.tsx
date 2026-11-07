@@ -3,6 +3,10 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 import { render, screen, fireEvent, waitFor, cleanup } from "@testing-library/react"
 import { AssistantDialog } from "./AssistantDialog"
 
+function hasClass(element: HTMLElement | null, className: string): boolean {
+  return element?.classList.contains(className) ?? false
+}
+
 const mockGet = vi.hoisted(() => vi.fn())
 const mockSetPrompt = vi.hoisted(() => vi.fn())
 const mockKList = vi.hoisted(() => vi.fn())
@@ -48,6 +52,17 @@ beforeEach(() => {
 afterEach(cleanup)
 
 describe("AssistantDialog", () => {
+  it("utilise le gabarit standard des outils du header", () => {
+    render(<AssistantDialog onClose={() => {}} conversationId={null} />)
+
+    const dialog = screen.getByRole("dialog")
+    expect(hasClass(dialog, "h-[75vh]")).toBe(true)
+    expect(hasClass(dialog, "w-[1100px]")).toBe(true)
+    expect(hasClass(dialog, "max-w-[96vw]")).toBe(true)
+    expect(screen.getByRole("heading", { name: "Assistant" })).not.toBeNull()
+    expect(screen.getByTestId("assistant-dialog-icon")).not.toBeNull()
+  })
+
   it("affiche les 3 sections avec les valeurs chargées", async () => {
     render(<AssistantDialog onClose={() => {}} conversationId="test-conv" />)
     const general = await screen.findByLabelText(/Instructions générales/) as HTMLTextAreaElement

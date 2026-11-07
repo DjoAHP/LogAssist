@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useState } from "react"
 import { Check, Pencil, Plus, Trash2, Upload, X, ChevronUp, ChevronDown } from "lucide-react"
+import { BookIcon } from "@/icons"
 import { t } from "@/i18n/fr"
 import { logger } from "@/lib/logger"
 import { loadPromptSettings, savePromptSettings } from "@/lib/prompts/store"
 import { DEFAULT_GENERAL_INSTRUCTIONS, PROFILE_APPRENTISSAGE } from "@/lib/prompts/defaults"
 import { knowledge, type KnowledgeRow } from "@/lib/db/knowledge"
 import { conversationKnowledge } from "@/lib/db/conversationKnowledge"
+import { HEADER_TOOL_DIALOG_SIZE_CLASS } from "./headerToolDialog"
 
 interface Props {
   onClose: () => void
@@ -154,11 +156,17 @@ export function AssistantDialog({ onClose, conversationId }: Props) {
         role="dialog"
         aria-modal="true"
         aria-label={t.assistant.title}
-        className="max-h-[85vh] w-[640px] max-w-[92vw] overflow-y-auto rounded-lg border border-border bg-background p-4"
+        className={`${HEADER_TOOL_DIALOG_SIZE_CLASS} overflow-y-auto rounded-lg border border-border bg-background p-4`}
         onClick={(e) => e.stopPropagation()}
       >
         <header className="mb-3 flex items-center justify-between">
-          <h2 className="text-base font-semibold">{t.assistant.title}</h2>
+          <div className="flex items-center gap-2">
+            <h2 className="text-base font-semibold">{t.assistant.title}</h2>
+            <BookIcon
+              data-testid="assistant-dialog-icon"
+              className="size-4 text-muted-foreground opacity-70"
+            />
+          </div>
           <button aria-label={t.assistant.close} onClick={onClose} className="rounded-md p-1 hover:bg-foreground/5">
             <X className="size-4" />
           </button>

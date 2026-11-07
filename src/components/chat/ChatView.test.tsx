@@ -134,9 +134,14 @@ describe("ChatView — présentation hybride des messages", () => {
     render(<ChatView {...base} vm={[msg({ role: "user", content: "Question" })]} />)
 
     const userBubble = screen.getByTestId("message-user")
-    expect(userBubble.className).toContain("rounded-lg")
+    expect(userBubble.className).toContain("rounded-xl")
     expect(userBubble.className).toContain("border")
-    expect(userBubble.className).toContain("bg-foreground/5")
+    expect(userBubble.className).toContain("border-border/50")
+    expect(userBubble.className).toContain("bg-background/40")
+    expect(userBubble.className).toContain("backdrop-blur-sm")
+    expect(userBubble.className).not.toContain("shadow-sm")
+    expect(userBubble.className).not.toContain("backdrop-blur-md")
+    expect(userBubble.className).not.toContain("bg-foreground/5")
     expect(userBubble.className).toContain("max-w-[80%]")
   })
 
@@ -146,10 +151,15 @@ describe("ChatView — présentation hybride des messages", () => {
     const assistantBubble = screen.getByTestId("message-assistant")
     expect(assistantBubble.className).toContain("border-l-2")
     expect(assistantBubble.className).toContain("border-l-[var(--brand-to)]")
-    expect(assistantBubble.className).toContain("bg-foreground/5")
+    expect(assistantBubble.className).toContain("rounded-xl")
+    expect(assistantBubble.className).toContain("border-border/50")
+    expect(assistantBubble.className).toContain("bg-background/40")
+    expect(assistantBubble.className).toContain("backdrop-blur-sm")
+    expect(assistantBubble.className).not.toContain("shadow-sm")
+    expect(assistantBubble.className).not.toContain("backdrop-blur-md")
+    expect(assistantBubble.className).not.toContain("bg-foreground/5")
     expect(assistantBubble.className).not.toContain("bg-transparent")
     expect(assistantBubble.className).toContain("max-w-[56rem]")
-    expect(assistantBubble.className).not.toContain("rounded-lg")
   })
 
   it("élargit la zone de conversation pour rapprocher les messages des bords", () => {
@@ -169,7 +179,7 @@ describe("ChatView — présentation hybride des messages", () => {
     })]} />)
 
     const assistantBubble = screen.getByTestId("message-assistant")
-    expect(assistantBubble.className).toContain("rounded-lg")
+    expect(assistantBubble.className).toContain("rounded-xl")
     expect(assistantBubble.className).toContain("border-destructive")
     expect(assistantBubble.className).toContain("bg-destructive/10")
     expect(assistantBubble.className).not.toContain("border-l-[var(--brand-to)]")

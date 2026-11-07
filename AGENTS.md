@@ -127,6 +127,10 @@ src-tauri/
   Ne pas réintroduire d'orange dans les nouveaux éléments d'interface.
   Tout bouton `bg-brand-from` doit aussi utiliser `text-brand-foreground`
   (`#000000`) afin de garantir un texte noir sur cet accent clair.
+- Les modales principales des outils du header utilisent obligatoirement
+  `HEADER_TOOL_DIALOG_SIZE_CLASS` (`1100px × 75vh`, `max-width: 96vw`), défini
+  dans `src/components/settings/headerToolDialog.ts` et documenté dans
+  `DESIGN_SYSTEM.md`. Ne pas créer de dimension locale concurrente.
 - Tests : nommer le comportement, pas l'implémentation ; TDD (test d'abord, vu rouge,
   puis code minimal). jsdom via commentaire `// @vitest-environment jsdom` par fichier.
 
