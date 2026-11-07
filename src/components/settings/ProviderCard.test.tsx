@@ -5,6 +5,10 @@ import { ProviderCard } from "./ProviderCard"
 import { type ProviderRow } from "@/lib/db/providers"
 import { t } from "@/i18n/fr"
 
+function hasClass(element: HTMLElement | SVGElement | null, className: string): boolean {
+  return element?.classList.contains(className) ?? false
+}
+
 const mockOnTest = vi.fn()
 const mockOnFetchModels = vi.fn()
 const mockOnEdit = vi.fn()
@@ -154,5 +158,74 @@ describe("ProviderCard — états des actions", () => {
 
     expect(screen.getByTestId("fetch-models-status").textContent)
       .toBe(`2 ${t.settings.fetchOkAdded}`)
+  })
+})
+
+describe("ProviderCard — proportions et couleurs (TDD)", () => {
+  it("normalise les trois icônes dans la même empreinte visuelle", () => {
+    render(<ProviderCard {...defaultProps} />)
+
+    // Vérifier chaque bouton d'action a son wrapper optique
+    const testIconFrame = screen.getByTestId("test-connection-icon-frame")
+    const fetchIconFrame = screen.getByTestId("fetch-models-icon-frame")
+    const editIconFrame = screen.getByTestId("edit-provider-icon-frame")
+
+    // Wrapper : size-7, items-center, justify-center
+    expect(hasClass(testIconFrame, "size-7")).toBe(true)
+    expect(hasClass(testIconFrame, "items-center")).toBe(true)
+    expect(hasClass(testIconFrame, "justify-center")).toBe(true)
+    expect(hasClass(fetchIconFrame, "size-7")).toBe(true)
+    expect(hasClass(fetchIconFrame, "items-center")).toBe(true)
+    expect(hasClass(fetchIconFrame, "justify-center")).toBe(true)
+    expect(hasClass(editIconFrame, "size-7")).toBe(true)
+    expect(hasClass(editIconFrame, "items-center")).toBe(true)
+    expect(hasClass(editIconFrame, "justify-center")).toBe(true)
+
+    // SVG à l'intérieur : size-6, strokeWidth=2
+    const testSvg = testIconFrame.querySelector("svg")
+    const fetchSvg = fetchIconFrame.querySelector("svg")
+    const editSvg = editIconFrame.querySelector("svg")
+    expect(hasClass(testSvg, "size-6")).toBe(true)
+    expect(hasClass(fetchSvg, "size-6")).toBe(true)
+    expect(hasClass(editSvg, "size-6")).toBe(true)
+  })
+
+  it("compacte la zone d'action sans sacrifier la zone de statut", () => {
+    render(<ProviderCard {...defaultProps} />)
+
+    // Bouton test : min-h-32, pb-12 (pas min-h-40, pb-16)
+    const testButton = screen.getByRole("button", { name: t.settings.test })
+    expect(hasClass(testButton, "min-h-32")).toBe(true)
+    expect(hasClass(testButton, "pb-12")).toBe(true)
+    expect(hasClass(testButton, "min-h-40")).toBe(false)
+    expect(hasClass(testButton, "pb-16")).toBe(false)
+
+    // Statut test : min-h-8 (pas min-h-12), line-clamp-3
+    const testStatus = screen.getByTestId("test-connection-status")
+    expect(hasClass(testStatus, "min-h-8")).toBe(true)
+    expect(hasClass(testStatus, "min-h-12")).toBe(false)
+    expect(hasClass(testStatus, "line-clamp-3")).toBe(true)
+
+    // Carte : min-h-72
+    const card = screen.getByTestId("provider-card")
+    expect(hasClass(card, "min-h-72")).toBe(true)
+  })
+
+  it("conserve un texte lisible sur le bouton modèles dans les deux thèmes", () => {
+    render(<ProviderCard {...defaultProps} />)
+
+    const browseButton = screen.getByRole("button", { name: `${t.settings.browseModels} (5)` })
+
+    // Texte foreground standard (pas brand-foreground)
+    expect(hasClass(browseButton, "text-foreground")).toBe(true)
+    expect(hasClass(browseButton, "text-brand-foreground")).toBe(false)
+
+    // Pas de hover:bg-brand-from/10
+    expect(hasClass(browseButton, "hover:bg-brand-from/10")).toBe(false)
+
+    // Hover : bg-foreground/5, text-brand-to, border-brand-to
+    expect(hasClass(browseButton, "hover:bg-foreground/5")).toBe(true)
+    expect(hasClass(browseButton, "hover:text-brand-to")).toBe(true)
+    expect(hasClass(browseButton, "hover:border-brand-to")).toBe(true)
   })
 })

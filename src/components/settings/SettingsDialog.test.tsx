@@ -3,6 +3,10 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 import { render, screen, fireEvent, waitFor, cleanup, within } from "@testing-library/react"
 import { SettingsDialog } from "./SettingsDialog"
 
+function hasClass(element: HTMLElement | SVGElement | null, className: string): boolean {
+  return element?.classList.contains(className) ?? false
+}
+
 const mockExecute = vi.hoisted(() => vi.fn())
 const mockSelect = vi.hoisted(() => vi.fn())
 const mockSecretsGet = vi.hoisted(() => vi.fn())
@@ -159,6 +163,14 @@ describe("SettingsDialog — cartes fournisseur", () => {
       name: `${t.settings.browseModels} (1)`,
     })).not.toBeNull()
     expect(within(card).queryByText("existing/model")).toBeNull()
+  })
+
+  it("aligne la hauteur de la carte d'ajout sur le format compact", async () => {
+    renderDialog()
+
+    const addButton = screen.getByRole("button", { name: t.settings.addProvider })
+    expect(hasClass(addButton, "min-h-72")).toBe(true)
+    expect(hasClass(addButton, "min-h-80")).toBe(false)
   })
 })
 

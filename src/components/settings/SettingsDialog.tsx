@@ -243,7 +243,7 @@ export function SettingsDialog({ onClose, onChanged }: Props) {
               <button
                 type="button"
                 onClick={() => setEditing("new")}
-                className="flex min-h-80 flex-col items-center justify-center gap-3 rounded-xl border-2 border-dashed border-border bg-background/50 p-5 outline-none transition-[border-color,background-color] hover:border-brand-to hover:bg-foreground/5 focus-visible:ring-2 focus-visible:ring-brand-to motion-reduce:transition-none"
+                className="flex min-h-72 flex-col items-center justify-center gap-3 rounded-xl border-2 border-dashed border-border bg-background/50 p-5 outline-none transition-[border-color,background-color] hover:border-brand-to hover:bg-foreground/5 focus-visible:ring-2 focus-visible:ring-brand-to motion-reduce:transition-none"
               >
                 <Plus aria-hidden="true" className="size-7 text-muted-foreground" />
                 <span className="text-center text-sm font-medium text-muted-foreground">

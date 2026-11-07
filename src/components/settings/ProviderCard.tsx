@@ -89,25 +89,31 @@ function ProviderAction({
         aria-describedby={feedback.text ? statusId : undefined}
         disabled={disabled}
         onClick={onClick}
-        className="group/action flex min-h-40 w-full flex-col items-center px-2 pb-16 pt-4 text-center outline-none disabled:cursor-wait disabled:opacity-70"
+        className="group/action flex min-h-32 w-full flex-col items-center px-2 pb-12 pt-4 text-center outline-none disabled:cursor-wait disabled:opacity-70"
       >
-        <StateIcon
-          aria-hidden="true"
-          className={`size-7 transition-colors motion-reduce:transition-none ${
-            loading
-              ? "animate-spin text-brand-to motion-reduce:animate-none"
-              : feedback.tone === "idle"
-                ? "text-muted-foreground group-hover/action:text-brand-to"
-                : statusToneClass[feedback.tone]
-          }`}
-        />
+        <span
+          data-testid={`${action}-icon-frame`}
+          className="flex size-7 shrink-0 items-center justify-center"
+        >
+          <StateIcon
+            aria-hidden="true"
+            strokeWidth={2}
+            className={`size-6 transition-colors motion-reduce:transition-none ${
+              loading
+                ? "animate-spin text-brand-to motion-reduce:animate-none"
+                : feedback.tone === "idle"
+                  ? "text-muted-foreground group-hover/action:text-brand-to"
+                  : statusToneClass[feedback.tone]
+            }`}
+          />
+        </span>
         <span className="mt-2 text-xs font-medium leading-tight">{label}</span>
       </button>
       <span
         id={statusId}
         data-testid={`${action}-status`}
         aria-live="polite"
-        className={`pointer-events-none absolute inset-x-1 bottom-3 min-h-12 text-center text-[10px] leading-tight ${statusToneClass[feedback.tone]}`}
+        className={`pointer-events-none absolute inset-x-1 bottom-2 min-h-8 text-center text-[10px] leading-tight line-clamp-3 ${statusToneClass[feedback.tone]}`}
       >
         {feedback.text}
       </span>
@@ -161,7 +167,7 @@ export function ProviderCard({
       data-testid="provider-card"
       className="
         relative rounded-lg border border-border bg-background p-3
-        flex flex-col
+        flex flex-col min-h-72
         hover:border-brand-from/50 hover:shadow-md
         transition-colors duration-200
         motion-reduce:transition-none
@@ -200,7 +206,7 @@ export function ProviderCard({
       <hr className="border-border my-2" aria-hidden="true" />
 
       {/* 3 actions égales avec états : RadioTower (test), CloudDownload (fetch), Wrench (edit) */}
-      <div className="flex gap-1.5 mb-3" role="group" aria-label="Actions du fournisseur">
+      <div className="flex gap-1.5 mb-2" role="group" aria-label="Actions du fournisseur">
         <ProviderAction
           action="test-connection"
           statusId={testStatusId}
@@ -239,10 +245,11 @@ export function ProviderCard({
         className="
           w-full flex items-center justify-center gap-1.5 rounded-md border border-border px-3 py-2
           text-sm font-medium text-foreground
-          hover:bg-brand-from/10 hover:text-brand-to hover:border-brand-from/50
+          hover:bg-foreground/5 hover:text-brand-to hover:border-brand-to
           focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-to
           transition-colors
           motion-reduce:transition-none
+          mt-auto
         "
       >
         {t.settings.browseModels}
