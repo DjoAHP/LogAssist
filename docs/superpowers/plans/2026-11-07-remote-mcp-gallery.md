@@ -6,7 +6,7 @@
 
 **Architecture:** SQLite et React conservent les métadonnées non sensibles et le catalogue ; Rust valide les destinations, lie les secrets au Credential Manager, gère les connexions `rmcp` et exécute les outils. Un orchestrateur TypeScript remplace `runWebAgent`, route les aliases unifiés, demande les approbations et préserve le comportement TinyFish/Web.
 
-**Tech Stack:** React 19, TypeScript strict, Tailwind 3, Vitest 5, Tauri 2, Rust 2024, SQLite (`tauri-plugin-sql` + `sqlx` 0.8.6 pour les transactions), `rmcp` 3.8, `reqwest` 0.13.5, `jsonschema` 0.60.2, `sha2` 0.11.1.
+**Tech Stack:** React 19, TypeScript strict, Tailwind 3, Vitest 5, Tauri 2, Rust 2024, SQLite (`tauri-plugin-sql` + `sqlx` 0.8.6 pour les transactions), `rmcp` 3.8, `reqwest` 0.13.5, `sha2` 0.11.1.
 
 ---
 
@@ -53,7 +53,7 @@ cargo test
 - Modifier `src-tauri/Cargo.toml` et `src-tauri/Cargo.lock` : dépendances explicites.
 - Créer `src-tauri/src/commands/database.rs` : vraie transaction SQLx sur le pool du plugin.
 - Modifier `src-tauri/src/mcp/types.rs` : DTO dynamiques et erreurs.
-- Modifier `src-tauri/src/mcp/security.rs` : URL, headers, JSON Schema et limites.
+- Modifier `src-tauri/src/mcp/security.rs` : URL, headers, structure des schémas et limites.
 - Créer `src-tauri/src/mcp/credentials.rs` : enveloppe et empreinte des secrets.
 - Créer `src-tauri/src/mcp/registry.rs` : registre atomique, allowlist et annulation par tour.
 - Réécrire `src-tauri/src/mcp/transport.rs` : connexion générique, DNS épinglé, pagination et normalisation.
@@ -1216,7 +1216,6 @@ Modifier `Cargo.toml` :
 
 ```toml
 reqwest = { version = "0.13.5", default-features = false, features = ["rustls"] }
-jsonschema = { version = "0.60.2", default-features = false }
 sha2 = "0.11.1"
 http = "1.5"
 ```
@@ -1234,7 +1233,7 @@ Set-Location C:\dev\LogAssist\.worktrees\remote-mcp-gallery\src-tauri
 cargo check
 ```
 
-Expected: `Cargo.lock` contient `jsonschema 0.60.2`; compilation encore rouge tant que les nouveaux DTO ne sont pas définis.
+Expected: compilation encore rouge tant que les nouveaux DTO ne sont pas définis.
 
 - [ ] **Step 3: Ajouter les DTO dynamiques sans casser le chemin TinyFish existant**
 
@@ -1407,7 +1406,8 @@ fn rejects_reserved_api_key_headers() {
 fn validates_arguments_offline_and_refuses_remote_ref() {
     let schema = serde_json::json!({"type":"object","properties":{"q":{"type":"string"}},"required":["q"]});
     assert!(validate_tool_arguments(&schema, &serde_json::json!({"q":"rust"})).is_ok());
-    assert_eq!(validate_tool_arguments(&schema, &serde_json::json!({})).unwrap_err().kind, McpErrorKind::InvalidArguments);
+    // La conformité required/type appartient au serveur MCP, pas au client local.
+    assert!(validate_tool_arguments(&schema, &serde_json::json!({})).is_ok());
     assert_eq!(validate_tool_schema(&serde_json::json!({"$ref":"https://attacker.example/schema"})).unwrap_err().kind, McpErrorKind::InvalidConfig);
 }
 
@@ -1433,7 +1433,6 @@ Expected: FAIL, fonctions absentes.
 
 ```rust
 use http::header::HeaderName;
-use jsonschema::Draft;
 use serde_json::Value;
 use url::{Host, Url};
 
@@ -1508,7 +1507,7 @@ fn is_valid_server_id(value: &str) -> bool {
 }
 ```
 
-- [ ] **Step 4: Ajouter les limites JSON et le validateur offline**
+- [ ] **Step 4: Ajouter les limites structurelles sans exécuter les schémas distants**
 
 ```rust
 fn json_depth(value: &Value) -> usize {
@@ -1523,28 +1522,27 @@ pub fn validate_tool_schema(schema: &Value) -> Result<(), McpErrorPayload> {
     if !schema.is_object() || serde_json::to_vec(schema).map_or(true, |bytes| bytes.len() > 64 * 1024) {
         return Err(McpErrorPayload::new(McpErrorKind::InvalidConfig, "Schéma MCP invalide ou trop volumineux"));
     }
-    jsonschema::options()
-        .with_draft(Draft::Draft202012)
-        .offline()
-        .build(schema)
-        .map(|_| ())
-        .map_err(|_| McpErrorPayload::new(McpErrorKind::InvalidConfig, "JSON Schema MCP invalide ou référence distante interdite"))
+    validate_schema_structure(schema)
 }
 
 pub fn validate_tool_arguments(schema: &Value, arguments: &Value) -> Result<(), McpErrorPayload> {
+    validate_tool_schema(schema)?;
     if !arguments.is_object()
         || serde_json::to_vec(arguments).map_or(true, |bytes| bytes.len() > MAX_ARGUMENT_BYTES)
         || json_depth(arguments) > MAX_ARGUMENT_DEPTH {
         return Err(McpErrorPayload::new(McpErrorKind::InvalidArguments, "Arguments MCP invalides"));
     }
-    let validator = jsonschema::options().with_draft(Draft::Draft202012).offline().build(schema)
-        .map_err(|_| McpErrorPayload::new(McpErrorKind::InvalidConfig, "JSON Schema MCP invalide"))?;
-    validator.validate(arguments)
-        .map_err(|_| McpErrorPayload::new(McpErrorKind::InvalidArguments, "Arguments incompatibles avec le schéma de l'outil"))
+    // Le serveur MCP reste l'autorité sémantique pour required/type/pattern.
+    Ok(())
 }
 ```
 
-Conserver le durcissement TinyFish dans une fonction appelée après la validation JSON Schema :
+`validate_schema_structure` parcourt uniquement l'arbre physique Draft 2020-12,
+sans suivre les `$ref`. Il borne profondeur (32), sous-schémas (4 096), patterns
+(128 × 1 024 caractères), et exige des `$ref`/`$dynamicRef` locales commençant
+par `#`. Les valeurs `const`, `enum`, `default` et `examples` restent opaques.
+
+Conserver le durcissement TinyFish dans une fonction appelée après la validation structurelle :
 
 ```rust
 pub fn tinyfish_arguments(native_name: &str, arguments: &Value) -> Result<JsonObject, McpErrorPayload> {

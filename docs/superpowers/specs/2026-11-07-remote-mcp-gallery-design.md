@@ -160,7 +160,8 @@ Une découverte réussie est appliquée dans une transaction :
 2. les nouveaux outils sont ajoutés désactivés et avec confirmation obligatoire ;
 3. les outils disparus sont supprimés ;
 4. une hausse de risque dans les annotations remet `approval_mode` à `confirm` ;
-5. les schémas invalides ou trop grands sont refusés, pas partiellement stockés.
+5. les schémas non objets, structurellement hors limites ou trop grands sont
+   refusés, pas partiellement stockés.
 
 Le frontend prépare uniquement des statements SQL paramétrés sur des données
 MCP non sensibles. Le pont Rust valide les bornes et les types des binds, puis
@@ -416,10 +417,11 @@ même serveur. La connexion et la découverte ont un timeout de 15 secondes.
 - 1 Mio de catalogue sérialisé par serveur ;
 - 2 000 caractères par description.
 
-Les schémas doivent être des objets JSON Schema valides. Les noms, titres,
-descriptions et annotations restent des données externes non fiables.
-Seules les références JSON Schema locales (`#…`) sont admises. La validation ne
-récupère jamais de `$ref` distant et dispose d'un budget de temps borné.
+Les schémas doivent être des objets structurellement bornés. LogAssist ne les
+compile ni ne les exécute localement : le serveur MCP reste l'autorité
+sémantique pour `required`, `type`, `pattern` et les autres mots-clés. Le client
+borne taille, profondeur, nombre de sous-schémas et patterns, et n'admet que des
+références locales (`#…`) sans jamais les résoudre.
 
 ### 10.3 Exécution
 
@@ -428,7 +430,8 @@ Avant le réseau, Rust vérifie :
 
 - l'allowlist ;
 - un objet JSON de 64 Kio maximum et de profondeur 32 maximum ;
-- la conformité au `inputSchema` découvert ;
+- un objet d'arguments borné en taille et profondeur ; le serveur valide ensuite
+  sa conformité au `inputSchema` ;
 - le budget de concurrence et l'absence d'annulation.
 
 Le timeout générique est celui du serveur, par défaut 60 secondes et borné entre
@@ -727,7 +730,8 @@ L'implémentation suit le TDD.
 - remplacement transactionnel et rédaction ;
 - synchronisation atomique de l'allowlist ;
 - pagination `tools/list` et plafonds ;
-- validation des arguments JSON Schema ;
+- validation structurelle des schémas et des enveloppes d'arguments, puis
+  validation sémantique par le serveur MCP ;
 - normalisation et troncature des résultats ;
 - classification 401, offline et timeout ;
 - couverture i18n exhaustive de chaque catégorie d'erreur MCP ;
