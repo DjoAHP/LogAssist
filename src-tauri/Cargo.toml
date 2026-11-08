@@ -40,6 +40,8 @@ tauri-plugin-fs = "2"
 # on ne sélectionne que le backend Windows ; default-features = false possible
 # plus tard (v3) pour réduire le binaire si caution/mock devient inutile.
 keyring = { version = "4.2.0", features = ["windows-native-keyring-store"] }
+futures = "0.3.34"
+sse-stream = "0.2.6"
 
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration

@@ -1,7 +1,8 @@
 //! Connecteur MCP Streamable HTTP générique et sécurisé via le SDK `rmcp`.
 //! L'adaptateur TinyFish historique reste temporairement isolé en fin de module.
 
-use std::collections::HashMap;
+use std::borrow::Cow;
+use std::collections::{HashMap, HashSet};
 use std::error::Error as StdError;
 use std::future::Future;
 use std::net::{IpAddr, SocketAddr};
@@ -9,33 +10,44 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex as StdMutex};
 use std::time::Duration;
 
-use http::HeaderValue;
+use futures::stream::BoxStream;
+use futures::{StreamExt, stream};
+use http::{HeaderMap, HeaderName, HeaderValue, StatusCode};
+use reqwest::header::{ACCEPT, CONTENT_TYPE, RETRY_AFTER, WWW_AUTHENTICATE};
 use rmcp::RoleClient;
 use rmcp::model::{
-    CallToolRequestParams, ErrorCode, ErrorData, JsonObject, PaginatedRequestParams,
-    ProtocolVersion,
+    CallToolRequestParams, CallToolResult, ClientJsonRpcMessage, ClientRequest, ContentBlock,
+    ErrorCode, ErrorData, JsonObject, JsonRpcMessage, PaginatedRequestParams, ProtocolVersion,
+    ResourceContents, ServerJsonRpcMessage,
 };
 use rmcp::service::{
     ClientInitializeError, ClientLifecycleMode, ClientServiceExt, RunningService,
     RunningServiceCancellationToken, ServiceError, ServiceExt,
 };
+use rmcp::transport::common::http_header::{
+    EVENT_STREAM_MIME_TYPE, HEADER_LAST_EVENT_ID, HEADER_MCP_PROTOCOL_VERSION, HEADER_SESSION_ID,
+    JSON_MIME_TYPE,
+};
 use rmcp::transport::streamable_http_client::{
-    AuthRequiredError, HttpStatusError, InsufficientScopeError,
-    StreamableHttpClientTransportConfig, StreamableHttpError,
+    AuthRequiredError, HttpStatusError, InsufficientScopeError, SseError, StreamableHttpClient,
+    StreamableHttpClientTransportConfig, StreamableHttpError, StreamableHttpPostResponse,
 };
 use rmcp::transport::{DynamicTransportError, StreamableHttpClientTransport};
 use serde_json::{Value, json};
+use sha2::{Digest, Sha256};
+use sse_stream::{Sse, SseStream};
 use tokio::sync::Mutex as AsyncMutex;
 use url::{Host, Url};
 
 use super::client::TinyfishExecutor;
 use super::security::{
-    MAX_SSE_EVENT_BYTES, server_definition, validate_api_key_header, validate_endpoint_static,
-    validate_public_ip, validate_public_web_url,
+    MAX_CATALOG_BYTES, MAX_RESULT_CHARS, MAX_SSE_EVENT_BYTES, MAX_TOOLS_PER_SERVER,
+    server_definition, validate_api_key_header, validate_endpoint_static, validate_public_ip,
+    validate_public_web_url, validate_tool_schema,
 };
 use super::types::{
-    McpAuthConfig, McpErrorKind, McpErrorPayload, McpRuntimeServer, McpServerId, WebSource,
-    WebToolRequest, WebToolResult,
+    McpAuthConfig, McpErrorKind, McpErrorPayload, McpResourceLink, McpRuntimeServer, McpServerId,
+    McpToolDescriptor, McpToolResult, WebSource, WebToolName, WebToolRequest, WebToolResult,
 };
 
 const SEARCH_RESULT_LIMIT: u32 = 5;
@@ -45,6 +57,22 @@ const FETCH_FORMAT: &str = "markdown";
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
 const CONTROL_REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
 const SESSION_RECOVERY_TIMEOUT: Duration = Duration::from_secs(5);
+const DISCOVERY_TIMEOUT: Duration = Duration::from_secs(15);
+const MAX_DISCOVERY_PAGES: usize = 32;
+const MAX_TOOL_NAME_CHARS: usize = 128;
+const MAX_LABEL_CHARS: usize = 500;
+const MAX_RESOURCE_URI_CHARS: usize = 2_048;
+const MAX_RESOURCE_LINKS: usize = 20;
+const OMITTED_BINARY_MARKER: &str = "[Contenu binaire omis]";
+const OMITTED_STRUCTURED_MARKER: &str = "[Contenu structuré omis]";
+// Le catalogue normalisé peut atteindre 1 Mio ; la marge couvre l'enveloppe
+// JSON-RPC, les curseurs et les champs MCP qui ne sont pas persistés localement.
+const MCP_JSON_ENVELOPE_MARGIN_BYTES: usize = 64 * 1024;
+const MAX_MCP_JSON_BODY_BYTES: usize = MAX_CATALOG_BYTES + MCP_JSON_ENVELOPE_MARGIN_BYTES;
+const MCP_RESPONSE_TOO_LARGE_MESSAGE: &str = "Réponse HTTP MCP trop volumineuse";
+const MCP_INVALID_JSON_MESSAGE: &str = "Réponse JSON MCP invalide";
+const MCP_UNEXPECTED_HTTP_MESSAGE: &str = "Réponse HTTP MCP inattendue";
+const MAX_RETRY_AFTER_BYTES: usize = 128;
 
 fn public_error_message(kind: McpErrorKind) -> &'static str {
     match kind {
@@ -449,6 +477,527 @@ fn prepare_endpoint_with_resolution(
     }
 }
 
+#[derive(Debug)]
+enum BoundedSseBodyError {
+    Source(reqwest::Error),
+    EventTooLarge { max_size: usize },
+}
+
+impl std::fmt::Display for BoundedSseBodyError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Source(error) => write!(formatter, "{error}"),
+            Self::EventTooLarge { max_size } => {
+                write!(
+                    formatter,
+                    "SSE event exceeded the maximum size of {max_size} bytes"
+                )
+            }
+        }
+    }
+}
+
+impl StdError for BoundedSseBodyError {
+    fn source(&self) -> Option<&(dyn StdError + 'static)> {
+        match self {
+            Self::Source(error) => Some(error),
+            Self::EventTooLarge { .. } => None,
+        }
+    }
+}
+
+#[derive(Debug)]
+struct SseEventSizeLimiter {
+    max_size: usize,
+    retained_size: usize,
+    line_size: usize,
+    line_is_comment: bool,
+    previous_was_cr: bool,
+}
+
+impl SseEventSizeLimiter {
+    fn new(max_size: usize) -> Self {
+        Self {
+            max_size,
+            retained_size: 0,
+            line_size: 0,
+            line_is_comment: false,
+            previous_was_cr: false,
+        }
+    }
+
+    fn observe(&mut self, chunk: &[u8]) -> Result<(), ()> {
+        for &byte in chunk {
+            if self.previous_was_cr {
+                self.previous_was_cr = false;
+                if byte == b'\n' {
+                    continue;
+                }
+            }
+            match byte {
+                b'\r' => {
+                    self.finish_line()?;
+                    self.previous_was_cr = true;
+                }
+                b'\n' => self.finish_line()?,
+                _ => {
+                    if self.line_size == 0 {
+                        self.line_is_comment = byte == b':';
+                    }
+                    self.line_size = self.line_size.saturating_add(1);
+                    self.check_limit()?;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn finish_line(&mut self) -> Result<(), ()> {
+        if self.line_size == 0 {
+            self.retained_size = 0;
+        } else if !self.line_is_comment {
+            self.retained_size = self
+                .retained_size
+                .saturating_add(self.line_size)
+                .saturating_add(1);
+        }
+        self.line_size = 0;
+        self.line_is_comment = false;
+        self.check_limit()
+    }
+
+    fn check_limit(&self) -> Result<(), ()> {
+        if self.retained_size.saturating_add(self.line_size) > self.max_size {
+            Err(())
+        } else {
+            Ok(())
+        }
+    }
+}
+
+fn bounded_sse_response(
+    response: reqwest::Response,
+    max_event_size: usize,
+) -> BoxStream<'static, Result<Sse, SseError>> {
+    // Même comptage par événement que l'adaptateur reqwest RMCP 3.8 : la
+    // réponse reste streamée et n'entre jamais dans la borne des corps JSON.
+    let bytes = stream::try_unfold(
+        (response, SseEventSizeLimiter::new(max_event_size)),
+        |(mut response, mut limiter)| async move {
+            let Some(chunk) = response
+                .chunk()
+                .await
+                .map_err(BoundedSseBodyError::Source)?
+            else {
+                return Result::<_, BoundedSseBodyError>::Ok(None);
+            };
+            limiter
+                .observe(&chunk)
+                .map_err(|()| BoundedSseBodyError::EventTooLarge {
+                    max_size: limiter.max_size,
+                })?;
+            Ok(Some((chunk, (response, limiter))))
+        },
+    );
+    SseStream::from_bytes_stream(bytes).boxed()
+}
+
+fn response_too_large() -> StreamableHttpError<reqwest::Error> {
+    StreamableHttpError::UnexpectedServerResponse(Cow::Borrowed(MCP_RESPONSE_TOO_LARGE_MESSAGE))
+}
+
+async fn collect_bounded_body(
+    mut response: reqwest::Response,
+) -> Result<Vec<u8>, StreamableHttpError<reqwest::Error>> {
+    // Content-Length permet de refuser avant allocation ; le compteur checked
+    // reste l'autorité pour les réponses chunked ou les longueurs mensongères.
+    if response
+        .content_length()
+        .is_some_and(|length| length > MAX_MCP_JSON_BODY_BYTES as u64)
+    {
+        return Err(response_too_large());
+    }
+    let capacity = response
+        .content_length()
+        .and_then(|length| usize::try_from(length).ok())
+        .unwrap_or_default()
+        .min(MAX_MCP_JSON_BODY_BYTES);
+    let mut body = Vec::with_capacity(capacity);
+    let mut received = 0_usize;
+    while let Some(chunk) = response
+        .chunk()
+        .await
+        .map_err(StreamableHttpError::Client)?
+    {
+        received = received
+            .checked_add(chunk.len())
+            .ok_or_else(response_too_large)?;
+        if received > MAX_MCP_JSON_BODY_BYTES {
+            return Err(response_too_large());
+        }
+        body.extend_from_slice(&chunk);
+    }
+    Ok(body)
+}
+
+fn is_content_type(headers: &HeaderMap, expected: &str) -> bool {
+    headers
+        .get(CONTENT_TYPE)
+        .is_some_and(|value| value.as_bytes().starts_with(expected.as_bytes()))
+}
+
+fn validate_transport_header(name: &HeaderName) -> Result<(), String> {
+    let reserved = [
+        "accept",
+        HEADER_SESSION_ID,
+        HEADER_MCP_PROTOCOL_VERSION,
+        HEADER_LAST_EVENT_ID,
+    ];
+    if reserved
+        .iter()
+        .any(|reserved| name.as_str().eq_ignore_ascii_case(reserved))
+        && !name
+            .as_str()
+            .eq_ignore_ascii_case(HEADER_MCP_PROTOCOL_VERSION)
+    {
+        Err(name.to_string())
+    } else {
+        Ok(())
+    }
+}
+
+fn apply_transport_headers(
+    mut request: reqwest::RequestBuilder,
+    custom_headers: HashMap<HeaderName, HeaderValue>,
+) -> Result<reqwest::RequestBuilder, StreamableHttpError<reqwest::Error>> {
+    for (name, value) in custom_headers {
+        validate_transport_header(&name).map_err(StreamableHttpError::ReservedHeaderConflict)?;
+        request = request.header(name, value);
+    }
+    Ok(request)
+}
+
+fn extract_auth_scope(header: &str) -> Option<String> {
+    let normalized = header.to_ascii_lowercase();
+    let position = normalized.find("scope=")?;
+    let value = &header[position + "scope=".len()..];
+    if let Some(quoted) = value.strip_prefix('"') {
+        return quoted.find('"').map(|end| quoted[..end].to_owned());
+    }
+    let end = value
+        .find(|character: char| character == ',' || character == ';' || character.is_whitespace())
+        .unwrap_or(value.len());
+    (end > 0).then(|| value[..end].to_owned())
+}
+
+enum PendingAuthError {
+    Required(String),
+    InsufficientScope(String, Option<String>),
+}
+
+fn pending_auth_error(
+    status: StatusCode,
+    headers: &HeaderMap,
+) -> Result<Option<PendingAuthError>, StreamableHttpError<reqwest::Error>> {
+    let Some(header) = headers.get(WWW_AUTHENTICATE) else {
+        return Ok(None);
+    };
+    let header = header.to_str().map_err(|_| {
+        StreamableHttpError::UnexpectedServerResponse(Cow::Borrowed(
+            "invalid www-authenticate header value",
+        ))
+    })?;
+    Ok(match status {
+        StatusCode::UNAUTHORIZED => Some(PendingAuthError::Required(header.to_owned())),
+        StatusCode::FORBIDDEN => Some(PendingAuthError::InsufficientScope(
+            header.to_owned(),
+            extract_auth_scope(header),
+        )),
+        _ => None,
+    })
+}
+
+fn status_error(status: StatusCode, headers: &HeaderMap) -> Option<HttpStatusError> {
+    if status != StatusCode::TOO_MANY_REQUESTS && !status.is_server_error() {
+        return None;
+    }
+    let retry_after = headers
+        .get(RETRY_AFTER)
+        .filter(|value| value.as_bytes().len() <= MAX_RETRY_AFTER_BYTES)
+        .and_then(|value| std::str::from_utf8(value.as_bytes()).ok())
+        .map(str::to_owned);
+    Some(HttpStatusError::new(status.as_u16(), retry_after))
+}
+
+fn parse_json_rpc_error(body: &[u8]) -> Option<ServerJsonRpcMessage> {
+    match serde_json::from_slice::<ServerJsonRpcMessage>(body) {
+        Ok(message @ JsonRpcMessage::Error(_)) => Some(message),
+        _ => None,
+    }
+}
+
+fn legacy_discover_response(
+    message: &ClientJsonRpcMessage,
+    session_was_attached: bool,
+    status: StatusCode,
+    body: &[u8],
+) -> Option<StreamableHttpPostResponse> {
+    if session_was_attached
+        || !status.is_client_error()
+        || matches!(status, StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN)
+    {
+        return None;
+    }
+    let ClientJsonRpcMessage::Request(request) = message else {
+        return None;
+    };
+    if !matches!(request.request, ClientRequest::DiscoverRequest(_)) {
+        return None;
+    }
+    let error = match serde_json::from_slice::<ServerJsonRpcMessage>(body) {
+        Ok(ServerJsonRpcMessage::Error(error)) => error.error,
+        _ => ErrorData::invalid_request("Découverte MCP legacy refusée", None),
+    };
+    Some(StreamableHttpPostResponse::Json(
+        ServerJsonRpcMessage::error(error, Some(request.id.clone())),
+        None,
+    ))
+}
+
+#[derive(Clone)]
+struct BoundedReqwestClient {
+    inner: reqwest::Client,
+}
+
+impl BoundedReqwestClient {
+    fn new(inner: reqwest::Client) -> Self {
+        Self { inner }
+    }
+
+    async fn post_bounded(
+        &self,
+        uri: Arc<str>,
+        message: ClientJsonRpcMessage,
+        session_id: Option<Arc<str>>,
+        auth_header: Option<String>,
+        custom_headers: HashMap<HeaderName, HeaderValue>,
+        max_sse_event_size: usize,
+    ) -> Result<StreamableHttpPostResponse, StreamableHttpError<reqwest::Error>> {
+        // Ce POST unique reprend la sémantique RMCP. Déléguer après réception
+        // rejouerait le message JSON-RPC et pourrait dupliquer un effet outil.
+        let mut request = self
+            .inner
+            .post(uri.as_ref())
+            .header(ACCEPT, [EVENT_STREAM_MIME_TYPE, JSON_MIME_TYPE].join(", "));
+        if let Some(auth_header) = auth_header {
+            request = request.bearer_auth(auth_header);
+        }
+        request = apply_transport_headers(request, custom_headers)?;
+        let session_was_attached = session_id.is_some();
+        if let Some(session_id) = session_id {
+            request = request.header(HEADER_SESSION_ID, session_id.as_ref());
+        }
+
+        let response = request
+            .json(&message)
+            .send()
+            .await
+            .map_err(StreamableHttpError::Client)?;
+        let status = response.status();
+        if matches!(status, StatusCode::ACCEPTED | StatusCode::NO_CONTENT) {
+            return Ok(StreamableHttpPostResponse::Accepted);
+        }
+        let session_expired = status == StatusCode::NOT_FOUND && session_was_attached;
+
+        let is_json = is_content_type(response.headers(), JSON_MIME_TYPE);
+        let is_sse = is_content_type(response.headers(), EVENT_STREAM_MIME_TYPE);
+        let auth_error = pending_auth_error(status, response.headers())?;
+        let http_status_error = status_error(status, response.headers());
+        let content_length = response.content_length();
+        let response_session_id = response
+            .headers()
+            .get(HEADER_SESSION_ID)
+            .and_then(|value| value.to_str().ok())
+            .map(str::to_owned);
+
+        if status.is_success()
+            && content_length == Some(0)
+            && matches!(
+                message,
+                ClientJsonRpcMessage::Notification(_)
+                    | ClientJsonRpcMessage::Response(_)
+                    | ClientJsonRpcMessage::Error(_)
+            )
+        {
+            return Ok(StreamableHttpPostResponse::Accepted);
+        }
+
+        if !status.is_success() {
+            let body = collect_bounded_body(response).await?;
+            if session_expired {
+                return Err(StreamableHttpError::SessionExpired);
+            }
+            if let Some(response) =
+                legacy_discover_response(&message, session_was_attached, status, &body)
+            {
+                return Ok(response);
+            }
+            match auth_error {
+                Some(PendingAuthError::Required(header)) => {
+                    return Err(StreamableHttpError::AuthRequired(AuthRequiredError::new(
+                        header,
+                    )));
+                }
+                Some(PendingAuthError::InsufficientScope(header, scope)) => {
+                    return Err(StreamableHttpError::InsufficientScope(
+                        InsufficientScopeError::new(header, scope),
+                    ));
+                }
+                None => {}
+            }
+            if matches!(status, StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN) {
+                return Err(HttpStatusError::new(status.as_u16(), None).into());
+            }
+            if status == StatusCode::TOO_MANY_REQUESTS {
+                return Err(http_status_error
+                    .unwrap_or_else(|| HttpStatusError::new(status.as_u16(), None))
+                    .into());
+            }
+            if is_json && let Some(message) = parse_json_rpc_error(&body) {
+                return Ok(StreamableHttpPostResponse::Json(
+                    message,
+                    response_session_id,
+                ));
+            }
+            if let Some(error) = http_status_error {
+                return Err(error.into());
+            }
+            return Err(StreamableHttpError::UnexpectedServerResponse(
+                Cow::Borrowed(MCP_UNEXPECTED_HTTP_MESSAGE),
+            ));
+        }
+
+        if is_sse {
+            return Ok(StreamableHttpPostResponse::Sse(
+                bounded_sse_response(response, max_sse_event_size),
+                response_session_id,
+            ));
+        }
+        if is_json {
+            let body = collect_bounded_body(response).await?;
+            return match serde_json::from_slice::<ServerJsonRpcMessage>(&body) {
+                Ok(parsed) => Ok(StreamableHttpPostResponse::Json(
+                    parsed,
+                    response_session_id,
+                )),
+                Err(_)
+                    if matches!(
+                        message,
+                        ClientJsonRpcMessage::Notification(_)
+                            | ClientJsonRpcMessage::Response(_)
+                            | ClientJsonRpcMessage::Error(_)
+                    ) =>
+                {
+                    Ok(StreamableHttpPostResponse::Accepted)
+                }
+                Err(_) => Err(StreamableHttpError::UnexpectedServerResponse(
+                    Cow::Borrowed(MCP_INVALID_JSON_MESSAGE),
+                )),
+            };
+        }
+        Err(StreamableHttpError::UnexpectedContentType(None))
+    }
+}
+
+impl StreamableHttpClient for BoundedReqwestClient {
+    type Error = reqwest::Error;
+
+    async fn post_message(
+        &self,
+        uri: Arc<str>,
+        message: ClientJsonRpcMessage,
+        session_id: Option<Arc<str>>,
+        auth_header: Option<String>,
+        custom_headers: HashMap<HeaderName, HeaderValue>,
+    ) -> Result<StreamableHttpPostResponse, StreamableHttpError<Self::Error>> {
+        self.post_bounded(
+            uri,
+            message,
+            session_id,
+            auth_header,
+            custom_headers,
+            MAX_SSE_EVENT_BYTES,
+        )
+        .await
+    }
+
+    async fn post_message_with_max_sse_event_size(
+        &self,
+        uri: Arc<str>,
+        message: ClientJsonRpcMessage,
+        session_id: Option<Arc<str>>,
+        auth_header: Option<String>,
+        custom_headers: HashMap<HeaderName, HeaderValue>,
+        max_sse_event_size: usize,
+    ) -> Result<StreamableHttpPostResponse, StreamableHttpError<Self::Error>> {
+        self.post_bounded(
+            uri,
+            message,
+            session_id,
+            auth_header,
+            custom_headers,
+            max_sse_event_size,
+        )
+        .await
+    }
+
+    async fn delete_session(
+        &self,
+        uri: Arc<str>,
+        session_id: Arc<str>,
+        auth_header: Option<String>,
+        custom_headers: HashMap<HeaderName, HeaderValue>,
+    ) -> Result<(), StreamableHttpError<Self::Error>> {
+        self.inner
+            .delete_session(uri, session_id, auth_header, custom_headers)
+            .await
+    }
+
+    async fn get_stream(
+        &self,
+        uri: Arc<str>,
+        session_id: Option<Arc<str>>,
+        last_event_id: Option<String>,
+        auth_header: Option<String>,
+        custom_headers: HashMap<HeaderName, HeaderValue>,
+    ) -> Result<BoxStream<'static, Result<Sse, SseError>>, StreamableHttpError<Self::Error>> {
+        self.inner
+            .get_stream(uri, session_id, last_event_id, auth_header, custom_headers)
+            .await
+    }
+
+    async fn get_stream_with_max_sse_event_size(
+        &self,
+        uri: Arc<str>,
+        session_id: Option<Arc<str>>,
+        last_event_id: Option<String>,
+        auth_header: Option<String>,
+        custom_headers: HashMap<HeaderName, HeaderValue>,
+        max_sse_event_size: usize,
+    ) -> Result<BoxStream<'static, Result<Sse, SseError>>, StreamableHttpError<Self::Error>> {
+        self.inner
+            .get_stream_with_max_sse_event_size(
+                uri,
+                session_id,
+                last_event_id,
+                auth_header,
+                custom_headers,
+                max_sse_event_size,
+            )
+            .await
+    }
+}
+
 async fn prepare_endpoint(endpoint: &Url) -> Result<PreparedEndpoint, McpErrorPayload> {
     match endpoint.host().ok_or_else(invalid_transport_config)? {
         Host::Domain(domain) => {
@@ -612,7 +1161,7 @@ where
     let mut config = transport_config(server, secret)?;
     config.uri = endpoint.as_str().to_owned().into();
     let prepared = resolver(endpoint).await?;
-    let client = reqwest_client(&prepared)?;
+    let client = BoundedReqwestClient::new(reqwest_client(&prepared)?);
     let transport = StreamableHttpClientTransport::with_client(client, config);
     let service =
         ().serve_with_lifecycle(transport, lifecycle_mode())
@@ -653,6 +1202,178 @@ impl McpConnector for RmcpConnector {
         })
         .await
     }
+}
+
+fn invalid_discovery_response() -> McpErrorPayload {
+    McpErrorPayload::new(
+        McpErrorKind::InvalidResponse,
+        "Réponse de découverte MCP invalide",
+    )
+}
+
+/// Nettoie une étiquette distante avant de l'exposer à l'interface. Les
+/// contrôles deviennent des espaces afin de ne pas fusionner deux mots, puis
+/// la valeur est tronquée en caractères Unicode et débarrassée de ses marges.
+fn clean_label(value: &str) -> Option<String> {
+    let mut cleaned = String::new();
+    for character in value.chars().take(MAX_LABEL_CHARS) {
+        if character.is_control() {
+            if !cleaned.ends_with(' ') {
+                cleaned.push(' ');
+            }
+        } else {
+            cleaned.push(character);
+        }
+    }
+    let cleaned = cleaned.trim();
+    (!cleaned.is_empty()).then(|| cleaned.to_owned())
+}
+
+fn schema_value(schema: &JsonObject) -> Result<Value, McpErrorPayload> {
+    let value = Value::Object(schema.clone());
+    validate_tool_schema(&value).map_err(|_| invalid_discovery_response())?;
+    Ok(value)
+}
+
+#[derive(serde::Serialize)]
+struct ToolContractHashEnvelope<'a> {
+    native_name: &'a str,
+    input_schema: &'a Value,
+    output_schema: &'a Option<Value>,
+    annotations: &'a Option<Value>,
+}
+
+fn tool_contract_hash(
+    native_name: &str,
+    input_schema: &Value,
+    output_schema: &Option<Value>,
+    annotations: &Option<Value>,
+) -> Result<String, McpErrorPayload> {
+    let envelope = ToolContractHashEnvelope {
+        native_name,
+        input_schema,
+        output_schema,
+        annotations,
+    };
+    let serialized = serde_json::to_vec(&envelope).map_err(|_| invalid_discovery_response())?;
+    let digest = Sha256::digest(serialized);
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let mut encoded = String::with_capacity("sha256:".len() + digest.len() * 2);
+    encoded.push_str("sha256:");
+    for byte in digest {
+        encoded.push(char::from(HEX[usize::from(byte >> 4)]));
+        encoded.push(char::from(HEX[usize::from(byte & 0x0f)]));
+    }
+    Ok(encoded)
+}
+
+fn descriptor_from_tool(tool: rmcp::model::Tool) -> Result<McpToolDescriptor, McpErrorPayload> {
+    let native_name = tool.name.into_owned();
+    let name_chars = native_name.chars().count();
+    if name_chars == 0
+        || name_chars > MAX_TOOL_NAME_CHARS
+        || native_name.trim().is_empty()
+        || native_name.chars().any(char::is_control)
+    {
+        return Err(invalid_discovery_response());
+    }
+
+    let input_schema = schema_value(tool.input_schema.as_ref())?;
+    let output_schema = tool
+        .output_schema
+        .as_ref()
+        .map(|schema| schema_value(schema.as_ref()))
+        .transpose()?;
+    let annotations = tool
+        .annotations
+        .map(|mut annotations| {
+            annotations.title = annotations.title.as_deref().and_then(clean_label);
+            serde_json::to_value(annotations).map_err(|_| invalid_discovery_response())
+        })
+        .transpose()?;
+    let schema_hash =
+        tool_contract_hash(&native_name, &input_schema, &output_schema, &annotations)?;
+
+    Ok(McpToolDescriptor {
+        native_name,
+        title: tool.title.as_deref().and_then(clean_label),
+        description: tool.description.as_deref().and_then(clean_label),
+        schema_hash,
+        input_schema,
+        output_schema,
+        annotations,
+    })
+}
+
+fn append_discovered_tool(
+    descriptors: &mut Vec<McpToolDescriptor>,
+    names: &mut HashSet<String>,
+    catalog_bytes: &mut usize,
+    tool: rmcp::model::Tool,
+) -> Result<(), McpErrorPayload> {
+    let descriptor = descriptor_from_tool(tool)?;
+    if !names.insert(descriptor.native_name.clone()) {
+        return Err(invalid_discovery_response());
+    }
+
+    let descriptor_bytes = serde_json::to_vec(&descriptor)
+        .map_err(|_| invalid_discovery_response())?
+        .len();
+    let separator_bytes = usize::from(!descriptors.is_empty());
+    *catalog_bytes = catalog_bytes
+        .checked_add(separator_bytes)
+        .and_then(|size| size.checked_add(descriptor_bytes))
+        .ok_or_else(invalid_discovery_response)?;
+    if *catalog_bytes > MAX_CATALOG_BYTES {
+        return Err(invalid_discovery_response());
+    }
+    descriptors.push(descriptor);
+    Ok(())
+}
+
+/// Découvre l'intégralité du catalogue MCP sans faire confiance aux bornes du
+/// serveur. `catalog_bytes` commence à deux pour compter exactement `[]`; une
+/// virgule est ensuite ajoutée entre chaque enveloppe de descripteur.
+pub async fn discover_tools(
+    session: &dyn McpSession,
+) -> Result<Vec<McpToolDescriptor>, McpErrorPayload> {
+    let mut descriptors = Vec::new();
+    let mut names = HashSet::new();
+    let mut cursors = HashSet::new();
+    let mut cursor = None;
+    let mut catalog_bytes = 2_usize;
+
+    for page_index in 0..MAX_DISCOVERY_PAGES {
+        let (tools, next_cursor) = session.list_tools_page(cursor.clone()).await?;
+        if descriptors
+            .len()
+            .checked_add(tools.len())
+            .is_none_or(|count| count > MAX_TOOLS_PER_SERVER)
+        {
+            return Err(invalid_discovery_response());
+        }
+        for tool in tools {
+            append_discovered_tool(&mut descriptors, &mut names, &mut catalog_bytes, tool)?;
+        }
+
+        let Some(next_cursor) = next_cursor else {
+            return Ok(descriptors);
+        };
+        if page_index + 1 == MAX_DISCOVERY_PAGES || !cursors.insert(next_cursor.clone()) {
+            return Err(invalid_discovery_response());
+        }
+        cursor = Some(next_cursor);
+    }
+
+    Err(invalid_discovery_response())
+}
+
+pub async fn discover_tools_bounded(
+    session: &dyn McpSession,
+) -> Result<Vec<McpToolDescriptor>, McpErrorPayload> {
+    tokio::time::timeout(DISCOVERY_TIMEOUT, discover_tools(session))
+        .await
+        .map_err(|_| connect_timeout_error())?
 }
 
 fn map_tinyfish_connect_error(e: impl std::fmt::Display) -> McpErrorPayload {
@@ -762,10 +1483,7 @@ fn map_tinyfish_call_error(e: impl std::fmt::Display) -> McpErrorPayload {
     }
 }
 
-fn extract_sources(
-    structured: Option<&Value>,
-    origin: super::types::WebToolName,
-) -> Vec<WebSource> {
+fn extract_tinyfish_sources(structured: Option<&Value>, origin: WebToolName) -> Vec<WebSource> {
     let Some(items) = structured
         .and_then(|v| v.get("results"))
         .and_then(|r| r.as_array())
@@ -784,12 +1502,124 @@ fn extract_sources(
                 title: item
                     .get("title")
                     .and_then(|t| t.as_str())
-                    .map(|title| title.chars().take(500).collect()),
+                    .and_then(clean_label),
                 origin,
             })
         })
         .take(20)
         .collect()
+}
+
+fn tinyfish_origin(server_id: &str, native_name: &str) -> Option<WebToolName> {
+    if server_id != McpServerId::Tinyfish.as_str() {
+        return None;
+    }
+    match native_name {
+        "search" => Some(WebToolName::Search),
+        "fetch_content" => Some(WebToolName::FetchContent),
+        _ => None,
+    }
+}
+
+fn append_result_text(target: &mut String, target_chars: &mut usize, value: &str) {
+    if value.is_empty() || *target_chars >= MAX_RESULT_CHARS {
+        return;
+    }
+    if !target.is_empty() {
+        target.push('\n');
+        *target_chars += 1;
+    }
+    let remaining = MAX_RESULT_CHARS.saturating_sub(*target_chars);
+    for character in value.chars().take(remaining) {
+        target.push(character);
+        *target_chars += 1;
+    }
+}
+
+fn normalize_resource_link(resource: rmcp::model::Resource) -> Option<McpResourceLink> {
+    if resource.uri.chars().count() > MAX_RESOURCE_URI_CHARS
+        || validate_public_web_url(&resource.uri).is_err()
+    {
+        return None;
+    }
+    Some(McpResourceLink {
+        uri: resource.uri,
+        name: clean_label(&resource.name),
+        description: resource.description.as_deref().and_then(clean_label),
+        mime_type: resource.mime_type.as_deref().and_then(clean_label),
+    })
+}
+
+fn bounded_structured_content(value: Option<Value>) -> (Option<Value>, bool) {
+    let Some(candidate) = value else {
+        return (None, false);
+    };
+    let retained = serde_json::to_string(&candidate).is_ok_and(|serialized| {
+        serialized.chars().take(MAX_RESULT_CHARS + 1).count() <= MAX_RESULT_CHARS
+    });
+    if retained {
+        (Some(candidate), false)
+    } else {
+        (None, true)
+    }
+}
+
+/// Convertit un résultat MCP distant en un contrat local borné. Les blocs
+/// binaires ne sont jamais recopiés : seul un marqueur constant subsiste.
+pub fn normalize_tool_result(
+    server_id: &str,
+    native_name: &str,
+    result: CallToolResult,
+) -> McpToolResult {
+    let sources = tinyfish_origin(server_id, native_name)
+        .map(|origin| extract_tinyfish_sources(result.structured_content.as_ref(), origin))
+        .unwrap_or_default();
+    let (structured_content, structured_omitted) =
+        bounded_structured_content(result.structured_content);
+    let mut content = String::new();
+    let mut content_chars = 0;
+    let mut resource_links = Vec::new();
+    if structured_omitted {
+        append_result_text(&mut content, &mut content_chars, OMITTED_STRUCTURED_MARKER);
+    }
+
+    for block in result.content {
+        match block {
+            ContentBlock::Text(text) => {
+                append_result_text(&mut content, &mut content_chars, &text.text);
+            }
+            ContentBlock::Image(_) | ContentBlock::Audio(_) => {
+                append_result_text(&mut content, &mut content_chars, OMITTED_BINARY_MARKER);
+            }
+            ContentBlock::Resource(resource) => match resource.resource {
+                ResourceContents::TextResourceContents { text, .. } => {
+                    append_result_text(&mut content, &mut content_chars, &text);
+                }
+                ResourceContents::BlobResourceContents { .. } => {
+                    append_result_text(&mut content, &mut content_chars, OMITTED_BINARY_MARKER);
+                }
+                _ => {
+                    append_result_text(&mut content, &mut content_chars, OMITTED_BINARY_MARKER);
+                }
+            },
+            ContentBlock::ResourceLink(resource) => {
+                if resource_links.len() < MAX_RESOURCE_LINKS
+                    && let Some(link) = normalize_resource_link(resource)
+                {
+                    resource_links.push(link);
+                }
+            }
+            _ => append_result_text(&mut content, &mut content_chars, OMITTED_BINARY_MARKER),
+        }
+    }
+
+    McpToolResult {
+        content,
+        structured_content,
+        resource_links,
+        sources,
+        is_error: result.is_error.unwrap_or(false),
+    }
 }
 
 fn result_to_web_tool_result(
@@ -818,7 +1648,7 @@ fn result_to_web_tool_result(
     }
     Ok(WebToolResult {
         content: trimmed,
-        sources: extract_sources(result.structured_content.as_ref(), origin),
+        sources: extract_tinyfish_sources(result.structured_content.as_ref(), origin),
     })
 }
 
@@ -856,25 +1686,34 @@ impl TinyfishExecutor for RmcpTinyfishClient {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::VecDeque;
     use std::error::Error as StdError;
     use std::fmt;
     use std::io::{Read, Write};
     use std::net::SocketAddr;
+    use std::sync::Arc;
     use std::sync::Mutex as StdMutex;
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
     use std::thread;
     use std::time::Duration;
 
     use http::{HeaderName, StatusCode};
-    use rmcp::model::{ErrorCode, ErrorData, ProtocolVersion};
+    use rmcp::model::{
+        CallToolResult, ClientJsonRpcMessage, ClientRequest, ContentBlock, ErrorCode, ErrorData,
+        PingRequest, ProtocolVersion, RequestId, Resource, ResourceContents, Tool, ToolAnnotations,
+    };
     use rmcp::service::{ClientInitializeError, ClientLifecycleMode, ServiceError};
     use rmcp::transport::DynamicTransportError;
     use rmcp::transport::streamable_http_client::{
-        AuthRequiredError, HttpStatusError, InsufficientScopeError, StreamableHttpError,
+        AuthRequiredError, HttpStatusError, InsufficientScopeError, StreamableHttpClient,
+        StreamableHttpError, StreamableHttpPostResponse,
     };
 
     use super::*;
-    use crate::mcp::security::{MAX_SSE_EVENT_BYTES, validate_endpoint_static};
+    use crate::mcp::security::{
+        MAX_CATALOG_BYTES, MAX_RESULT_CHARS, MAX_SSE_EVENT_BYTES, MAX_TOOLS_PER_SERVER,
+        validate_endpoint_static,
+    };
     use crate::mcp::types::{McpAuthConfig, McpRuntimeServer, McpTransportKind};
 
     fn remote_server(auth: McpAuthConfig) -> McpRuntimeServer {
@@ -893,6 +1732,223 @@ mod tests {
 
     fn socket(value: &str) -> SocketAddr {
         value.parse().expect("adresse de test valide")
+    }
+
+    enum TestHttpBody {
+        ContentLength { declared: usize, body: Vec<u8> },
+        Chunked(Vec<Vec<u8>>),
+    }
+
+    fn spawn_json_response(
+        status: &'static str,
+        body: TestHttpBody,
+    ) -> (String, thread::JoinHandle<usize>) {
+        let listener =
+            std::net::TcpListener::bind("127.0.0.1:0").expect("listener HTTP local disponible");
+        let address = listener.local_addr().expect("adresse locale disponible");
+        let handle = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("connexion HTTP reçue");
+            stream
+                .set_read_timeout(Some(Duration::from_secs(2)))
+                .expect("timeout de lecture configurable");
+            stream
+                .set_write_timeout(Some(Duration::from_secs(2)))
+                .expect("timeout d'écriture configurable");
+            let mut request = [0_u8; 4096];
+            let _ = stream.read(&mut request);
+            let mut sent = 0;
+            match body {
+                TestHttpBody::ContentLength { declared, body } => {
+                    write!(
+                        stream,
+                        "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {declared}\r\nConnection: close\r\n\r\n"
+                    )
+                    .expect("en-têtes HTTP envoyés");
+                    if stream.write_all(&body).is_ok() {
+                        sent = body.len();
+                    }
+                }
+                TestHttpBody::Chunked(chunks) => {
+                    write!(
+                        stream,
+                        "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n"
+                    )
+                    .expect("en-têtes chunked envoyés");
+                    for chunk in chunks {
+                        if write!(stream, "{:X}\r\n", chunk.len()).is_err()
+                            || stream.write_all(&chunk).is_err()
+                            || stream.write_all(b"\r\n").is_err()
+                            || stream.flush().is_err()
+                        {
+                            break;
+                        }
+                        sent += chunk.len();
+                    }
+                    let _ = stream.write_all(b"0\r\n\r\n");
+                }
+            }
+            let _ = stream.flush();
+            sent
+        });
+        (format!("http://{address}/mcp"), handle)
+    }
+
+    fn padded_json_response(size: usize) -> Vec<u8> {
+        let mut body = br#"{"jsonrpc":"2.0","id":1,"result":{}}"#.to_vec();
+        assert!(body.len() <= size, "taille JSON de test suffisante");
+        body.resize(size, b' ');
+        body
+    }
+
+    fn ping_message() -> ClientJsonRpcMessage {
+        ClientJsonRpcMessage::request(
+            ClientRequest::PingRequest(PingRequest::default()),
+            RequestId::Number(1),
+        )
+    }
+
+    fn bounded_test_client() -> BoundedReqwestClient {
+        let inner = reqwest::Client::builder()
+            .no_proxy()
+            .redirect(reqwest::redirect::Policy::none())
+            .retry(reqwest::retry::never())
+            .build()
+            .expect("client reqwest de test");
+        BoundedReqwestClient::new(inner)
+    }
+
+    fn assert_fixed_body_limit_error(error: StreamableHttpError<reqwest::Error>, endpoint: &str) {
+        match &error {
+            StreamableHttpError::UnexpectedServerResponse(message) => {
+                assert_eq!(message.as_ref(), MCP_RESPONSE_TOO_LARGE_MESSAGE);
+            }
+            other => panic!("erreur de taille attendue, reçu {other:?}"),
+        }
+        let rendered = error.to_string();
+        assert!(!rendered.contains(endpoint));
+        assert!(!rendered.contains("EXTERNAL-BODY-SECRET"));
+    }
+
+    fn schema_with_padding(length: usize) -> Arc<JsonObject> {
+        Arc::new(
+            json!({ "type": "object", "padding": "x".repeat(length) })
+                .as_object()
+                .expect("schéma objet")
+                .clone(),
+        )
+    }
+
+    fn remote_tool(name: impl Into<String>) -> Tool {
+        Tool::new(name.into(), "Description distante", schema_with_padding(0))
+    }
+
+    type ToolPage = Result<(Vec<Tool>, Option<String>), McpErrorPayload>;
+
+    enum FakePages {
+        Ready(StdMutex<VecDeque<ToolPage>>),
+        Pending,
+    }
+
+    struct FakeSession {
+        pages: FakePages,
+        cursors: StdMutex<Vec<Option<String>>>,
+    }
+
+    impl FakeSession {
+        fn new(pages: Vec<ToolPage>) -> Self {
+            Self {
+                pages: FakePages::Ready(StdMutex::new(pages.into())),
+                cursors: StdMutex::new(Vec::new()),
+            }
+        }
+
+        fn pending() -> Self {
+            Self {
+                pages: FakePages::Pending,
+                cursors: StdMutex::new(Vec::new()),
+            }
+        }
+
+        fn requested_cursors(&self) -> Vec<Option<String>> {
+            self.cursors.lock().expect("cursors").clone()
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl McpSession for FakeSession {
+        async fn list_tools_page(
+            &self,
+            cursor: Option<String>,
+        ) -> Result<(Vec<Tool>, Option<String>), McpErrorPayload> {
+            self.cursors.lock().expect("cursors").push(cursor);
+            match &self.pages {
+                FakePages::Ready(pages) => pages
+                    .lock()
+                    .expect("pages")
+                    .pop_front()
+                    .expect("page de test disponible"),
+                FakePages::Pending => std::future::pending().await,
+            }
+        }
+
+        async fn call_tool(
+            &self,
+            _name: &str,
+            _arguments: serde_json::Map<String, Value>,
+        ) -> Result<rmcp::model::CallToolResult, McpErrorPayload> {
+            panic!("aucun appel d'outil attendu pendant la découverte")
+        }
+
+        async fn close(&self) {}
+    }
+
+    fn assert_generic_invalid_response(error: &McpErrorPayload, external: &str) {
+        assert_eq!(error.kind, McpErrorKind::InvalidResponse);
+        if !external.is_empty() {
+            assert!(!error.message.contains(external));
+        }
+    }
+
+    fn expected_descriptor(tool: &Tool) -> super::super::types::McpToolDescriptor {
+        super::super::types::McpToolDescriptor {
+            native_name: tool.name.to_string(),
+            title: tool.title.clone(),
+            description: tool.description.as_ref().map(ToString::to_string),
+            input_schema: Value::Object(tool.input_schema.as_ref().clone()),
+            output_schema: tool
+                .output_schema
+                .as_ref()
+                .map(|schema| Value::Object(schema.as_ref().clone())),
+            annotations: tool
+                .annotations
+                .as_ref()
+                .map(|annotations| serde_json::to_value(annotations).expect("annotations")),
+            // Le contenu du digest n'affecte pas la taille JSON : uniquement sa longueur fixe.
+            schema_hash: format!("sha256:{}", "0".repeat(64)),
+        }
+    }
+
+    fn serialized_descriptor_catalog_size(tools: &[Tool]) -> usize {
+        let descriptors: Vec<_> = tools.iter().map(expected_descriptor).collect();
+        serde_json::to_vec(&descriptors)
+            .expect("catalogue attendu sérialisable")
+            .len()
+    }
+
+    fn call_result(
+        content: Vec<ContentBlock>,
+        structured_content: Option<Value>,
+        is_error: Option<bool>,
+    ) -> CallToolResult {
+        let mut result = CallToolResult::default();
+        result.content = content;
+        result.structured_content = structured_content;
+        result.is_error = is_error;
+        result
+    }
+
+    fn web_resource(uri: impl Into<String>, name: impl Into<String>) -> ContentBlock {
+        ContentBlock::resource_link(Resource::new(uri, name))
     }
 
     #[derive(Debug)]
@@ -1070,6 +2126,115 @@ mod tests {
         assert_eq!(config.control_request_timeout, Duration::from_secs(5));
         assert_eq!(config.session_recovery_timeout, Duration::from_secs(5));
         assert_eq!(config.max_sse_event_size, MAX_SSE_EVENT_BYTES);
+    }
+
+    #[tokio::test]
+    async fn bounded_client_rejects_json_content_length_before_reading_the_body() {
+        let (endpoint, server_thread) = spawn_json_response(
+            "200 OK",
+            TestHttpBody::ContentLength {
+                declared: MAX_MCP_JSON_BODY_BYTES + 1,
+                body: b"EXTERNAL-BODY-SECRET".to_vec(),
+            },
+        );
+
+        let error = bounded_test_client()
+            .post_message(
+                Arc::from(endpoint.as_str()),
+                ping_message(),
+                None,
+                None,
+                HashMap::new(),
+            )
+            .await
+            .expect_err("Content-Length dépasse la limite");
+
+        server_thread.join().expect("serveur local terminé");
+        assert_fixed_body_limit_error(error, &endpoint);
+    }
+
+    #[tokio::test]
+    async fn bounded_client_stops_a_chunked_json_body_at_the_limit() {
+        let mut body = b"EXTERNAL-BODY-SECRET".to_vec();
+        body.resize(MAX_MCP_JSON_BODY_BYTES + 1, b'x');
+        let chunks = body.chunks(16 * 1024).map(<[u8]>::to_vec).collect();
+        let (endpoint, server_thread) =
+            spawn_json_response("200 OK", TestHttpBody::Chunked(chunks));
+
+        let error = bounded_test_client()
+            .post_message(
+                Arc::from(endpoint.as_str()),
+                ping_message(),
+                None,
+                None,
+                HashMap::new(),
+            )
+            .await
+            .expect_err("le compteur chunked dépasse la limite");
+
+        let sent = server_thread.join().expect("serveur local terminé");
+        assert!(sent >= MAX_MCP_JSON_BODY_BYTES);
+        assert_fixed_body_limit_error(error, &endpoint);
+    }
+
+    #[tokio::test]
+    async fn bounded_client_accepts_the_exact_json_limit_and_decodes_a_normal_response() {
+        for body in [
+            padded_json_response(MAX_MCP_JSON_BODY_BYTES),
+            padded_json_response(256),
+        ] {
+            let declared = body.len();
+            let (endpoint, server_thread) =
+                spawn_json_response("200 OK", TestHttpBody::ContentLength { declared, body });
+
+            let response = bounded_test_client()
+                .post_message(
+                    Arc::from(endpoint.as_str()),
+                    ping_message(),
+                    None,
+                    None,
+                    HashMap::new(),
+                )
+                .await
+                .expect("JSON borné décodé");
+
+            server_thread.join().expect("serveur local terminé");
+            assert!(matches!(response, StreamableHttpPostResponse::Json(..)));
+        }
+    }
+
+    #[tokio::test]
+    async fn bounded_client_rejects_oversized_http_errors_without_body_or_url() {
+        for (status, session_id) in [
+            ("400 Bad Request", None),
+            ("401 Unauthorized", None),
+            ("403 Forbidden", None),
+            ("404 Not Found", Some(Arc::<str>::from("session-1"))),
+            ("429 Too Many Requests", None),
+            ("500 Internal Server Error", None),
+        ] {
+            let (endpoint, server_thread) = spawn_json_response(
+                status,
+                TestHttpBody::ContentLength {
+                    declared: MAX_MCP_JSON_BODY_BYTES + 1,
+                    body: b"EXTERNAL-BODY-SECRET".to_vec(),
+                },
+            );
+
+            let error = bounded_test_client()
+                .post_message(
+                    Arc::from(endpoint.as_str()),
+                    ping_message(),
+                    session_id,
+                    None,
+                    HashMap::new(),
+                )
+                .await
+                .expect_err("erreur HTTP surdimensionnée refusée");
+
+            server_thread.join().expect("serveur local terminé");
+            assert_fixed_body_limit_error(error, &endpoint);
+        }
     }
 
     #[tokio::test]
@@ -1714,6 +2879,489 @@ mod tests {
         assert_connector::<RmcpConnector>();
     }
 
+    #[tokio::test]
+    async fn discovery_follows_every_cursor_and_preserves_page_order() {
+        let session = FakeSession::new(vec![
+            Ok((vec![remote_tool("alpha")], Some("page-2".to_owned()))),
+            Ok((vec![remote_tool("beta")], Some("page-3".to_owned()))),
+            Ok((vec![remote_tool("gamma")], None)),
+        ]);
+
+        let tools = discover_tools(&session).await.expect("découverte valide");
+
+        assert_eq!(
+            tools
+                .iter()
+                .map(|tool| tool.native_name.as_str())
+                .collect::<Vec<_>>(),
+            ["alpha", "beta", "gamma"]
+        );
+        assert_eq!(
+            session.requested_cursors(),
+            [None, Some("page-2".to_owned()), Some("page-3".to_owned())]
+        );
+    }
+
+    #[tokio::test]
+    async fn discovery_accepts_exact_page_and_tool_limits() {
+        let pages = (0..32)
+            .map(|page| {
+                let tools = (0..8)
+                    .map(|index| remote_tool(format!("tool-{page}-{index}")))
+                    .collect();
+                let cursor = (page < 31).then(|| format!("page-{}", page + 2));
+                Ok((tools, cursor))
+            })
+            .collect();
+        let session = FakeSession::new(pages);
+
+        let tools = discover_tools(&session)
+            .await
+            .expect("32 pages et 256 outils sont permis");
+
+        assert_eq!(tools.len(), MAX_TOOLS_PER_SERVER);
+        assert_eq!(session.requested_cursors().len(), 32);
+    }
+
+    #[tokio::test]
+    async fn discovery_rejects_a_page_beyond_the_limit_without_requesting_it() {
+        let pages = (0..33)
+            .map(|page| {
+                let cursor = (page < 32).then(|| format!("cursor-{page}"));
+                Ok((Vec::new(), cursor))
+            })
+            .collect();
+        let session = FakeSession::new(pages);
+
+        let error = discover_tools(&session)
+            .await
+            .expect_err("une 33e page est interdite");
+
+        assert_generic_invalid_response(&error, "cursor-31");
+        assert_eq!(session.requested_cursors().len(), 32);
+    }
+
+    #[tokio::test]
+    async fn discovery_rejects_repeated_cursors_and_tool_overflow() {
+        let looped = FakeSession::new(vec![
+            Ok((Vec::new(), Some("same-cursor".to_owned()))),
+            Ok((Vec::new(), Some("same-cursor".to_owned()))),
+        ]);
+        let loop_error = discover_tools(&looped)
+            .await
+            .expect_err("un curseur répété forme une boucle");
+        assert_generic_invalid_response(&loop_error, "same-cursor");
+
+        let overflow = FakeSession::new(vec![Ok((
+            (0..=MAX_TOOLS_PER_SERVER)
+                .map(|index| remote_tool(format!("tool-{index}")))
+                .collect(),
+            None,
+        ))]);
+        let overflow_error = discover_tools(&overflow)
+            .await
+            .expect_err("257 outils sont interdits");
+        assert_generic_invalid_response(&overflow_error, "tool-256");
+    }
+
+    #[tokio::test]
+    async fn discovery_rejects_duplicate_empty_long_and_control_names() {
+        let cases = vec![
+            vec![remote_tool("duplicate"), remote_tool("duplicate")],
+            vec![remote_tool("")],
+            vec![remote_tool("   ")],
+            vec![remote_tool("x".repeat(129))],
+            vec![remote_tool("unsafe\nname")],
+        ];
+
+        for tools in cases {
+            let external = tools[0].name.to_string();
+            let session = FakeSession::new(vec![Ok((tools, None))]);
+            let error = discover_tools(&session)
+                .await
+                .expect_err("nom distant invalide");
+            assert_generic_invalid_response(&error, &external);
+        }
+    }
+
+    #[tokio::test]
+    async fn discovery_validates_both_input_and_output_schemas() {
+        fn too_deep_schema() -> Arc<JsonObject> {
+            let mut nested = json!({ "type": "string" });
+            for _ in 0..40 {
+                nested = json!({ "items": nested });
+            }
+            Arc::new(nested.as_object().expect("schéma objet").clone())
+        }
+
+        let mut invalid_input = remote_tool("invalid-input");
+        invalid_input.input_schema = too_deep_schema();
+        let mut invalid_output = remote_tool("invalid-output");
+        invalid_output.output_schema = Some(too_deep_schema());
+
+        for (tool, external) in [
+            (invalid_input, "invalid-input"),
+            (invalid_output, "invalid-output"),
+        ] {
+            let session = FakeSession::new(vec![Ok((vec![tool], None))]);
+            let error = discover_tools(&session)
+                .await
+                .expect_err("schéma distant invalide");
+            assert_generic_invalid_response(&error, external);
+        }
+    }
+
+    #[tokio::test]
+    async fn discovery_cleans_and_bounds_untrusted_labels_and_annotations() {
+        let mut tool = remote_tool("labels");
+        tool.title = Some(format!("  Titre\n{}  ", "t".repeat(700)));
+        tool.description = Some(format!("  Description\r{}  ", "d".repeat(700)).into());
+        tool.annotations = Some(ToolAnnotations::with_title(format!(
+            "  Annotation\t{}  ",
+            "a".repeat(700)
+        )));
+        let original = tool.clone();
+        let session = FakeSession::new(vec![Ok((vec![tool], None))]);
+
+        let descriptors = discover_tools(&session).await.expect("outil nettoyé");
+        let descriptor = &descriptors[0];
+
+        for label in [
+            descriptor.title.as_ref().expect("titre"),
+            descriptor.description.as_ref().expect("description"),
+            descriptor.annotations.as_ref().expect("annotations")["title"]
+                .as_str()
+                .expect("titre d'annotation"),
+        ] {
+            assert!(label.chars().count() <= 500);
+            assert!(!label.chars().any(char::is_control));
+            assert_eq!(label, label.trim());
+        }
+        assert_eq!(
+            original.title.as_deref(),
+            Some(format!("  Titre\n{}  ", "t".repeat(700)).as_str())
+        );
+    }
+
+    #[tokio::test]
+    async fn discovery_hash_covers_the_complete_contract_and_has_a_known_digest() {
+        async fn hash(tool: Tool) -> String {
+            let session = FakeSession::new(vec![Ok((vec![tool], None))]);
+            discover_tools(&session).await.expect("hash calculé")[0]
+                .schema_hash
+                .clone()
+        }
+
+        let base = remote_tool("known");
+        let repeated = base.clone();
+        let renamed = remote_tool("renamed");
+        let mut changed_input = base.clone();
+        changed_input.input_schema = schema_with_padding(1);
+        let mut changed_output = base.clone();
+        changed_output.output_schema = Some(schema_with_padding(1));
+        let mut changed_annotations = base.clone();
+        changed_annotations.annotations = Some(ToolAnnotations::new().read_only(true));
+
+        let base_hash = hash(base).await;
+        let variants = [
+            hash(renamed).await,
+            hash(changed_input).await,
+            hash(changed_output).await,
+            hash(changed_annotations).await,
+        ];
+
+        assert_eq!(base_hash, hash(repeated).await);
+        assert!(variants.iter().all(|variant| variant != &base_hash));
+        assert_eq!(
+            base_hash,
+            "sha256:07acd62f7cc123c25a109e94110e9e4d049ba93510a0921813b5337234bad5b6"
+        );
+    }
+
+    #[tokio::test]
+    async fn discovery_counts_the_exact_serialized_catalog_envelope() {
+        let mut tools: Vec<_> = (0..9)
+            .map(|index| {
+                let mut tool = remote_tool(format!("catalog-{index}"));
+                tool.output_schema = Some(schema_with_padding(0));
+                tool
+            })
+            .collect();
+        let initial_size = serialized_descriptor_catalog_size(&tools);
+        let mut remaining = MAX_CATALOG_BYTES - initial_size;
+        for index in 0..(tools.len() * 2) {
+            let padding = remaining.min(60_000);
+            if index % 2 == 0 {
+                tools[index / 2].input_schema = schema_with_padding(padding);
+            } else {
+                tools[index / 2].output_schema = Some(schema_with_padding(padding));
+            }
+            remaining -= padding;
+        }
+        assert_eq!(remaining, 0, "capacité suffisante pour atteindre 1 Mio");
+        assert_eq!(
+            serialized_descriptor_catalog_size(&tools),
+            MAX_CATALOG_BYTES
+        );
+
+        let exact = FakeSession::new(vec![Ok((tools.clone(), None))]);
+        assert_eq!(
+            discover_tools(&exact)
+                .await
+                .expect("catalogue exact accepté")
+                .len(),
+            tools.len()
+        );
+
+        match Arc::make_mut(&mut tools[0].input_schema).get_mut("padding") {
+            Some(Value::String(padding)) => padding.push('x'),
+            _ => panic!("padding de schéma disponible"),
+        }
+        assert_eq!(
+            serialized_descriptor_catalog_size(&tools),
+            MAX_CATALOG_BYTES + 1
+        );
+        let oversized = FakeSession::new(vec![Ok((tools, None))]);
+        let error = discover_tools(&oversized)
+            .await
+            .expect_err("un seul octet au-delà est interdit");
+        assert_generic_invalid_response(&error, "catalog-0");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn bounded_discovery_has_a_fixed_fifteen_second_deadline() {
+        let session = FakeSession::pending();
+        let started_at = tokio::time::Instant::now();
+
+        let error = discover_tools_bounded(&session)
+            .await
+            .expect_err("la découverte bloquée doit expirer");
+
+        assert_eq!(error.kind, McpErrorKind::Timeout);
+        assert_eq!(error.message, public_error_message(McpErrorKind::Timeout));
+        assert_eq!(started_at.elapsed(), Duration::from_secs(15));
+    }
+
+    #[test]
+    fn normalization_preserves_text_structured_json_and_error_state_without_mutation() {
+        let raw = call_result(
+            vec![ContentBlock::text("premier"), ContentBlock::text("second")],
+            Some(json!({ "matches": [1, 2, 3] })),
+            Some(true),
+        );
+        let untouched = raw.clone();
+
+        let normalized = normalize_tool_result("remote-docs", "lookup", raw.clone());
+
+        assert_eq!(raw, untouched);
+        assert_eq!(normalized.content, "premier\nsecond");
+        assert_eq!(
+            normalized.structured_content,
+            Some(json!({ "matches": [1, 2, 3] }))
+        );
+        assert!(normalized.resource_links.is_empty());
+        assert!(normalized.sources.is_empty());
+        assert!(normalized.is_error);
+    }
+
+    #[test]
+    fn normalization_omits_every_binary_payload_with_a_fixed_marker() {
+        let raw = call_result(
+            vec![
+                ContentBlock::text("avant"),
+                ContentBlock::image("IMAGE-BASE64-SECRET", "image/png"),
+                ContentBlock::audio("AUDIO-BASE64-SECRET", "audio/wav"),
+                ContentBlock::resource(ResourceContents::blob(
+                    "RESOURCE-BASE64-SECRET",
+                    "https://example.com/blob",
+                )),
+                ContentBlock::resource(ResourceContents::text(
+                    "ressource textuelle",
+                    "https://example.com/text",
+                )),
+                ContentBlock::text("après"),
+            ],
+            None,
+            None,
+        );
+
+        let normalized = normalize_tool_result("remote-docs", "lookup", raw);
+
+        for secret in [
+            "IMAGE-BASE64-SECRET",
+            "AUDIO-BASE64-SECRET",
+            "RESOURCE-BASE64-SECRET",
+        ] {
+            assert!(!normalized.content.contains(secret));
+        }
+        assert!(normalized.content.contains("avant"));
+        assert!(normalized.content.contains("ressource textuelle"));
+        assert!(normalized.content.contains("après"));
+        assert_eq!(
+            normalized.content.matches("[Contenu binaire omis]").count(),
+            3
+        );
+        assert!(!normalized.is_error);
+    }
+
+    #[test]
+    fn normalization_keeps_only_safe_bounded_resource_links_and_twenty_valid_items() {
+        let exact_uri = format!(
+            "https://example.com/{}",
+            "a".repeat(2_048 - "https://example.com/".len())
+        );
+        let oversized_uri = format!("{exact_uri}x");
+        let mut content = vec![
+            web_resource("javascript:alert(1)", "script"),
+            web_resource("file:///etc/passwd", "file"),
+            web_resource("http://127.0.0.1/private", "private"),
+            web_resource(oversized_uri, "oversized"),
+            ContentBlock::resource_link(
+                Resource::new(&exact_uri, format!("  Nom\n{}  ", "n".repeat(700)))
+                    .with_description(format!("  Description\r{}  ", "d".repeat(700)))
+                    .with_mime_type(format!("  text/plain\t{}  ", "m".repeat(700))),
+            ),
+        ];
+        content.extend(
+            (0..25).map(|index| web_resource(format!("https://example.com/{index}"), "doc")),
+        );
+
+        let normalized =
+            normalize_tool_result("remote-docs", "lookup", call_result(content, None, None));
+
+        assert_eq!(normalized.resource_links.len(), 20);
+        let exact = &normalized.resource_links[0];
+        assert_eq!(exact.uri, exact_uri);
+        for metadata in [
+            exact.name.as_deref().expect("nom"),
+            exact.description.as_deref().expect("description"),
+            exact.mime_type.as_deref().expect("type MIME"),
+        ] {
+            assert!(metadata.chars().count() <= 500);
+            assert!(!metadata.chars().any(char::is_control));
+            assert_eq!(metadata, metadata.trim());
+        }
+        assert!(
+            normalized
+                .resource_links
+                .iter()
+                .all(|link| link.uri.starts_with("https://example.com/"))
+        );
+    }
+
+    #[test]
+    fn normalization_accepts_exact_result_limits_and_bounds_overflows() {
+        let exact_text = "é".repeat(MAX_RESULT_CHARS);
+        let exact_json = Value::String("x".repeat(MAX_RESULT_CHARS - 2));
+        assert_eq!(exact_json.to_string().chars().count(), MAX_RESULT_CHARS);
+        let exact = normalize_tool_result(
+            "remote-docs",
+            "lookup",
+            call_result(
+                vec![ContentBlock::text(exact_text.clone())],
+                Some(exact_json.clone()),
+                None,
+            ),
+        );
+        assert_eq!(exact.content, exact_text);
+        assert_eq!(exact.structured_content, Some(exact_json));
+
+        let overflow = normalize_tool_result(
+            "remote-docs",
+            "lookup",
+            call_result(
+                vec![ContentBlock::text("é".repeat(MAX_RESULT_CHARS + 1))],
+                Some(Value::String("x".repeat(MAX_RESULT_CHARS - 1))),
+                None,
+            ),
+        );
+        assert_eq!(overflow.content.chars().count(), MAX_RESULT_CHARS);
+        assert!(overflow.structured_content.is_none());
+    }
+
+    #[test]
+    fn normalization_marks_an_omitted_structured_result_even_without_text() {
+        let normalized = normalize_tool_result(
+            "remote-docs",
+            "lookup",
+            call_result(
+                Vec::new(),
+                Some(Value::String("x".repeat(MAX_RESULT_CHARS))),
+                None,
+            ),
+        );
+
+        assert!(normalized.structured_content.is_none());
+        assert_eq!(normalized.content, "[Contenu structuré omis]");
+        assert!(normalized.content.chars().count() <= MAX_RESULT_CHARS);
+    }
+
+    #[test]
+    fn normalization_extracts_sources_only_for_exact_tinyfish_tool_mappings() {
+        let structured = json!({
+            "results": [{
+                "url": "https://example.com/doc",
+                "title": "Documentation"
+            }]
+        });
+        let cases = [
+            (
+                "tinyfish",
+                "search",
+                Some(super::super::types::WebToolName::Search),
+            ),
+            (
+                "tinyfish",
+                "fetch_content",
+                Some(super::super::types::WebToolName::FetchContent),
+            ),
+            ("tinyfish", "other", None),
+            ("remote-docs", "search", None),
+            ("TinyFish", "search", None),
+        ];
+
+        for (server_id, native_name, expected_origin) in cases {
+            let normalized = normalize_tool_result(
+                server_id,
+                native_name,
+                call_result(Vec::new(), Some(structured.clone()), None),
+            );
+            match expected_origin {
+                Some(origin) => {
+                    assert_eq!(normalized.sources.len(), 1);
+                    assert_eq!(normalized.sources[0].origin, origin);
+                    assert_eq!(normalized.sources[0].url, "https://example.com/doc");
+                }
+                None => assert!(normalized.sources.is_empty()),
+            }
+        }
+    }
+
+    #[test]
+    fn legacy_tinyfish_result_mapping_still_rejects_errors_and_empty_content() {
+        let error = result_to_web_tool_result(
+            CallToolResult::error(vec![ContentBlock::text("échec distant")]),
+            super::super::types::WebToolName::Search,
+        )
+        .expect_err("isError reste une erreur legacy");
+        assert_eq!(error.kind, McpErrorKind::InvalidResponse);
+        assert!(!error.message.contains("échec distant"));
+
+        let empty = result_to_web_tool_result(
+            CallToolResult::success(Vec::new()),
+            super::super::types::WebToolName::Search,
+        )
+        .expect_err("le contenu legacy vide reste refusé");
+        assert_eq!(empty.kind, McpErrorKind::InvalidResponse);
+
+        let success = result_to_web_tool_result(
+            CallToolResult::success(vec![ContentBlock::text("contenu legacy")]),
+            super::super::types::WebToolName::Search,
+        )
+        .expect("le chemin legacy reste fonctionnel");
+        assert_eq!(success.content, "contenu legacy");
+    }
+
     #[test]
     fn key_validation_requires_both_allowed_tools() {
         assert!(ensure_required_tools(&["search", "fetch_content"]).is_ok());
@@ -1739,15 +3387,19 @@ mod tests {
             "results": [
                 { "url": "javascript:alert(1)", "title": "danger" },
                 { "url": "file:///etc/passwd", "title": "local" },
-                { "url": "https://example.com", "title": "x".repeat(700) }
+                {
+                    "url": "https://example.com",
+                    "title": format!("  Documentation\n{}  ", "x".repeat(700))
+                }
             ]
         });
-        let sources = extract_sources(Some(&structured), super::super::types::WebToolName::Search);
+        let sources =
+            extract_tinyfish_sources(Some(&structured), super::super::types::WebToolName::Search);
         assert_eq!(sources.len(), 1);
         assert_eq!(sources[0].url, "https://example.com");
-        assert_eq!(
-            sources[0].title.as_ref().expect("title").chars().count(),
-            500
-        );
+        let title = sources[0].title.as_ref().expect("title");
+        assert!(title.chars().count() <= 500);
+        assert_eq!(title, title.trim());
+        assert!(!title.chars().any(char::is_control));
     }
 }
