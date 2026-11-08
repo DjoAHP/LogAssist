@@ -2,8 +2,8 @@ mod commands;
 pub mod mcp;
 
 use commands::{
-    delete_secret, get_secret, mcp_call, mcp_cancel, mcp_configure, mcp_delete_secret,
-    mcp_has_secret, set_secret,
+    delete_secret, execute_transaction, get_secret, mcp_call, mcp_cancel, mcp_configure,
+    mcp_delete_secret, mcp_has_secret, set_secret,
 };
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -23,7 +23,8 @@ pub fn run() {
             mcp_configure,
             mcp_delete_secret,
             mcp_call,
-            mcp_cancel
+            mcp_cancel,
+            execute_transaction
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

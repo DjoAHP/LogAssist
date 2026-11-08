@@ -1,3 +1,4 @@
+import { invoke } from "@tauri-apps/api/core"
 import Database from "@tauri-apps/plugin-sql"
 import {
   SCHEMA_VERSION,
@@ -13,10 +14,43 @@ import {
 
 let dbPromise: Promise<Database> | null = null
 
+export interface TransactionStatement {
+  sql: string
+  bind?: unknown[]
+}
+
 export function getDb(): Promise<Database> {
   if (!dbPromise) dbPromise = init()
   return dbPromise
 }
+
+export function createTransactionExecutor(
+  loadDb: () => Promise<unknown>,
+  runBatch: (statements: Array<{ sql: string; values: unknown[] }>) => Promise<void>,
+) {
+  let tail: Promise<void> = Promise.resolve()
+  return async (statements: TransactionStatement[]): Promise<void> => {
+    if (statements.length === 0) return
+    const previous = tail
+    let release!: () => void
+    tail = new Promise<void>((resolve) => { release = resolve })
+    await previous
+    try {
+      await loadDb()
+      await runBatch(statements.map((statement) => ({
+        sql: statement.sql,
+        values: statement.bind ?? [],
+      })))
+    } finally {
+      release()
+    }
+  }
+}
+
+export const executeTransaction = createTransactionExecutor(
+  getDb,
+  (statements) => invoke("execute_transaction", { statements }),
+)
 
 async function init(): Promise<Database> {
   const db = await Database.load("sqlite:logassist.db")
