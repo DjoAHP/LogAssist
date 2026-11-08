@@ -738,6 +738,45 @@ function parseAuth(value: unknown): McpAuthConfig {
   throw new Error("Mode d'authentification MCP invalide")
 }
 
+function characterCount(value: string): number {
+  return Array.from(value).length
+}
+
+function isLoopbackHost(hostname: string): boolean {
+  const normalized = hostname.toLowerCase()
+  if (normalized === "localhost" || normalized === "::1" || normalized === "[::1]") return true
+  const octets = normalized.split(".")
+  return octets.length === 4 && octets[0] === "127"
+    && octets.every((octet) => /^\d{1,3}$/.test(octet) && Number(octet) <= 255)
+}
+
+function parseEndpoint(value: unknown): string {
+  if (typeof value !== "string" || value.length === 0 || characterCount(value) > 2_048) {
+    throw new Error("Endpoint MCP invalide")
+  }
+  if (/[\u0000-\u0020\u007f]/.test(value) || !/^https?:\/\//i.test(value)) {
+    throw new Error("Endpoint MCP invalide")
+  }
+  const prefix = /^https?:\/\//i.exec(value)
+  const afterPrefix = value.slice(prefix?.[0].length ?? 0)
+  const authorityEnd = afterPrefix.search(/[/?#]/)
+  const authority = authorityEnd === -1 ? afterPrefix : afterPrefix.slice(0, authorityEnd)
+  if (authority === "" || authority.includes("@")) throw new Error("Endpoint MCP invalide")
+
+  let endpoint: URL
+  try { endpoint = new URL(value) }
+  catch { throw new Error("Endpoint MCP invalide") }
+  if (endpoint.username !== "" || endpoint.password !== "" || value.includes("#")) {
+    throw new Error("Endpoint MCP invalide")
+  }
+  const isHttps = endpoint.protocol === "https:"
+  const isLocalHttp = endpoint.protocol === "http:" && isLoopbackHost(endpoint.hostname)
+  if (!isHttps && !isLocalHttp) throw new Error("Un MCP distant exige HTTPS ; HTTP est limité à la boucle locale")
+  const normalized = endpoint.toString()
+  if (characterCount(normalized) > 2_048) throw new Error("Endpoint MCP invalide")
+  return normalized
+}
+
 function parseServer(value: unknown): McpServerConfig {
   const server = record(value, "serveur")
   exactKeys(server, ["id", "name", "endpoint", "transport", "auth", "timeoutMs"], "serveur")
@@ -750,16 +789,10 @@ function parseServer(value: unknown): McpServerConfig {
   if (!Number.isInteger(server.timeoutMs) || (server.timeoutMs as number) < 5_000 || (server.timeoutMs as number) > 300_000) {
     throw new Error("Timeout MCP invalide")
   }
-  if (typeof server.endpoint !== "string" || server.endpoint.length > 2_048) throw new Error("Endpoint MCP invalide")
-  const endpoint = new URL(server.endpoint)
-  const local = endpoint.hostname === "localhost" || endpoint.hostname === "127.0.0.1" || endpoint.hostname === "[::1]"
-  if (endpoint.protocol !== "https:" && !(endpoint.protocol === "http:" && local)) {
-    throw new Error("Un MCP distant exige HTTPS ; HTTP est limité à la boucle locale")
-  }
   return {
     id: server.id,
     name: server.name.trim(),
-    endpoint: endpoint.toString(),
+    endpoint: parseEndpoint(server.endpoint),
     transport: "streamable_http",
     auth: parseAuth(server.auth),
     timeoutMs: server.timeoutMs as number,
@@ -793,8 +826,8 @@ function authKey(auth: McpAuthConfig): string {
 }
 
 export function diffMcpImport(
-  incoming: McpServerConfig[],
-  existing: McpServerConfig[],
+  incoming: readonly McpServerConfig[],
+  existing: readonly McpServerConfig[],
 ): McpImportDiff[] {
   const byId = new Map(existing.map((server) => [server.id, server]))
   return incoming.map((server) => {

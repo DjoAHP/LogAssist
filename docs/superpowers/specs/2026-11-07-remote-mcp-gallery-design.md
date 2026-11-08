@@ -332,6 +332,11 @@ valeur candidate avant de quitter Rust.
 - paramètres de requête admis comme métadonnées visibles, jamais comme stockage
   recommandé d'un secret.
 
+Avant la normalisation WHATWG, l'import exige une forme brute `http(s)://`,
+refuse les espaces et caractères de contrôle non encodés, et inspecte
+explicitement l'autorité pour interdire tout userinfo. La limite de 2 048
+caractères est vérifiée avant et après normalisation.
+
 ### 9.2 Protection SSRF
 
 Pour un domaine public, Rust résout les adresses avant la connexion et refuse
