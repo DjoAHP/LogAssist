@@ -6,7 +6,7 @@
 
 **Architecture:** SQLite et React conservent les métadonnées non sensibles et le catalogue ; Rust valide les destinations, lie les secrets au Credential Manager, gère les connexions `rmcp` et exécute les outils. Un orchestrateur TypeScript remplace `runWebAgent`, route les aliases unifiés, demande les approbations et préserve le comportement TinyFish/Web.
 
-**Tech Stack:** React 19, TypeScript strict, Tailwind 3, Vitest 5, Tauri 2, Rust 2024, SQLite (`tauri-plugin-sql`), `rmcp` 3.8, `reqwest` 0.13.5, `jsonschema` 0.60.2, `sha2` 0.11.1.
+**Tech Stack:** React 19, TypeScript strict, Tailwind 3, Vitest 5, Tauri 2, Rust 2024, SQLite (`tauri-plugin-sql` + `sqlx` 0.8.6 pour les transactions), `rmcp` 3.8, `reqwest` 0.13.5, `jsonschema` 0.60.2, `sha2` 0.11.1.
 
 ---
 
@@ -38,8 +38,8 @@ cargo test
 
 ### Persistance et contrats TypeScript
 
-- Modifier `src/lib/db/database.ts` : primitive transactionnelle sérialisée.
-- Créer `src/lib/db/database.test.ts` : commit, rollback et sérialisation.
+- Modifier `src/lib/db/database.ts` : sérialisation des lots et pont IPC transactionnel.
+- Créer `src/lib/db/database.test.ts` : lots vides, mapping, concurrence et reprise après erreur.
 - Modifier `src/lib/db/migrations.ts` : migration V9.
 - Modifier `src/lib/db/migrations.test.ts` : couverture V8 → V9 et base fraîche.
 - Créer `src/lib/db/mcpServers.ts` : repository serveurs/outils, sans secret.
@@ -51,6 +51,7 @@ cargo test
 ### Backend Rust
 
 - Modifier `src-tauri/Cargo.toml` et `src-tauri/Cargo.lock` : dépendances explicites.
+- Créer `src-tauri/src/commands/database.rs` : vraie transaction SQLx sur le pool du plugin.
 - Modifier `src-tauri/src/mcp/types.rs` : DTO dynamiques et erreurs.
 - Modifier `src-tauri/src/mcp/security.rs` : URL, headers, JSON Schema et limites.
 - Créer `src-tauri/src/mcp/credentials.rs` : enveloppe et empreinte des secrets.
@@ -85,133 +86,148 @@ cargo test
 
 ---
 
-### Task 1: Ajouter une primitive SQLite transactionnelle
+### Task 1: Ajouter un pont transactionnel SQLite Rust
 
 **Files:**
-- Create: `src/lib/db/database.test.ts`
 - Modify: `src/lib/db/database.ts`
+- Create: `src/lib/db/database.test.ts`
+- Create: `src-tauri/src/commands/database.rs`
+- Modify: `src-tauri/src/commands/mod.rs`
+- Modify: `src-tauri/src/lib.rs`
+- Modify: `src-tauri/Cargo.toml`
+- Modify: `src-tauri/Cargo.lock`
 
-- [ ] **Step 1: Écrire les tests rouges commit/rollback/sérialisation**
+- [x] **Step 1: Prouver que les lots frontend sont sérialisés et reprennent après erreur**
 
-```ts
-import { beforeEach, describe, expect, it, vi } from "vitest"
-
-const execute = vi.fn()
-const select = vi.fn()
-const db = { execute, select }
-
-import { createTransactionRunner } from "./database"
-
-beforeEach(() => {
-  vi.clearAllMocks()
-  execute.mockResolvedValue({})
-  select.mockResolvedValue([])
-})
-
-describe("transaction SQLite", () => {
-  it("commit après le travail", async () => {
-    const transaction = createTransactionRunner(async () => db as never)
-    await transaction(async (tx) => {
-      await tx.execute("INSERT INTO settings (key, value) VALUES (?, ?)", ["k", "v"])
-    })
-    expect(execute.mock.calls.map(([sql]) => sql)).toEqual([
-      "BEGIN IMMEDIATE",
-      "INSERT INTO settings (key, value) VALUES (?, ?)",
-      "COMMIT",
-    ])
-  })
-
-  it("rollback et propage l'erreur", async () => {
-    const transaction = createTransactionRunner(async () => db as never)
-    const failure = new Error("insert impossible")
-    await expect(transaction(async () => { throw failure })).rejects.toBe(failure)
-    expect(execute).toHaveBeenCalledWith("ROLLBACK")
-  })
-
-  it("sérialise deux transactions concurrentes", async () => {
-    const transaction = createTransactionRunner(async () => db as never)
-    const order: string[] = []
-    let releaseFirst!: () => void
-    const gate = new Promise<void>((resolve) => { releaseFirst = resolve })
-    const first = transaction(async () => { order.push("first:start"); await gate; order.push("first:end") })
-    const second = transaction(async () => { order.push("second") })
-    await Promise.resolve()
-    expect(order).toEqual(["first:start"])
-    releaseFirst()
-    await Promise.all([first, second])
-    expect(order).toEqual(["first:start", "first:end", "second"])
-  })
-})
-```
-
-- [ ] **Step 2: Exécuter le test et constater l'absence de `transaction`**
-
-Run:
-
-```bash
-../../node_modules/.bin/vitest run --isolate src/lib/db/database.test.ts
-```
-
-Expected: FAIL avec `transaction is not exported`.
-
-- [ ] **Step 3: Ajouter le contrat et la file transactionnelle**
+Les tests TypeScript couvrent cinq comportements : lot vide sans chargement ni
+IPC, mapping `bind` vers `values`, ordre FIFO sous concurrence, reprise après
+échec de `loadDb`, et reprise après échec IPC.
 
 ```ts
-export interface DatabaseTransaction {
-  execute(sql: string, bind?: unknown[]): Promise<void>
-  select<T>(sql: string, bind?: unknown[]): Promise<T[]>
+export interface TransactionStatement {
+  sql: string
+  bind?: unknown[]
 }
 
-export function createTransactionRunner(loadDb: () => Promise<Database>) {
+export function createTransactionExecutor(
+  loadDb: () => Promise<unknown>,
+  runBatch: (statements: Array<{ sql: string; values: unknown[] }>) => Promise<void>,
+) {
   let tail: Promise<void> = Promise.resolve()
-  return async function run<T>(work: (tx: DatabaseTransaction) => Promise<T>): Promise<T> {
+  return async (statements: TransactionStatement[]): Promise<void> => {
+    if (statements.length === 0) return
     const previous = tail
     let release!: () => void
     tail = new Promise<void>((resolve) => { release = resolve })
     await previous
-    let began = false
     try {
-      const db = await loadDb()
-      await db.execute("BEGIN IMMEDIATE")
-      began = true
-      const tx: DatabaseTransaction = {
-        execute: async (sql, bind = []) => { await db.execute(sql, bind) },
-        select: async <Row>(sql: string, bind: unknown[] = []) =>
-          (await db.select(sql, bind)) as Row[],
-      }
-      const result = await work(tx)
-      await db.execute("COMMIT")
-      return result
-    } catch (error) {
-      if (began) {
-        const db = await loadDb()
-        await db.execute("ROLLBACK").catch(() => undefined)
-      }
-      throw error
+      await loadDb()
+      await runBatch(statements.map((statement) => ({
+        sql: statement.sql,
+        values: statement.bind ?? [],
+      })))
     } finally {
       release()
     }
   }
 }
-
-export const transaction = createTransactionRunner(getDb)
 ```
 
-- [ ] **Step 4: Passer le test ciblé et le typecheck**
+Rouge attendu : `createTransactionExecutor is not a function`.
+
+```bash
+../../node_modules/.bin/vitest run --isolate src/lib/db/database.test.ts
+```
+
+- [x] **Step 2: Exposer une seule commande IPC par lot**
+
+```ts
+export const executeTransaction = createTransactionExecutor(
+  getDb,
+  (statements) => invoke("execute_transaction", { statements }),
+)
+```
+
+Le frontend ne transmet jamais `BEGIN`, `COMMIT` ou `ROLLBACK`. La classe
+`Database` du plugin représente un chemin de pool, pas une connexion épinglée.
+
+- [x] **Step 3: Ajouter une vraie transaction SQLx sur le pool existant**
+
+Ajouter la dépendance explicite :
+
+```toml
+sqlx = { version = "0.8.6", default-features = false, features = ["sqlite", "runtime-tokio"] }
+```
+
+La commande utilise `tauri_plugin_sql::DbInstances`, clone uniquement le
+`SqlitePool` associé à `sqlite:logassist.db`, libère le read-lock, puis ouvre une
+transaction SQLx unique.
+
+```rust
+async fn execute_on_pool(
+    pool: &SqlitePool,
+    statements: Vec<TransactionStatement>,
+) -> Result<(), TransactionError> {
+    let statements = validate_statements(statements)?;
+    let mut transaction = pool.begin().await.map_err(|_| TransactionError::Database)?;
+
+    for statement in statements {
+        let mut query = sqlx::query(&statement.sql);
+        for value in statement.values {
+            query = match value {
+                SqliteBind::Null => query.bind(Option::<String>::None),
+                SqliteBind::Bool(value) => query.bind(value),
+                SqliteBind::Integer(value) => query.bind(value),
+                SqliteBind::Float(value) => query.bind(value),
+                SqliteBind::Text(value) => query.bind(value),
+            };
+        }
+        if query.execute(&mut *transaction).await.is_err() {
+            let _ = transaction.rollback().await;
+            return Err(TransactionError::Database);
+        }
+    }
+
+    transaction.commit().await.map_err(|_| TransactionError::Database)
+}
+```
+
+Bornes obligatoires avant ouverture de la transaction : 1 à 1 024 statements,
+SQL non vide limité à 64 Kio, 64 binds maximum par statement. Seuls `null`,
+booléen, chaîne, entier signé/non signé représentable et flottant fini sont
+acceptés. Arrays, objets et nombres hors plage sont refusés. Les erreurs
+publiques restent `Lot transactionnel invalide` ou
+`Transaction SQLite impossible`, sans SQL ni bind.
+
+- [x] **Step 4: Enregistrer et tester la commande Rust**
+
+Réexporter `execute_transaction` depuis `commands/mod.rs` et l'ajouter au
+`tauri::generate_handler!` de `lib.rs`.
+
+Les tests Rust utilisent une vraie `SqlitePool` en mémoire avec deux connexions
+et couvrent : commit de deux écritures, rollback intégral après second statement
+invalide, rejet des valeurs non primitives, limites du lot et réussite d'une
+nouvelle transaction après rollback.
+
+```powershell
+Set-Location C:\dev\LogAssist\.worktrees\remote-mcp-gallery\src-tauri
+cargo fmt --check
+cargo test commands::database
+cargo clippy --all-targets -- -D warnings
+```
+
+- [x] **Step 5: Vérifier TypeScript et committer**
 
 ```bash
 ../../node_modules/.bin/vitest run --isolate src/lib/db/database.test.ts
 ../../node_modules/.bin/tsc --noEmit
-```
-
-Expected: PASS, aucune erreur TypeScript.
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add src/lib/db/database.ts src/lib/db/database.test.ts
+git diff --check
+git add src/lib/db/database.ts src/lib/db/database.test.ts src-tauri/src/commands/database.rs src-tauri/src/commands/mod.rs src-tauri/src/lib.rs src-tauri/Cargo.toml src-tauri/Cargo.lock
 git commit -m "feat: ajouter les transactions SQLite"
 ```
+
+Résultat validé : 5/5 tests TypeScript, 5/5 tests Rust ciblés, TypeScript,
+rustfmt et Clippy verts. Commit final : `04c1b556`.
 
 ---
 
@@ -818,8 +834,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 
 const execute = vi.hoisted(() => vi.fn())
 const select = vi.hoisted(() => vi.fn())
-const transaction = vi.hoisted(() => vi.fn(async (work) => work({ execute, select })))
-vi.mock("@/lib/db/database", () => ({ execute, select, transaction }))
+const executeTransaction = vi.hoisted(() => vi.fn())
+vi.mock("@/lib/db/database", () => ({ execute, select, executeTransaction }))
 
 import { mcpServers } from "./mcpServers"
 
@@ -832,10 +848,10 @@ describe("mcpServers", () => {
       transport: "streamable_http", auth: { type: "bearer" }, timeoutMs: 60_000,
       enabled: false, builtin: false,
     } }])
-    const [sql, bind] = execute.mock.calls[0]
-    expect(sql).toContain("INSERT INTO mcp_servers")
-    expect(bind).toEqual(["docs", "Docs", "https://docs.example/mcp", "streamable_http", "bearer", null, 60_000, 0, 0])
-    expect(JSON.stringify(bind)).not.toMatch(/token|secret|bearer\s+[a-z0-9]/i)
+    const [statements] = executeTransaction.mock.calls[0]
+    expect(statements[0].sql).toContain("INSERT INTO mcp_servers")
+    expect(statements[0].bind).toEqual(["docs", "Docs", "https://docs.example/mcp", "streamable_http", "bearer", null, 60_000, 0, 0])
+    expect(JSON.stringify(statements)).not.toMatch(/token|secret|bearer\s+[a-z0-9]/i)
   })
 
   it("désactive et vide le catalogue lors d'une mise à jour sensible", async () => {
@@ -843,11 +859,11 @@ describe("mcpServers", () => {
       current: { id: "docs", name: "Docs", endpoint: "https://old.example/mcp", transport: "streamable_http", auth: { type: "bearer" }, timeoutMs: 60_000, enabled: true, builtin: false },
       incoming: { id: "docs", name: "Docs", endpoint: "https://new.example/mcp", transport: "streamable_http", auth: { type: "bearer" }, timeoutMs: 60_000, enabled: false, builtin: false },
     }])
-    expect(execute.mock.calls.map(([sql]) => sql)).toEqual([
+    expect(executeTransaction.mock.calls[0][0].map(({ sql }: { sql: string }) => sql)).toEqual([
       expect.stringContaining("enabled = ?"),
       "DELETE FROM mcp_tools WHERE server_id = ?",
     ])
-    expect(execute.mock.calls[0][1]).toContain(0)
+    expect(executeTransaction.mock.calls[0][0][0].bind).toContain(0)
   })
 
   it("réconcilie le catalogue dans une transaction", async () => {
@@ -855,8 +871,9 @@ describe("mcpServers", () => {
     await mcpServers.replaceCatalog("docs", [{
       nativeName: "search", description: "Search", inputSchema: { type: "object" }, schemaHash: "v1",
     }])
-    expect(execute.mock.calls[0]).toEqual(["DELETE FROM mcp_tools WHERE server_id = ?", ["docs"]])
-    expect(execute.mock.calls[1][0]).toContain("INSERT INTO mcp_tools")
+    const [statements] = executeTransaction.mock.calls[0]
+    expect(statements[0]).toEqual({ sql: "DELETE FROM mcp_tools WHERE server_id = ?", bind: ["docs"] })
+    expect(statements[1].sql).toContain("INSERT INTO mcp_tools")
   })
 
   it("refuse la suppression de TinyFish", async () => {
@@ -908,7 +925,7 @@ export interface McpServerRow {
 - [ ] **Step 4: Implémenter les conversions et lectures**
 
 ```ts
-import { execute, select, transaction } from "./database"
+import { execute, executeTransaction, select, type TransactionStatement } from "./database"
 import { reconcileDiscoveredTools } from "@/lib/mcp/catalog"
 import type {
   McpAgentTool, McpDiscoveredTool, McpServerConfig, McpServerRow,
@@ -928,6 +945,17 @@ export function serverConfigFromRow(row: McpServerRow): McpServerConfig {
     auth: authFromRow(row), timeoutMs: row.timeout_ms,
     enabled: row.enabled === 1, builtin: row.builtin === 1,
   }
+}
+
+let mutationTail: Promise<void> = Promise.resolve()
+
+async function runMcpMutation<T>(work: () => Promise<T>): Promise<T> {
+  const previous = mutationTail
+  let release!: () => void
+  mutationTail = new Promise<void>((resolve) => { release = resolve })
+  await previous
+  try { return await work() }
+  finally { release() }
 }
 
 export const mcpServers = {
@@ -970,76 +998,83 @@ export const mcpServers = {
 
 ```ts
   async applyImport(items: McpImportDiff[]): Promise<string[]> {
-    const invalidated: string[] = []
-    await transaction(async (tx) => {
+    return runMcpMutation(async () => {
+      const invalidated: string[] = []
+      const statements: TransactionStatement[] = []
       for (const item of items) {
         if (item.kind === "unchanged") continue
         const server = item.incoming
         const header = server.auth.type === "api_key" ? server.auth.header : null
         if (item.kind === "create") {
-          await tx.execute(
-            `INSERT INTO mcp_servers
+          statements.push({
+            sql: `INSERT INTO mcp_servers
              (id,name,endpoint,transport,auth_type,header_name,timeout_ms,enabled,builtin)
              VALUES (?,?,?,?,?,?,?,?,?)`,
-            [server.id, server.name, server.endpoint, server.transport, server.auth.type, header, server.timeoutMs, 0, 0],
-          )
+            bind: [server.id, server.name, server.endpoint, server.transport, server.auth.type, header, server.timeoutMs, 0, 0],
+          })
           continue
         }
-        await tx.execute(
-          `UPDATE mcp_servers SET name = ?, endpoint = ?, transport = ?, auth_type = ?,
+        statements.push({
+          sql: `UPDATE mcp_servers SET name = ?, endpoint = ?, transport = ?, auth_type = ?,
            header_name = ?, timeout_ms = ?, enabled = ?, updated_at = datetime('now')
            WHERE id = ? AND builtin = 0`,
-          [server.name, server.endpoint, server.transport, server.auth.type, header,
+          bind: [server.name, server.endpoint, server.transport, server.auth.type, header,
             server.timeoutMs, item.sensitive ? 0 : Number(item.current.enabled), server.id],
-        )
+        })
         if (item.sensitive) {
-          await tx.execute("DELETE FROM mcp_tools WHERE server_id = ?", [server.id])
+          statements.push({ sql: "DELETE FROM mcp_tools WHERE server_id = ?", bind: [server.id] })
           invalidated.push(server.id)
         }
       }
+      if (statements.length > 0) await executeTransaction(statements)
+      return invalidated
     })
-    return invalidated
   },
   async replaceCatalog(serverId: string, discovered: McpDiscoveredTool[]): Promise<McpToolRow[]> {
-    return transaction(async (tx) => {
-      const existing = await tx.select<McpToolRow>(
+    return runMcpMutation(async () => {
+      const existing = await select<McpToolRow>(
         "SELECT * FROM mcp_tools WHERE server_id = ? ORDER BY native_name ASC",
         [serverId],
       )
       const reconciled = reconcileDiscoveredTools(serverId, discovered, existing)
-      await tx.execute("DELETE FROM mcp_tools WHERE server_id = ?", [serverId])
+      const statements: TransactionStatement[] = [
+        { sql: "DELETE FROM mcp_tools WHERE server_id = ?", bind: [serverId] },
+      ]
       for (const tool of reconciled) {
-        await tx.execute(
-          `INSERT INTO mcp_tools
+        statements.push({
+          sql: `INSERT INTO mcp_tools
            (server_id,native_name,llm_name,title,description,input_schema,output_schema,
             annotations,enabled,approval_mode,schema_hash,discovered_at)
            VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
-          [tool.server_id, tool.native_name, tool.llm_name, tool.title, tool.description,
+          bind: [tool.server_id, tool.native_name, tool.llm_name, tool.title, tool.description,
             tool.input_schema, tool.output_schema, tool.annotations, tool.enabled,
             tool.approval_mode, tool.schema_hash, tool.discovered_at],
-        )
+        })
       }
+      await executeTransaction(statements)
       return reconciled
     })
   },
   async setEnabled(id: string, enabled: boolean): Promise<void> {
-    await execute("UPDATE mcp_servers SET enabled = ?, updated_at = datetime('now') WHERE id = ?", [Number(enabled), id])
+    await runMcpMutation(() => execute("UPDATE mcp_servers SET enabled = ?, updated_at = datetime('now') WHERE id = ?", [Number(enabled), id]))
   },
   async setToolEnabled(serverId: string, nativeName: string, enabled: boolean): Promise<void> {
-    await execute("UPDATE mcp_tools SET enabled = ? WHERE server_id = ? AND native_name = ?", [Number(enabled), serverId, nativeName])
+    await runMcpMutation(() => execute("UPDATE mcp_tools SET enabled = ? WHERE server_id = ? AND native_name = ?", [Number(enabled), serverId, nativeName]))
   },
   async setApprovalMode(serverId: string, nativeName: string, mode: "confirm" | "auto"): Promise<void> {
-    const [tool] = await select<McpToolRow>("SELECT * FROM mcp_tools WHERE server_id = ? AND native_name = ?", [serverId, nativeName])
-    if (!tool) return
-    const annotations = tool.annotations ? JSON.parse(tool.annotations) as { readOnlyHint?: boolean; destructiveHint?: boolean } : {}
-    if (mode === "auto" && (annotations.readOnlyHint !== true || annotations.destructiveHint === true)) {
-      throw new Error("Seul un outil déclaré en lecture seule peut être automatique")
-    }
-    await execute("UPDATE mcp_tools SET approval_mode = ? WHERE server_id = ? AND native_name = ?", [mode, serverId, nativeName])
+    await runMcpMutation(async () => {
+      const [tool] = await select<McpToolRow>("SELECT * FROM mcp_tools WHERE server_id = ? AND native_name = ?", [serverId, nativeName])
+      if (!tool) return
+      const annotations = tool.annotations ? JSON.parse(tool.annotations) as { readOnlyHint?: boolean; destructiveHint?: boolean } : {}
+      if (mode === "auto" && (annotations.readOnlyHint !== true || annotations.destructiveHint === true)) {
+        throw new Error("Seul un outil déclaré en lecture seule peut être automatique")
+      }
+      await execute("UPDATE mcp_tools SET approval_mode = ? WHERE server_id = ? AND native_name = ?", [mode, serverId, nativeName])
+    })
   },
   async remove(id: string): Promise<void> {
     if (id === "tinyfish") throw new Error("TinyFish est un serveur MCP intégré")
-    await execute("DELETE FROM mcp_servers WHERE id = ? AND builtin = 0", [id])
+    await runMcpMutation(() => execute("DELETE FROM mcp_servers WHERE id = ? AND builtin = 0", [id]))
   },
 }
 ```

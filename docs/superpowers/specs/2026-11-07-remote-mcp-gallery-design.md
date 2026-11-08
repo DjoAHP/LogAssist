@@ -68,6 +68,9 @@ L'architecture retenue sépare les responsabilités :
 
 - TypeScript et SQLite gèrent les métadonnées non sensibles, l'import, la
   galerie et le catalogue découvert ;
+- les lectures simples continuent d'utiliser `tauri-plugin-sql`, tandis que les
+  lots d'écritures atomiques passent par une commande Tauri qui ouvre une vraie
+  `sqlx::Transaction` sur une connexion unique du pool SQLite existant ;
 - Rust valide les destinations, construit les headers, accède au Credential
   Manager, gère les clients `rmcp`, découvre les outils et exécute les appels ;
 - React transforme les outils activés en définitions LLM et orchestre les tours
@@ -75,8 +78,11 @@ L'architecture retenue sépare les responsabilités :
 - TinyFish utilise le registre commun, avec un adaptateur spécialisé pour les
   sources Web.
 
-Cette approche évite une seconde couche de persistance SQLite côté Rust tout en
-empêchant le frontend de lire les secrets pendant l'usage normal.
+Cette approche évite une seconde base ou un second pool côté Rust : le pont
+transactionnel réutilise `tauri_plugin_sql::DbInstances`. Elle empêche aussi le
+frontend de lire les secrets pendant l'usage normal. Une séquence
+`BEGIN`/écritures/`COMMIT` via plusieurs appels JavaScript est interdite, car le
+plugin peut choisir une connexion différente du pool à chaque appel.
 
 ### 4.2 Portée globale
 
@@ -155,6 +161,11 @@ Une découverte réussie est appliquée dans une transaction :
 3. les outils disparus sont supprimés ;
 4. une hausse de risque dans les annotations remet `approval_mode` à `confirm` ;
 5. les schémas invalides ou trop grands sont refusés, pas partiellement stockés.
+
+Le frontend prépare uniquement des statements SQL paramétrés sur des données
+MCP non sensibles. Le pont Rust valide les bornes et les types des binds, puis
+exécute le lot dans une transaction SQLx unique. Aucun SQL ni bind n'est inclus
+dans les erreurs publiques ou les logs.
 
 Un changement de nom ou de timeout serveur conserve le catalogue. Un changement
 d'endpoint, de type d'authentification ou de header désactive le serveur et
@@ -242,7 +253,8 @@ Règles :
 
 L'import classe chaque entrée en création, inchangée, mise à jour ou erreur.
 L'utilisateur doit confirmer l'aperçu. L'écriture SQLite est atomique : une
-erreur empêche l'ensemble de l'import.
+erreur empêche l'ensemble de l'import. Cette atomicité est fournie par le pont
+transactionnel Rust, pas par une série d'appels `Database.execute()`.
 
 Une mise à jour sensible — endpoint ou authentification — désactive le serveur,
 invalide sa connexion et exige un nouveau secret d'accès. Le secret précédent ne
