@@ -22,6 +22,20 @@ export interface McpServerConfig {
   builtin: boolean
 }
 
+export interface McpServerRow {
+  id: string
+  name: string
+  endpoint: string
+  transport: McpTransport
+  auth_type: McpAuthConfig["type"]
+  header_name: string | null
+  timeout_ms: number
+  enabled: number
+  builtin: number
+  created_at: string
+  updated_at: string
+}
+
 export interface McpToolAnnotations {
   readOnlyHint?: boolean
   destructiveHint?: boolean
