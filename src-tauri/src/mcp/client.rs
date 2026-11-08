@@ -8,6 +8,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use tokio_util::sync::CancellationToken;
 
+pub use super::credentials::SecretStore;
 use super::security::{MAX_RESULT_CHARS, validate_request};
 use super::types::{McpErrorPayload, McpServerId, WebToolRequest, WebToolResult};
 
@@ -16,12 +17,6 @@ pub trait TinyfishExecutor: Send + Sync {
     /// Vérifie une clé candidate : liste les outils et exige search ET fetch_content.
     async fn verify(&self, api_key: &str) -> Result<(), McpErrorPayload>;
     async fn call(&self, request: &WebToolRequest) -> Result<WebToolResult, McpErrorPayload>;
-}
-
-pub trait SecretStore: Send + Sync {
-    fn get(&self, secret_ref: &str) -> Result<Option<String>, String>;
-    fn set(&self, secret_ref: &str, value: &str) -> Result<(), String>;
-    fn delete(&self, secret_ref: &str) -> Result<(), String>;
 }
 
 pub fn secret_ref_for(server_id: McpServerId) -> String {
