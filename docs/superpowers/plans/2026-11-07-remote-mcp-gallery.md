@@ -563,13 +563,18 @@ export function makeLlmToolName(
   nativeName: string,
   used: Set<string>,
 ): string {
-  const normalized = `${serverId}__${nativeName}`
+  const sanitize = (value: string) => value
     .replace(/[^a-zA-Z0-9_-]/g, "_")
     .replace(/_+/g, "_")
+  const normalized = `${sanitize(serverId)}__${sanitize(nativeName)}`
   let candidate = normalized.slice(0, 64)
   if (normalized.length > 64 || used.has(candidate)) {
-    const suffix = `__${shortHash(`${serverId}\0${nativeName}`)}`
-    candidate = `${normalized.slice(0, 64 - suffix.length)}${suffix}`
+    let salt = 0
+    do {
+      const suffix = `__${shortHash(`${serverId}\0${nativeName}\0${salt}`)}`
+      candidate = `${normalized.slice(0, 64 - suffix.length)}${suffix}`
+      salt++
+    } while (used.has(candidate))
   }
   used.add(candidate)
   return candidate
