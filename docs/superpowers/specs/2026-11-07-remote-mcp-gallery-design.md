@@ -178,7 +178,10 @@ L'alias commence systématiquement par l'identifiant serveur, par exemple
 `github__search`. Les caractères non compatibles sont normalisés. Une
 troncature ou une collision ajoute un suffixe déterministe court dérivé du
 couple `(server_id, native_name)`. L'alias est persisté afin de rester stable
-entre deux découvertes et ne dépasse jamais 64 caractères.
+entre deux découvertes et ne dépasse jamais 64 caractères. Son allocation
+consulte l'ensemble global des aliases déjà réservés, pas seulement le serveur
+courant, afin de respecter l'unicité SQLite même lorsque deux identifiants se
+normalisent vers le même nom.
 
 ## 6. TinyFish intégré
 

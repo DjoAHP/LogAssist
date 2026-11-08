@@ -284,7 +284,7 @@ export const SCHEMA_VERSION = 9
 
 export const SCHEMA_V9_STATEMENTS: string[] = [
   `CREATE TABLE IF NOT EXISTS mcp_servers (
-  id TEXT PRIMARY KEY,
+  id TEXT PRIMARY KEY NOT NULL,
   name TEXT NOT NULL,
   endpoint TEXT NOT NULL,
   transport TEXT NOT NULL CHECK (transport = 'streamable_http'),
@@ -411,7 +411,7 @@ describe("catalogue MCP", () => {
       title: "Read", description: "Read data", input_schema: "{\"type\":\"object\"}",
       output_schema: null, annotations: "{\"readOnlyHint\":true}", enabled: 1,
       approval_mode: "auto", schema_hash: "v1", discovered_at: "2026-01-01",
-    }])
+    }], new Set(), "2026-11-08T00:00:00.000Z")
     expect(result[0]).toMatchObject({ enabled: 1, approval_mode: "confirm" })
   })
 
@@ -587,11 +587,13 @@ function mayRunAutomatically(annotations?: McpToolAnnotations): boolean {
 export function reconcileDiscoveredTools(
   serverId: string,
   discovered: McpDiscoveredTool[],
-  existing: McpToolRow[],
+  existingForServer: McpToolRow[],
+  reservedAliases: ReadonlySet<string>,
+  discoveredAt: string,
 ): McpToolRow[] {
-  const byName = new Map(existing.map((tool) => [tool.native_name, tool]))
-  const used = new Set(existing.map((tool) => tool.llm_name))
-  const now = new Date().toISOString()
+  const byName = new Map(existingForServer.map((tool) => [tool.native_name, tool]))
+  const used = new Set(reservedAliases)
+  for (const tool of existingForServer) used.add(tool.llm_name)
   return discovered.map((tool) => {
     const previous = byName.get(tool.nativeName)
     const annotations = tool.annotations ?? {}
@@ -609,7 +611,7 @@ export function reconcileDiscoveredTools(
         ? "auto"
         : "confirm",
       schema_hash: tool.schemaHash,
-      discovered_at: now,
+      discovered_at: discoveredAt,
     }
   })
 }
@@ -872,7 +874,7 @@ describe("mcpServers", () => {
   })
 
   it("réconcilie le catalogue dans une transaction", async () => {
-    select.mockResolvedValueOnce([])
+    select.mockResolvedValueOnce([]).mockResolvedValueOnce([])
     await mcpServers.replaceCatalog("docs", [{
       nativeName: "search", description: "Search", inputSchema: { type: "object" }, schemaHash: "v1",
     }])
@@ -1041,7 +1043,17 @@ export const mcpServers = {
         "SELECT * FROM mcp_tools WHERE server_id = ? ORDER BY native_name ASC",
         [serverId],
       )
-      const reconciled = reconcileDiscoveredTools(serverId, discovered, existing)
+      const reserved = await select<{ llm_name: string }>(
+        "SELECT llm_name FROM mcp_tools WHERE server_id != ?",
+        [serverId],
+      )
+      const reconciled = reconcileDiscoveredTools(
+        serverId,
+        discovered,
+        existing,
+        new Set(reserved.map((row) => row.llm_name)),
+        new Date().toISOString(),
+      )
       const statements: TransactionStatement[] = [
         { sql: "DELETE FROM mcp_tools WHERE server_id = ?", bind: [serverId] },
       ]
