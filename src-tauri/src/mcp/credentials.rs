@@ -8,7 +8,7 @@ use super::types::{McpAuthConfig, McpAuthStatus, McpErrorKind, McpErrorPayload, 
 
 const SECRET_ENVELOPE_VERSION: u8 = 1;
 const MAX_STORED_SECRET_UTF16_BYTES: usize = 2_560;
-const TINYFISH_ENDPOINT: &str = "https://agent.tinyfish.ai/mcp";
+const BUILTIN_ENDPOINT: &str = "https://agent.tinyfish.ai/mcp";
 
 #[derive(PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -122,7 +122,7 @@ fn accepts_legacy_tinyfish_secret(server: &McpRuntimeServer) -> bool {
     server.id == "tinyfish"
         && server.builtin
         && matches!(&server.auth, McpAuthConfig::Bearer)
-        && normalize_endpoint(&server.endpoint) == TINYFISH_ENDPOINT
+        && normalize_endpoint(&server.endpoint) == BUILTIN_ENDPOINT
 }
 
 pub fn decode_stored_secret(
@@ -588,7 +588,7 @@ mod tests {
     #[test]
     fn raw_legacy_tinyfish_accepts_a_normalized_canonical_endpoint() {
         let mut server = tinyfish_server();
-        server.endpoint = "HTTPS://AGENT.TINYFISH.AI:443/mcp".to_owned();
+        server.endpoint = "HTTPS://Agent.Tinyfish.AI:443/mcp".to_owned();
 
         assert_eq!(
             decode_stored_secret(&server, "legacy-key").expect("endpoint canonique"),

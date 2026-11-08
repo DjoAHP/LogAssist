@@ -5,10 +5,7 @@ use http::HeaderName;
 use serde_json::{Value, json};
 use url::{Host, Url};
 
-use super::types::{
-    JsonObject, McpAuthConfig, McpErrorKind, McpErrorPayload, McpRuntimeServer,
-    McpServerDefinition, McpServerId, WebToolName, WebToolRequest,
-};
+use super::types::{JsonObject, McpAuthConfig, McpErrorKind, McpErrorPayload, McpRuntimeServer};
 
 pub const MAX_FETCH_URLS: usize = 3;
 pub const MAX_ARGUMENT_BYTES: usize = 64 * 1024;
@@ -25,17 +22,16 @@ const MAX_SCHEMA_NODES: usize = 4_096;
 const MAX_SCHEMA_PATTERNS: usize = 128;
 const MAX_SCHEMA_PATTERN_CHARS: usize = 1_024;
 
-static TINYFISH: McpServerDefinition = McpServerDefinition {
-    id: McpServerId::Tinyfish,
-    endpoint: "https://agent.tinyfish.ai/mcp",
-    allowed_tools: &[WebToolName::Search, WebToolName::FetchContent],
-};
+/// Endpoint du serveur MCP intégré (TinyFish) : l'identifiant interne fixe
+/// `tinyfish` et cet endpoint doivent voyager ensemble (échec sinon).
+const BUILTIN_ENDPOINT: &str = "https://agent.tinyfish.ai/mcp";
 
-pub fn server_definition(server_id: McpServerId) -> &'static McpServerDefinition {
-    match server_id {
-        McpServerId::Tinyfish => &TINYFISH,
-    }
-}
+/// Valeurs canoniques du produit imposées aux arguments TinyFish.
+/// Source unique : transport.rs et client.rs n'en redéfinissent aucune.
+pub const SEARCH_RESULT_LIMIT: u32 = 5;
+pub const SEARCH_LANGUAGE: &str = "fr";
+pub const SEARCH_DOMAIN_TYPE: &str = "web";
+pub const FETCH_FORMAT: &str = "markdown";
 
 fn invalid_config(message: &'static str) -> McpErrorPayload {
     McpErrorPayload::new(McpErrorKind::InvalidConfig, message)
@@ -389,9 +385,9 @@ pub fn tinyfish_arguments(
             let purpose = optional_purpose(object)?;
             let mut output = JsonObject::new();
             output.insert("query".to_owned(), json!(query));
-            output.insert("result_limit".to_owned(), json!(5));
-            output.insert("language".to_owned(), json!("fr"));
-            output.insert("domain_type".to_owned(), json!("web"));
+            output.insert("result_limit".to_owned(), json!(SEARCH_RESULT_LIMIT));
+            output.insert("language".to_owned(), json!(SEARCH_LANGUAGE));
+            output.insert("domain_type".to_owned(), json!(SEARCH_DOMAIN_TYPE));
             if let Some(purpose) = purpose {
                 output.insert("purpose".to_owned(), json!(purpose));
             }
@@ -417,7 +413,7 @@ pub fn tinyfish_arguments(
             let purpose = optional_purpose(object)?;
             let mut output = JsonObject::new();
             output.insert("urls".to_owned(), json!(safe_urls));
-            output.insert("format".to_owned(), json!("markdown"));
+            output.insert("format".to_owned(), json!(FETCH_FORMAT));
             output.insert("links".to_owned(), json!(true));
             output.insert("image_links".to_owned(), json!(false));
             output.insert("iframe_links".to_owned(), json!(false));
@@ -459,12 +455,12 @@ pub fn validate_server_config(server: &McpRuntimeServer) -> Result<(), McpErrorP
         return Err(invalid_config("Délai d'attente MCP invalide"));
     }
 
-    let is_tinyfish = server.id == McpServerId::Tinyfish.as_str();
+    let is_tinyfish = server.id == "tinyfish";
     if server.builtin != is_tinyfish {
         return Err(invalid_config("Serveur MCP intégré invalide"));
     }
     if is_tinyfish {
-        if endpoint.as_str() != TINYFISH.endpoint {
+        if endpoint.as_str() != BUILTIN_ENDPOINT {
             return Err(invalid_config("Endpoint TinyFish invalide"));
         }
         if !matches!(&server.auth, McpAuthConfig::Bearer) {
@@ -502,47 +498,6 @@ pub fn validate_server_config(server: &McpRuntimeServer) -> Result<(), McpErrorP
         validate_tool_schema(&tool.input_schema)?;
     }
 
-    Ok(())
-}
-
-pub fn validate_request(
-    server: &McpServerDefinition,
-    request: &WebToolRequest,
-) -> Result<(), McpErrorPayload> {
-    if !server.allowed_tools.contains(&request.tool_name()) {
-        return Err(McpErrorPayload::tool_denied("Outil MCP non autorisé"));
-    }
-
-    match request {
-        WebToolRequest::Search { query, purpose } => {
-            validate_text(query, MAX_QUERY_CHARS, "Requête de recherche invalide")?;
-            validate_purpose(purpose)
-        }
-        WebToolRequest::FetchContent { urls, purpose } => {
-            if urls.is_empty() || urls.len() > MAX_FETCH_URLS {
-                return Err(McpErrorPayload::tool_denied(
-                    "Le nombre d'URL doit être compris entre 1 et 3",
-                ));
-            }
-            for value in urls {
-                validate_public_web_url(value)?;
-            }
-            validate_purpose(purpose)
-        }
-    }
-}
-
-fn validate_purpose(purpose: &Option<String>) -> Result<(), McpErrorPayload> {
-    if let Some(value) = purpose {
-        validate_text(value, MAX_PURPOSE_CHARS, "But de recherche invalide")?;
-    }
-    Ok(())
-}
-
-fn validate_text(value: &str, max_chars: usize, message: &str) -> Result<(), McpErrorPayload> {
-    if value.trim().is_empty() || value.chars().count() > max_chars {
-        return Err(McpErrorPayload::tool_denied(message));
-    }
     Ok(())
 }
 
@@ -664,33 +619,15 @@ mod tests {
 
     use super::{
         MAX_ARGUMENT_BYTES, MAX_ARGUMENT_DEPTH, MAX_CATALOG_BYTES, MAX_FETCH_URLS,
-        MAX_RESULT_CHARS, MAX_SSE_EVENT_BYTES, MAX_TOOLS_PER_SERVER, server_definition,
-        tinyfish_arguments, validate_api_key_header, validate_endpoint_static, validate_public_ip,
-        validate_request, validate_server_config, validate_tool_arguments, validate_tool_schema,
+        MAX_RESULT_CHARS, MAX_SSE_EVENT_BYTES, MAX_TOOLS_PER_SERVER, tinyfish_arguments,
+        validate_api_key_header, validate_endpoint_static, validate_public_ip,
+        validate_server_config, validate_tool_arguments, validate_tool_schema,
     };
     use crate::mcp::types::{
-        McpAuthConfig, McpErrorKind, McpRuntimeServer, McpRuntimeTool, McpServerId,
-        McpTransportKind, WebToolRequest,
+        McpAuthConfig, McpErrorKind, McpRuntimeServer, McpRuntimeTool, McpTransportKind,
+        WebToolName,
     };
     use serde_json::json;
-
-    fn search(query: &str) -> WebToolRequest {
-        WebToolRequest::Search {
-            query: query.to_owned(),
-            purpose: None,
-        }
-    }
-
-    fn fetch(urls: &[&str]) -> WebToolRequest {
-        WebToolRequest::FetchContent {
-            urls: urls.iter().map(|url| (*url).to_owned()).collect(),
-            purpose: None,
-        }
-    }
-
-    fn validate(request: &WebToolRequest) -> Result<(), crate::mcp::types::McpErrorPayload> {
-        validate_request(server_definition(McpServerId::Tinyfish), request)
-    }
 
     fn runtime_tool(native_name: &str) -> McpRuntimeTool {
         McpRuntimeTool {
@@ -743,9 +680,23 @@ mod tests {
 
     #[test]
     fn accepts_bounded_search_and_public_web_urls() {
-        assert!(validate(&search("documentation Tauri v2")).is_ok());
-        assert!(validate(&fetch(&["https://docs.rs/rmcp"])).is_ok());
-        assert!(validate(&fetch(&["http://example.com/tutorial"])).is_ok());
+        assert!(
+            tinyfish_arguments("search", &json!({ "query": "documentation Tauri v2" })).is_ok()
+        );
+        assert!(
+            tinyfish_arguments(
+                "fetch_content",
+                &json!({ "urls": ["https://docs.rs/rmcp"] })
+            )
+            .is_ok()
+        );
+        assert!(
+            tinyfish_arguments(
+                "fetch_content",
+                &json!({ "urls": ["http://example.com/tutorial"] })
+            )
+            .is_ok()
+        );
     }
 
     #[test]
@@ -769,7 +720,9 @@ mod tests {
             "javascript:alert(1)",
         ] {
             assert_eq!(
-                validate(&fetch(&[url])).unwrap_err().kind,
+                tinyfish_arguments("fetch_content", &json!({ "urls": [url] }))
+                    .unwrap_err()
+                    .kind,
                 McpErrorKind::ToolDenied,
                 "{url}"
             );
@@ -778,49 +731,59 @@ mod tests {
 
     #[test]
     fn rejects_empty_or_oversized_arguments() {
+        // Requête vide ou trop longue : le nouveau chemin borne
+        // via tinyfish_arguments (InvalidArguments, pas ToolDenied).
         assert_eq!(
-            validate(&search("  ")).unwrap_err().kind,
-            McpErrorKind::ToolDenied
+            tinyfish_arguments("search", &json!({ "query": "  " }))
+                .unwrap_err()
+                .kind,
+            McpErrorKind::InvalidArguments
         );
         assert_eq!(
-            validate(&search(&"x".repeat(2_001))).unwrap_err().kind,
-            McpErrorKind::ToolDenied
+            tinyfish_arguments("search", &json!({ "query": "x".repeat(2_001) }))
+                .unwrap_err()
+                .kind,
+            McpErrorKind::InvalidArguments
         );
         assert_eq!(
-            validate(&fetch(&[])).unwrap_err().kind,
-            McpErrorKind::ToolDenied
-        );
-        assert_eq!(
-            validate(&fetch(&[
-                "https://one.example",
-                "https://two.example",
-                "https://three.example",
-                "https://four.example",
-            ]))
+            tinyfish_arguments(
+                "search",
+                &json!({ "query": "docs", "purpose": "x".repeat(501) })
+            )
             .unwrap_err()
             .kind,
-            McpErrorKind::ToolDenied,
+            McpErrorKind::InvalidArguments
         );
-
-        let request = WebToolRequest::Search {
-            query: "Tauri".to_owned(),
-            purpose: Some("x".repeat(501)),
-        };
+        // Liste d'URL vide ou dépassant MAX_FETCH_URLS.
         assert_eq!(
-            validate(&request).unwrap_err().kind,
-            McpErrorKind::ToolDenied
+            tinyfish_arguments("fetch_content", &json!({ "urls": [] }))
+                .unwrap_err()
+                .kind,
+            McpErrorKind::InvalidArguments
+        );
+        assert_eq!(
+            tinyfish_arguments(
+                "fetch_content",
+                &json!({ "urls": [
+                    "https://one.example",
+                    "https://two.example",
+                    "https://three.example",
+                    "https://four.example",
+                ] })
+            )
+            .unwrap_err()
+            .kind,
+            McpErrorKind::InvalidArguments
         );
     }
 
     #[test]
-    fn serde_rejects_unknown_server_and_tool_names() {
-        assert!(serde_json::from_str::<McpServerId>(r#""other""#).is_err());
-        assert!(
-            serde_json::from_str::<WebToolRequest>(
-                r#"{"tool":"run_web_automation","arguments":{}}"#,
-            )
-            .is_err()
+    fn web_tool_name_keeps_its_serde_contract() {
+        assert_eq!(
+            serde_json::from_value::<WebToolName>(json!("fetch_content")).expect("outil connu"),
+            WebToolName::FetchContent
         );
+        assert!(serde_json::from_value::<WebToolName>(json!("delete_all")).is_err());
     }
 
     #[test]
@@ -920,13 +883,21 @@ mod tests {
                 "{raw}"
             );
             assert_eq!(
-                validate(&fetch(&[raw])).unwrap_err().kind,
+                tinyfish_arguments("fetch_content", &json!({ "urls": [raw] }))
+                    .unwrap_err()
+                    .kind,
                 McpErrorKind::ToolDenied,
                 "{raw}"
             );
         }
 
-        assert!(validate(&fetch(&["https://example.com/mcp"])).is_ok());
+        assert!(
+            tinyfish_arguments(
+                "fetch_content",
+                &json!({ "urls": ["https://example.com/mcp"] })
+            )
+            .is_ok()
+        );
         assert_eq!(
             validate_endpoint_static("https://example.com./mcp")
                 .unwrap_err()
@@ -943,7 +914,9 @@ mod tests {
             McpErrorKind::InvalidConfig
         );
         assert_eq!(
-            validate(&fetch(&[raw])).unwrap_err().kind,
+            tinyfish_arguments("fetch_content", &json!({ "urls": [raw] }))
+                .unwrap_err()
+                .kind,
             McpErrorKind::ToolDenied
         );
     }
@@ -1104,7 +1077,9 @@ mod tests {
         assert_eq!(tinyfish, before);
 
         let mut normalized = tinyfish_server();
-        normalized.endpoint = "HTTPS://AGENT.TINYFISH.AI/mcp".to_owned();
+        // L'hôte est insensible à la casse : l'endpoint rejeté si non
+        // normalisé conserve exactement l'autorité du serveur intégré.
+        normalized.endpoint = "HTTPS://Agent.Tinyfish.AI/mcp".to_owned();
         assert!(validate_server_config(&normalized).is_ok());
     }
 

@@ -5,52 +5,9 @@ pub type JsonObject = Map<String, Value>;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
-pub enum McpServerId {
-    Tinyfish,
-}
-
-impl McpServerId {
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::Tinyfish => "tinyfish",
-        }
-    }
-}
-
-#[derive(Debug)]
-pub struct McpServerDefinition {
-    pub id: McpServerId,
-    pub endpoint: &'static str,
-    pub allowed_tools: &'static [WebToolName],
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
-#[serde(rename_all = "snake_case")]
 pub enum WebToolName {
     Search,
     FetchContent,
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize)]
-#[serde(tag = "tool", content = "arguments", rename_all = "snake_case")]
-pub enum WebToolRequest {
-    Search {
-        query: String,
-        purpose: Option<String>,
-    },
-    FetchContent {
-        urls: Vec<String>,
-        purpose: Option<String>,
-    },
-}
-
-impl WebToolRequest {
-    pub const fn tool_name(&self) -> WebToolName {
-        match self {
-            Self::Search { .. } => WebToolName::Search,
-            Self::FetchContent { .. } => WebToolName::FetchContent,
-        }
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
@@ -59,12 +16,6 @@ pub struct WebSource {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
     pub origin: WebToolName,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
-pub struct WebToolResult {
-    pub content: String,
-    pub sources: Vec<WebSource>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
@@ -167,7 +118,6 @@ pub enum McpErrorKind {
     InvalidResponse,
     Cancelled,
     Unknown,
-    Network,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
@@ -486,7 +436,6 @@ mod tests {
             (McpErrorKind::InvalidResponse, "invalid_response"),
             (McpErrorKind::Cancelled, "cancelled"),
             (McpErrorKind::Unknown, "unknown"),
-            (McpErrorKind::Network, "network"),
         ];
 
         for (kind, expected) in cases {
@@ -547,64 +496,11 @@ mod tests {
     }
 
     #[test]
-    fn legacy_server_and_tool_names_keep_their_serde_contracts() {
-        assert_eq!(
-            serde_json::from_value::<McpServerId>(json!("tinyfish")).expect("serveur connu"),
-            McpServerId::Tinyfish
-        );
+    fn web_tool_name_keeps_its_serde_contract() {
         assert_eq!(
             serde_json::from_value::<WebToolName>(json!("fetch_content")).expect("outil connu"),
             WebToolName::FetchContent
         );
-        assert!(serde_json::from_value::<McpServerId>(json!("other")).is_err());
         assert!(serde_json::from_value::<WebToolName>(json!("delete_all")).is_err());
-    }
-
-    #[test]
-    fn legacy_web_tool_request_and_result_keep_their_serde_contracts() {
-        let request = WebToolRequest::Search {
-            query: "documentation".to_owned(),
-            purpose: Some("apprendre".to_owned()),
-        };
-        let request_json = serde_json::to_value(&request).expect("requête sérialisable");
-        assert_eq!(
-            request_json,
-            json!({
-                "tool": "search",
-                "arguments": {
-                    "query": "documentation",
-                    "purpose": "apprendre"
-                }
-            })
-        );
-        assert_eq!(
-            serde_json::from_value::<WebToolRequest>(request_json)
-                .expect("requête désérialisable")
-                .tool_name(),
-            WebToolName::Search
-        );
-        assert!(
-            serde_json::from_value::<WebToolRequest>(json!({
-                "tool": "delete_all",
-                "arguments": {}
-            }))
-            .is_err()
-        );
-
-        let result = WebToolResult {
-            content: "contenu".to_owned(),
-            sources: vec![WebSource {
-                url: "https://example.com".to_owned(),
-                title: None,
-                origin: WebToolName::FetchContent,
-            }],
-        };
-        assert_eq!(
-            serde_json::from_value::<WebToolResult>(
-                serde_json::to_value(&result).expect("résultat sérialisable")
-            )
-            .expect("résultat désérialisable"),
-            result
-        );
     }
 }

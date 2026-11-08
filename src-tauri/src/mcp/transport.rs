@@ -1,5 +1,6 @@
-//! Connecteur MCP Streamable HTTP générique et sécurisé via le SDK `rmcp`.
-//! L'adaptateur TinyFish historique reste temporairement isolé en fin de module.
+//! Connecteur MCP Streamable HTTP générique et sécurisé via le SDK `rmcp`,
+//! plus le pool de sessions par serveur. Les helpers TinyFish (sources,
+//! arguments canoniques, normalisation) restent isolés en fin de module.
 
 use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
@@ -22,7 +23,7 @@ use rmcp::model::{
 };
 use rmcp::service::{
     ClientInitializeError, ClientLifecycleMode, ClientServiceExt, RunningService,
-    RunningServiceCancellationToken, ServiceError, ServiceExt,
+    RunningServiceCancellationToken, ServiceError,
 };
 use rmcp::transport::common::http_header::{
     EVENT_STREAM_MIME_TYPE, HEADER_LAST_EVENT_ID, HEADER_MCP_PROTOCOL_VERSION, HEADER_SESSION_ID,
@@ -33,27 +34,23 @@ use rmcp::transport::streamable_http_client::{
     StreamableHttpClientTransportConfig, StreamableHttpError, StreamableHttpPostResponse,
 };
 use rmcp::transport::{DynamicTransportError, StreamableHttpClientTransport};
-use serde_json::{Value, json};
+use serde_json::Value;
 use sha2::{Digest, Sha256};
 use sse_stream::{Sse, SseStream};
 use tokio::sync::Mutex as AsyncMutex;
 use url::{Host, Url};
 
-use super::client::TinyfishExecutor;
+use super::credentials::binding_fingerprint;
 use super::security::{
     MAX_CATALOG_BYTES, MAX_RESULT_CHARS, MAX_SSE_EVENT_BYTES, MAX_TOOLS_PER_SERVER,
-    server_definition, validate_api_key_header, validate_endpoint_static, validate_public_ip,
-    validate_public_web_url, validate_tool_schema,
+    validate_api_key_header, validate_endpoint_static, validate_public_ip, validate_public_web_url,
+    validate_tool_schema,
 };
 use super::types::{
-    McpAuthConfig, McpErrorKind, McpErrorPayload, McpResourceLink, McpRuntimeServer, McpServerId,
-    McpToolDescriptor, McpToolResult, WebSource, WebToolName, WebToolRequest, WebToolResult,
+    McpAuthConfig, McpErrorKind, McpErrorPayload, McpResourceLink, McpRuntimeServer,
+    McpToolDescriptor, McpToolResult, WebSource, WebToolName,
 };
 
-const SEARCH_RESULT_LIMIT: u32 = 5;
-const SEARCH_LANGUAGE: &str = "fr";
-const SEARCH_DOMAIN_TYPE: &str = "web";
-const FETCH_FORMAT: &str = "markdown";
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
 const CONTROL_REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
 const SESSION_RECOVERY_TIMEOUT: Duration = Duration::from_secs(5);
@@ -1376,110 +1373,116 @@ pub async fn discover_tools_bounded(
         .map_err(|_| connect_timeout_error())?
 }
 
-fn map_tinyfish_connect_error(e: impl std::fmt::Display) -> McpErrorPayload {
-    let message = e.to_string();
-    let lower = message.to_ascii_lowercase();
-    let kind = if lower.contains("401") || lower.contains("403") {
-        McpErrorKind::Auth
-    } else if lower.contains("timeout") || lower.contains("timed out") {
-        McpErrorKind::Timeout
-    } else {
-        McpErrorKind::Network
-    };
-    McpErrorPayload {
-        kind,
-        message: format!("Connexion MCP impossible : {message}"),
+/// Empreinte d'un slot de connexion : une session est réutilisée tant que la
+/// liaison serveur (id, endpoint, auth) est inchangée.
+pub struct McpConnectionPool {
+    connector: Arc<dyn McpConnector>,
+    slots: AsyncMutex<HashMap<String, Arc<ConnectionSlot>>>,
+}
+
+struct ConnectionSlot {
+    fingerprint: String,
+    session: AsyncMutex<Option<Arc<dyn McpSession>>>,
+}
+
+impl McpConnectionPool {
+    /// Construction de production : connecteur rmcp réel.
+    pub fn production() -> Self {
+        Self::new(Arc::new(RmcpConnector))
     }
-}
 
-fn tinyfish_transport_config(api_key: &str) -> StreamableHttpClientTransportConfig {
-    let definition = server_definition(McpServerId::Tinyfish);
-    StreamableHttpClientTransportConfig::with_uri(definition.endpoint).auth_header(api_key)
-}
-
-async fn connect_tinyfish(
-    api_key: &str,
-) -> Result<RunningService<RoleClient, ()>, McpErrorPayload> {
-    let config = tinyfish_transport_config(api_key);
-    let transport = StreamableHttpClientTransport::from_config(config);
-    ().serve(transport)
-        .await
-        .map_err(map_tinyfish_connect_error)
-}
-
-fn tool_display_name(name: &rmcp::model::Tool) -> String {
-    name.name.to_string()
-}
-
-fn ensure_required_tools(names: &[&str]) -> Result<(), McpErrorPayload> {
-    for required in ["search", "fetch_content"] {
-        if !names.contains(&required) {
-            return Err(McpErrorPayload {
-                kind: McpErrorKind::InvalidResponse,
-                message: format!("Outil MCP requis absent du serveur : {required}"),
-            });
+    pub fn new(connector: Arc<dyn McpConnector>) -> Self {
+        Self {
+            connector,
+            slots: AsyncMutex::new(HashMap::new()),
         }
     }
-    Ok(())
-}
 
-async fn require_tools(session: &RunningService<RoleClient, ()>) -> Result<(), McpErrorPayload> {
-    let listed = session
-        .list_tools(Default::default())
-        .await
-        .map_err(map_tinyfish_connect_error)?;
-    let names: Vec<String> = listed.tools.iter().map(tool_display_name).collect();
-    let names: Vec<&str> = names.iter().map(String::as_str).collect();
-    ensure_required_tools(&names)
-}
-
-fn arguments_for(request: &WebToolRequest) -> JsonObject {
-    let value: Value = match request {
-        WebToolRequest::Search { query, purpose } => {
-            let mut args = json!({
-                "query": query,
-                "result_limit": SEARCH_RESULT_LIMIT,
-                "language": SEARCH_LANGUAGE,
-                "domain_type": SEARCH_DOMAIN_TYPE,
-            });
-            if let Some(purpose) = purpose {
-                args["purpose"] = json!(purpose);
-            }
-            args
+    async fn close_session_in_slot(slot: &ConnectionSlot) {
+        if let Some(session) = slot.session.lock().await.take() {
+            session.close().await;
         }
-        WebToolRequest::FetchContent { urls, purpose } => {
-            let mut args = json!({
-                "urls": urls,
-                "format": FETCH_FORMAT,
-                "links": true,
-                "image_links": false,
-                "iframe_links": false,
-                "page_metadata": false,
-            });
-            if let Some(purpose) = purpose {
-                args["purpose"] = json!(purpose);
-            }
-            args
-        }
-    };
-    value.as_object().cloned().unwrap_or_default()
-}
+    }
 
-fn map_tinyfish_call_error(e: impl std::fmt::Display) -> McpErrorPayload {
-    let message = e.to_string();
-    let lower = message.to_ascii_lowercase();
-    let kind = if lower.contains("401") || lower.contains("403") {
-        McpErrorKind::Auth
-    } else if lower.contains("429") || lower.contains("rate") {
-        McpErrorKind::RateLimit
-    } else if lower.contains("timeout") || lower.contains("timed out") {
-        McpErrorKind::Timeout
-    } else {
-        McpErrorKind::Network
-    };
-    McpErrorPayload {
-        kind,
-        message: format!("Appel MCP impossible : {message}"),
+    async fn close_optional(previous: Option<Arc<ConnectionSlot>>) {
+        if let Some(slot) = previous {
+            Self::close_session_in_slot(&slot).await;
+        }
+    }
+
+    /// Retourne la session installée pour la liaison courante, ou en ouvre une.
+    /// Un slot dont l'empreinte a changé est fermé et remplacé.
+    pub async fn session(
+        &self,
+        server: &McpRuntimeServer,
+        secret: Option<&str>,
+    ) -> Result<Arc<dyn McpSession>, McpErrorPayload> {
+        let fingerprint = binding_fingerprint(server);
+        let (slot, stale) = {
+            let mut slots = self.slots.lock().await;
+            let must_replace = slots
+                .get(&server.id)
+                .is_some_and(|slot| slot.fingerprint != fingerprint);
+            let stale = if must_replace {
+                slots.remove(&server.id)
+            } else {
+                None
+            };
+            let slot = slots
+                .entry(server.id.clone())
+                .or_insert_with(|| {
+                    Arc::new(ConnectionSlot {
+                        fingerprint: fingerprint.clone(),
+                        session: AsyncMutex::new(None),
+                    })
+                })
+                .clone();
+            (slot, stale)
+        };
+        Self::close_optional(stale).await;
+        let mut current = slot.session.lock().await;
+        if let Some(session) = current.as_ref() {
+            return Ok(session.clone());
+        }
+        let session = self.connector.connect(server, secret).await?;
+        *current = Some(session.clone());
+        Ok(session)
+    }
+
+    /// Teste un candidate en externe : la session créée n'entre pas dans le
+    /// pool tant qu'elle n'a pas été installée explicitement.
+    pub async fn connect_candidate(
+        &self,
+        server: &McpRuntimeServer,
+        secret: &str,
+    ) -> Result<Arc<dyn McpSession>, McpErrorPayload> {
+        self.connector.connect(server, Some(secret)).await
+    }
+
+    /// Remplace le slot du serveur par une session déjà validée (clé testée),
+    /// en fermant proprement la session précédente le cas échéant.
+    pub async fn install(&self, server_id: &str, fingerprint: &str, session: Arc<dyn McpSession>) {
+        let previous = self.slots.lock().await.insert(
+            server_id.to_owned(),
+            Arc::new(ConnectionSlot {
+                fingerprint: fingerprint.to_owned(),
+                session: AsyncMutex::new(Some(session)),
+            }),
+        );
+        Self::close_optional(previous).await;
+    }
+
+    /// Ferme et retire le slot du serveur. Idempotent : id inconnu = no-op.
+    pub async fn disconnect(&self, server_id: &str) {
+        let slot = self.slots.lock().await.remove(server_id);
+        Self::close_optional(slot).await;
+    }
+
+    /// Purge plusieurs slots (sync du registre, serveur supprimé ou modifié).
+    pub async fn disconnect_many(&self, server_ids: &[String]) {
+        for server_id in server_ids {
+            self.disconnect(server_id).await;
+        }
     }
 }
 
@@ -1511,7 +1514,8 @@ fn extract_tinyfish_sources(structured: Option<&Value>, origin: WebToolName) -> 
 }
 
 fn tinyfish_origin(server_id: &str, native_name: &str) -> Option<WebToolName> {
-    if server_id != McpServerId::Tinyfish.as_str() {
+    // Identifiant interne figé du serveur intégré TinyFish.
+    if server_id != "tinyfish" {
         return None;
     }
     match native_name {
@@ -1622,68 +1626,6 @@ pub fn normalize_tool_result(
     }
 }
 
-fn result_to_web_tool_result(
-    result: rmcp::model::CallToolResult,
-    origin: super::types::WebToolName,
-) -> Result<WebToolResult, McpErrorPayload> {
-    if result.is_error.unwrap_or(false) {
-        return Err(McpErrorPayload {
-            kind: McpErrorKind::InvalidResponse,
-            message: "L'outil MCP a signalé une erreur".to_owned(),
-        });
-    }
-    let mut content = String::new();
-    for block in &result.content {
-        if let Some(text) = block.as_text() {
-            content.push_str(&text.text);
-            content.push('\n');
-        }
-    }
-    let trimmed = content.trim().to_owned();
-    if trimmed.is_empty() {
-        return Err(McpErrorPayload {
-            kind: McpErrorKind::InvalidResponse,
-            message: "Réponse MCP vide".to_owned(),
-        });
-    }
-    Ok(WebToolResult {
-        content: trimmed,
-        sources: extract_tinyfish_sources(result.structured_content.as_ref(), origin),
-    })
-}
-
-pub struct RmcpTinyfishClient {
-    pub api_key: String,
-}
-
-#[async_trait::async_trait]
-impl TinyfishExecutor for RmcpTinyfishClient {
-    async fn verify(&self, _api_key: &str) -> Result<(), McpErrorPayload> {
-        // La clé testée est celle portée par l'exécuteur (construction dédiée).
-        let session = connect_tinyfish(&self.api_key).await?;
-        let outcome = require_tools(&session).await;
-        let _ = session.cancel().await;
-        outcome
-    }
-
-    async fn call(&self, request: &WebToolRequest) -> Result<WebToolResult, McpErrorPayload> {
-        let origin = request.tool_name();
-        let tool_name = match origin {
-            super::types::WebToolName::Search => "search",
-            super::types::WebToolName::FetchContent => "fetch_content",
-        };
-        let params = CallToolRequestParams::new(tool_name).with_arguments(arguments_for(request));
-        let session = connect_tinyfish(&self.api_key).await?;
-        let outcome = session
-            .call_tool(params)
-            .await
-            .map_err(map_tinyfish_call_error)
-            .and_then(|result| result_to_web_tool_result(result, origin));
-        let _ = session.cancel().await;
-        outcome
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use std::collections::VecDeque;
@@ -1715,6 +1657,7 @@ mod tests {
         validate_endpoint_static,
     };
     use crate::mcp::types::{McpAuthConfig, McpRuntimeServer, McpTransportKind};
+    use serde_json::json;
 
     fn remote_server(auth: McpAuthConfig) -> McpRuntimeServer {
         McpRuntimeServer {
@@ -3335,50 +3278,6 @@ mod tests {
                 None => assert!(normalized.sources.is_empty()),
             }
         }
-    }
-
-    #[test]
-    fn legacy_tinyfish_result_mapping_still_rejects_errors_and_empty_content() {
-        let error = result_to_web_tool_result(
-            CallToolResult::error(vec![ContentBlock::text("échec distant")]),
-            super::super::types::WebToolName::Search,
-        )
-        .expect_err("isError reste une erreur legacy");
-        assert_eq!(error.kind, McpErrorKind::InvalidResponse);
-        assert!(!error.message.contains("échec distant"));
-
-        let empty = result_to_web_tool_result(
-            CallToolResult::success(Vec::new()),
-            super::super::types::WebToolName::Search,
-        )
-        .expect_err("le contenu legacy vide reste refusé");
-        assert_eq!(empty.kind, McpErrorKind::InvalidResponse);
-
-        let success = result_to_web_tool_result(
-            CallToolResult::success(vec![ContentBlock::text("contenu legacy")]),
-            super::super::types::WebToolName::Search,
-        )
-        .expect("le chemin legacy reste fonctionnel");
-        assert_eq!(success.content, "contenu legacy");
-    }
-
-    #[test]
-    fn key_validation_requires_both_allowed_tools() {
-        assert!(ensure_required_tools(&["search", "fetch_content"]).is_ok());
-        assert_eq!(
-            ensure_required_tools(&["search"]).unwrap_err().kind,
-            McpErrorKind::InvalidResponse
-        );
-        assert_eq!(
-            ensure_required_tools(&["fetch_content"]).unwrap_err().kind,
-            McpErrorKind::InvalidResponse
-        );
-    }
-
-    #[test]
-    fn transport_config_stores_a_raw_bearer_token() {
-        let config = tinyfish_transport_config("tf-secret");
-        assert_eq!(config.auth_header.as_deref(), Some("tf-secret"));
     }
 
     #[test]
