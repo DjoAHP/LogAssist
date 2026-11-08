@@ -335,7 +335,7 @@ mod tests {
             .await;
         assert_eq!(
             outcome.unwrap_err().kind,
-            super::super::types::McpErrorKind::Unknown
+            super::super::types::McpErrorKind::Cancelled
         );
         assert_eq!(service.executor.calls.load(Ordering::SeqCst), 0);
     }
@@ -366,7 +366,7 @@ mod tests {
 
         assert_eq!(
             outcome.unwrap_err().kind,
-            super::super::types::McpErrorKind::Unknown
+            super::super::types::McpErrorKind::Cancelled
         );
     }
 
