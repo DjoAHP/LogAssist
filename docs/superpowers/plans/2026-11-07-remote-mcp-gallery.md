@@ -908,7 +908,11 @@ describe("mcpServers", () => {
 
   it("réconcilie le catalogue dans une transaction", async () => {
     select.mockResolvedValueOnce([]).mockResolvedValueOnce([])
-    await mcpServers.replaceCatalog("docs", [{
+    await mcpServers.replaceCatalog({
+      id: "docs", name: "Docs", endpoint: "https://docs.example/mcp",
+      transport: "streamable_http", auth: { type: "none" }, timeoutMs: 60_000,
+      enabled: false, builtin: false,
+    }, [{
       nativeName: "search", description: "Search", inputSchema: { type: "object" }, schemaHash: "v1",
     }])
     const [statements] = executeTransaction.mock.calls[0]
@@ -1054,24 +1058,40 @@ export const mcpServers = {
           })
           continue
         }
-        statements.push({
-          sql: `UPDATE mcp_servers SET name = ?, endpoint = ?, transport = ?, auth_type = ?,
-           header_name = ?, timeout_ms = ?, enabled = ?, updated_at = datetime('now')
-           WHERE id = ? AND builtin = 0`,
-          bind: [server.name, server.endpoint, server.transport, server.auth.type, header,
-            server.timeoutMs, item.sensitive ? 0 : Number(item.current.enabled), server.id],
-        })
+        if (item.current.builtin || server.id === "tinyfish") {
+          throw new Error("Un serveur MCP intégré ne peut pas être importé")
+        }
         if (item.sensitive) {
+          statements.push({
+            sql: `UPDATE mcp_servers SET name = ?, endpoint = ?, transport = ?, auth_type = ?,
+             header_name = ?, timeout_ms = ?, enabled = ?, updated_at = ?
+             WHERE id = ? AND builtin = 0`,
+            bind: [server.name, server.endpoint, server.transport, server.auth.type, header,
+              server.timeoutMs, 0, new Date().toISOString(), server.id],
+          })
           statements.push({ sql: "DELETE FROM mcp_tools WHERE server_id = ?", bind: [server.id] })
           invalidated.push(server.id)
+        } else {
+          statements.push({
+            sql: "UPDATE mcp_servers SET name = ?, timeout_ms = ?, updated_at = ? WHERE id = ? AND builtin = 0",
+            bind: [server.name, server.timeoutMs, new Date().toISOString(), server.id],
+          })
         }
       }
       if (statements.length > 0) await executeTransaction(statements)
       return invalidated
     })
   },
-  async replaceCatalog(serverId: string, discovered: McpDiscoveredTool[]): Promise<McpToolRow[]> {
+  async replaceCatalog(expectedServer: McpServerConfig, discovered: readonly McpDiscoveredTool[]): Promise<McpToolRow[]> {
     return runMcpMutation(async () => {
+      const serverId = expectedServer.id
+      const [serverRow] = await select<McpServerRow>(
+        "SELECT * FROM mcp_servers WHERE id = ?",
+        [serverId],
+      )
+      if (!serverRow || !hasSameRemoteBinding(expectedServer, serverConfigFromRow(serverRow))) {
+        throw new StaleMcpDiscoveryError()
+      }
       const existing = await select<McpToolRow>(
         "SELECT * FROM mcp_tools WHERE server_id = ? ORDER BY native_name ASC",
         [serverId],
@@ -4046,7 +4066,7 @@ useEffect(() => {
       const discovered = secret === undefined
         ? await mcp.connectAndListTools(server.id)
         : await mcp.configureAuth(server.id, secret)
-      await mcpServers.replaceCatalog(server.id, discovered)
+      await mcpServers.replaceCatalog(server, discovered)
       setStatuses((current) => ({ ...current, [server.id]: { state: "connected" } }))
       await afterChange()
     } catch (error) {

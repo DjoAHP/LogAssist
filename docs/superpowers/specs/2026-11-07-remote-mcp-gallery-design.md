@@ -172,6 +172,11 @@ d'endpoint, de type d'authentification ou de header désactive le serveur et
 supprime son catalogue devenu obsolète. Une nouvelle découverte est alors
 obligatoire.
 
+Une découverte transporte la configuration sensible qui l'a initiée. Avant de
+remplacer le catalogue, le repository relit la ligne serveur et compare endpoint,
+transport et authentification. Si ce binding a changé pendant l'appel réseau,
+le résultat obsolète est refusé sans supprimer ni réinsérer d'outil.
+
 ### 5.4 Alias LLM
 
 L'alias commence systématiquement par l'identifiant serveur, par exemple
