@@ -159,6 +159,18 @@ export const fr = {
     deleteKey: "Supprimer la clé",
     deleteConfirm: "Supprimer la clé TinyFish et désactiver l'accès Web ?",
     close: "Fermer",
+    // Import JSON
+    importConfig: "Importer une configuration JSON",
+    importFile: "Fichier de configuration MCP",
+    importPreview: "Aperçu de l'import",
+    importCreate: "Création",
+    importUpdate: "Mise à jour",
+    importUnchanged: "Inchangé",
+    importOneServer: "Importer 1 serveur",
+    importManyServers: "Importer les serveurs",
+    importInvalid: "Le fichier de configuration MCP est invalide.",
+    importHint: "Les serveurs et nouveaux outils resteront désactivés jusqu'à validation.",
+    cancel: "Annuler",
     // Cartes serveur MCP
     integrated: "Intégré",
     ready: "Prêt",
