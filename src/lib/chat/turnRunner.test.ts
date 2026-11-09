@@ -2,10 +2,16 @@ import { describe, expect, it, vi } from "vitest"
 import type { IProvider } from "@/lib/ai/openai-compat"
 import type { ChatRequest, TurnCallbacks } from "@/lib/ai/types"
 import type { WebAgentInput } from "@/lib/mcp/webAgent"
+import type { ToolAgentInput } from "@/lib/mcp/toolAgent"
 import { runAssistantTurn } from "./turnRunner"
 
 type WebTurnOptions = Omit<
   WebAgentInput,
+  "provider" | "request" | "apiKey" | "modelId" | "callbacks" | "signal"
+>
+
+type ToolTurnOptions = Omit<
+  ToolAgentInput,
   "provider" | "request" | "apiKey" | "modelId" | "callbacks" | "signal"
 >
 
@@ -28,6 +34,20 @@ function createWebOptions(): WebTurnOptions {
     requestId: "assistant-1",
     compatibilityKey: "provider/model",
     unsupportedTools: new Set<string>(),
+  }
+}
+
+function createToolOptions(): ToolTurnOptions {
+  return {
+    toolClient: {
+      call: vi.fn().mockResolvedValue({ content: "Résultat", sources: [], isError: false, structuredContent: undefined, resourceLinks: [] }),
+    },
+    tools: [],
+    webIntent: "auto",
+    turnId: "turn-1",
+    compatibilityKey: "provider/model",
+    unsupportedTools: new Set<string>(),
+    approve: vi.fn().mockResolvedValue("allow"),
   }
 }
 
@@ -65,6 +85,30 @@ describe("runAssistantTurn", () => {
       callbacks,
       signal,
     )
+  })
+
+  it("reconstruit l'entrée outils avec les champs communs autoritaires", async () => {
+    const runTools = vi.fn().mockResolvedValue({ text: "Réponse", sources: [], firstTokenMs: 10, totalMs: 20 })
+    const tools = createToolOptions()
+    const provider = providerWithRunTurn(vi.fn())
+
+    await runAssistantTurn({ provider, request, apiKey: "secret", modelId: "model", callbacks, signal, tools, runTools })
+
+    expect(runTools).toHaveBeenCalledWith({ ...tools, provider, request, apiKey: "secret", modelId: "model", callbacks, signal })
+  })
+
+  it("utilise un tour direct sans catalogue", async () => {
+    const runTurn = vi.fn().mockResolvedValue({
+      text: "Réponse directe",
+      toolCalls: [],
+      firstTokenMs: 12,
+      totalMs: 40,
+    })
+    const provider = providerWithRunTurn(runTurn)
+
+    await runAssistantTurn({ provider, request, apiKey: "secret", modelId: "model", callbacks, signal })
+
+    expect(runTurn).toHaveBeenCalledWith(request, "secret", "model", {}, callbacks, signal)
   })
 
   it("reconstruit l'entrée Web avec les champs communs de la racine", async () => {

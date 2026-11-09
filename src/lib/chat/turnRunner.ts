@@ -1,6 +1,7 @@
 import type { IProvider } from "@/lib/ai/openai-compat"
 import type { ChatRequest, TokenUsage, TurnCallbacks } from "@/lib/ai/types"
 import { runWebAgent, type WebAgentInput, type WebAgentResult } from "@/lib/mcp/webAgent"
+import { runToolAgent, type ToolAgentInput, type ToolAgentResult } from "@/lib/mcp/toolAgent"
 import type { WebSource } from "@/lib/mcp/types"
 
 export interface AssistantTurnResult {
@@ -11,6 +12,11 @@ export interface AssistantTurnResult {
   warning?: string
   usage?: TokenUsage
 }
+
+type ToolTurnOptions = Omit<
+  ToolAgentInput,
+  "provider" | "request" | "apiKey" | "modelId" | "callbacks" | "signal"
+>
 
 type WebTurnOptions = Omit<
   WebAgentInput,
@@ -26,17 +32,27 @@ interface BaseTurnInput {
   signal: AbortSignal
 }
 
-type RunAssistantTurnInput = BaseTurnInput & (
-  | { web?: undefined; runWeb?: undefined }
-  | {
-      web: WebTurnOptions
-      runWeb?: (input: WebAgentInput) => Promise<WebAgentResult>
-    }
-)
+type RunAssistantTurnInput = BaseTurnInput & {
+  tools?: ToolTurnOptions
+  runTools?: (input: ToolAgentInput) => Promise<ToolAgentResult>
+  web?: WebTurnOptions
+  runWeb?: (input: WebAgentInput) => Promise<WebAgentResult>
+}
 
 export async function runAssistantTurn(
   input: RunAssistantTurnInput,
 ): Promise<AssistantTurnResult> {
+  if (input.tools) {
+    return (input.runTools ?? runToolAgent)({
+      ...input.tools,
+      provider: input.provider,
+      request: input.request,
+      apiKey: input.apiKey,
+      modelId: input.modelId,
+      callbacks: input.callbacks,
+      signal: input.signal,
+    })
+  }
   if (input.web) {
     const webInput: WebAgentInput = {
       ...input.web,
