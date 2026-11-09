@@ -55,6 +55,14 @@ Les cartes utilisent le format compact de référence :
 - libellés d’action : `11px` ;
 - bouton inférieur : taille `text-xs` et padding vertical compact.
 
+## Galerie MCP
+
+La galerie MCP reprend la grille des fournisseurs : quatre colonnes dans le
+gabarit desktop, puis trois, deux et une selon la largeur. Une carte utilise
+`min-h-56`, trois actions centrales de même largeur et un bouton inférieur
+`Parcourir les outils`. Les états réseau associent toujours texte, icône et
+couleur. TinyFish porte le badge `Intégré` et ne propose pas de suppression.
+
 ## Messages du chat
 
 Les questions utilisateur et les réponses assistant partagent la même surface
