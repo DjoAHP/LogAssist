@@ -45,6 +45,11 @@ sse-stream = "0.2.6"
 
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration
+[dev-dependencies]
+# Serveur Streamable HTTP factice pour les tests d'intégration du transport MCP.
+axum = "0.8"
+rmcp = { version = "3.8.0", default-features = false, features = ["macros", "server", "transport-streamable-http-server"] }
+
 [profile.release]
 codegen-units = 1
 lto = true
