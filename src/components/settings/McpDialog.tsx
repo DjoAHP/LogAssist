@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react"
-import { Upload } from "lucide-react"
+import { Plus, Upload } from "lucide-react"
 
 import { t } from "@/i18n/fr"
 import { mcpUiError } from "@/lib/mcp/errorMessages"
@@ -195,6 +195,30 @@ export function McpDialog({ snapshot, onClose, onChanged }: Props) {
   // Sort: TinyFish (builtin) first, then by created_at
   serverConfigs.sort((a, b) => (b.builtin ? 1 : 0) - (a.builtin ? 1 : 0))
 
+  const startCreate = () => {
+    const usedIds = new Set(serverConfigs.map((server) => server.id))
+    const idBase = `mcp-${Date.now().toString(36)}`
+    let id = idBase
+    let suffix = 2
+    while (usedIds.has(id)) {
+      id = `${idBase}-${suffix}`
+      suffix += 1
+    }
+
+    setEditing({
+      id,
+      name: "",
+      endpoint: "",
+      transport: "streamable_http",
+      auth: { type: "none" },
+      timeoutMs: 30_000,
+      enabled: false,
+      builtin: false,
+    })
+  }
+
+  const editingIsCreate = editing !== null && !serverConfigs.some((server) => server.id === editing.id)
+
   // Filter servers by query (name or endpoint)
   const normalizedQuery = query.trim().toLocaleLowerCase("fr")
   const filteredServers = serverConfigs.filter((server) =>
@@ -262,6 +286,14 @@ export function McpDialog({ snapshot, onClose, onChanged }: Props) {
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
             <button
               type="button"
+              onClick={startCreate}
+              className="flex min-h-56 flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed border-border p-4 hover:border-brand-to focus-visible:ring-2 focus-visible:ring-brand-to"
+            >
+              <Plus className="size-6 text-muted-foreground" />
+              <span className="text-xs font-medium text-muted-foreground">{t.mcp.addServer}</span>
+            </button>
+            <button
+              type="button"
               onClick={() => setImporting(true)}
               className="flex min-h-56 flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed border-border p-4 hover:border-brand-to focus-visible:ring-2 focus-visible:ring-brand-to"
             >
@@ -301,18 +333,18 @@ export function McpDialog({ snapshot, onClose, onChanged }: Props) {
             <section
               role="dialog"
               aria-modal="true"
-              aria-label={`${t.mcp.edit} — ${editing.name}`}
+              aria-label={editingIsCreate ? t.mcp.addServer : `${t.mcp.edit} — ${editing.name}`}
               className="w-[640px] max-w-[94vw] rounded-lg border border-border bg-background p-4"
             >
               <McpServerForm
                 initial={editing}
                 authStatus={snapshot.authStatuses[editing.id] ?? "missing"}
                 onSave={async (next) => {
-                  await applyImport(diffMcpImport([next], [editing]))
+                  await applyImport(diffMcpImport([next], editingIsCreate ? [] : [editing]))
                   setEditing(null)
                 }}
                 onConfigureSecret={async (next, secret) => {
-                  await applyImport(diffMcpImport([next], [editing]))
+                  await applyImport(diffMcpImport([next], editingIsCreate ? [] : [editing]))
                   await discover(next, secret)
                   setEditing(next)
                 }}

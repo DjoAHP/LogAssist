@@ -212,6 +212,7 @@ export const fr = {
     activeTools: "outil(s) actif(s)",
     // Galerie
     searchServers: "Rechercher un serveur MCP",
+    addServer: "Ajouter un serveur",
     // Navigateur d'outils et console
     searchTools: "Rechercher un outil",
     readOnly: "Lecture seule",

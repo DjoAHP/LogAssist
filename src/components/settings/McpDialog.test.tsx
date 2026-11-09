@@ -322,4 +322,34 @@ describe("McpDialog", () => {
     expect(removeSecret).toHaveBeenCalledWith("docs")
     expect(onChanged).toHaveBeenCalled()
   })
+
+  it("ouvre le formulaire de création depuis la tuile Ajouter un serveur", async () => {
+    renderDialog()
+
+    fireEvent.click(screen.getByRole("button", { name: "Ajouter un serveur" }))
+
+    const nameInput = screen.getByRole("textbox", { name: "Nom du serveur" }) as HTMLInputElement
+    expect(nameInput).not.toBeNull()
+    expect(nameInput.value).toBe("")
+  })
+
+  it("crée un serveur via le formulaire avec un diff de type création", async () => {
+    renderDialog()
+
+    fireEvent.click(screen.getByRole("button", { name: "Ajouter un serveur" }))
+    fireEvent.change(screen.getByRole("textbox", { name: "Nom du serveur" }), {
+      target: { value: "Test local" },
+    })
+    fireEvent.change(screen.getByRole("textbox", { name: "Endpoint MCP" }), {
+      target: { value: "https://example.com/mcp" },
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Enregistrer les paramètres" }))
+
+    await waitFor(() => expect(applyImport).toHaveBeenCalledTimes(1))
+    const diff = applyImport.mock.calls[0][0] as McpImportDiff[]
+    expect(diff).toHaveLength(1)
+    expect(diff[0].kind).toBe("create")
+    // La sous-modale se ferme après une création réussie
+    expect(screen.queryByRole("textbox", { name: "Nom du serveur" })).toBeNull()
+  })
 })
