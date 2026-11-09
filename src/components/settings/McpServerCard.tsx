@@ -35,6 +35,23 @@ function statusLabel(status: McpServerStatus): string {
   return labels[status.state]
 }
 
+// Méthode — DESIGN_SYSTEM.md : chaque état réseau associe texte, icône ET couleur.
+// Tonalité par état, même motif/tokens que ProviderCard (statusToneClass) :
+// neutre → muted, succès → vert discret, échec → destructive. La couleur n'est
+// jamais le seul canal : le libellé et l'icône varient déjà par état.
+const statusToneClass: Record<McpServerStatus["state"], string> = {
+  disabled: "text-muted-foreground",
+  not_configured: "text-muted-foreground",
+  ready: "text-muted-foreground",
+  connected: "text-green-600 dark:text-green-400",
+  connecting: "text-muted-foreground",
+  auth: "text-destructive",
+  offline: "text-destructive",
+  timeout: "text-destructive",
+  protocol: "text-destructive",
+}
+
+
 export function McpServerCard({
   server,
   toolCount,
@@ -86,7 +103,7 @@ export function McpServerCard({
       </header>
       <span
         role="status"
-        className="mb-1 inline-flex min-h-8 items-start gap-1 text-[10px] text-muted-foreground"
+        className={`mb-1 inline-flex min-h-8 items-start gap-1 text-[10px] ${statusToneClass[status.state]}`}
       >
         <StatusIcon
           className={`mt-0.5 size-3.5 shrink-0 ${busy ? "animate-spin motion-reduce:animate-none" : ""}`}

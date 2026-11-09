@@ -56,4 +56,25 @@ describe("McpServerCard", () => {
     rerender(<McpServerCard server={server} toolCount={4} canEnable status={{ state: "offline" }} {...callbacks} />)
     expect(screen.getByRole("status").textContent).toContain("Serveur injoignable")
   })
+  describe("tonalité d'état réseau (DESIGN_SYSTEM.md : texte + icône + couleur)", () => {
+    // Même motif que ProviderCard : connexité en cours → neutre, succès → vert, échec → destructive.
+    const toneByState: Array<{ state: string; classe: string }> = [
+      { state: "connected", classe: "text-green-600" },
+      { state: "auth", classe: "text-destructive" },
+      { state: "offline", classe: "text-destructive" },
+      { state: "timeout", classe: "text-destructive" },
+      { state: "protocol", classe: "text-destructive" },
+    ]
+    it.each(toneByState)("l'état $state porte sa classe de tonalité $classe", ({ state, classe }) => {
+      render(<McpServerCard server={server} toolCount={4} canEnable status={{ state: state as "connected" }} {...callbacks} />)
+      expect((screen.getByRole("status") as HTMLElement).className).toContain(classe)
+    })
+    it("au moins deux états distincts rendent des couleurs différentes", () => {
+      const { rerender } = render(<McpServerCard server={server} toolCount={4} canEnable status={{ state: "connected" }} {...callbacks} />)
+      const connected = (screen.getByRole("status") as HTMLElement).className
+      rerender(<McpServerCard server={server} toolCount={4} canEnable status={{ state: "offline" }} {...callbacks} />)
+      const offline = (screen.getByRole("status") as HTMLElement).className
+      expect(connected).not.toBe(offline)
+    })
+  })
 })
