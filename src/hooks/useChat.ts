@@ -15,9 +15,14 @@ import { messages as messagesDb, type MessageRow } from "@/lib/db/messages"
 import { images as imagesDb } from "@/lib/db/images"
 import { conversations } from "@/lib/db/conversations"
 import { secrets } from "@/lib/secrets/service"
-import { tinyfish } from "@/lib/mcp/client"
-import { resolveWebChoice } from "@/lib/mcp/webIntent"
-import type { WebAccessConfig, WebSource, WebStatus, WebToolRequest } from "@/lib/mcp/types"
+import { mcp } from "@/lib/mcp/client"
+import { resolveWebIntent } from "@/lib/mcp/webIntent"
+import type { McpRuntimeSnapshot } from "@/lib/mcp/runtime"
+import type {
+  McpToolApprovalRequest,
+  WebSource,
+  WebStatus,
+} from "@/lib/mcp/types"
 import { buildChatMessages } from "@/lib/chat/contextBuilder"
 import { createRecoveryPlan, type RecoveryMode } from "@/lib/chat/recoveryPolicy"
 import { runAssistantTurn, type AssistantTurnResult } from "@/lib/chat/turnRunner"
@@ -67,14 +72,20 @@ export interface ChatMessageVM {
   persistenceFailed?: boolean
   recoveryMode?: RecoveryMode
   recoveryFailed?: boolean
+  toolApproval?: McpToolApprovalRequest
 }
 
 export interface SendOptions {
   forceWeb?: boolean
 }
 
-const WEB_DISABLED: WebAccessConfig = { enabled: false, configured: false }
 const PERSISTENCE_ERROR_MESSAGE = "La réponse n'a pas pu être enregistrée."
+const EMPTY_MCP_RUNTIME: McpRuntimeSnapshot = {
+  servers: [],
+  activeTools: [],
+  authStatuses: {},
+  webAccess: { enabled: false, configured: false },
+}
 
 function safeErrorMessage(error: unknown, exactSecrets: readonly string[] = []): string {
   const message = typeof error === "object" && error !== null &&
@@ -92,19 +103,21 @@ function normalizeDuration(value: unknown): number | null {
 
 export function useChat(
   modelSelection: { provider: ProviderConfig; modelId: string; supportsImages: boolean } | null,
-  webAccess: WebAccessConfig = WEB_DISABLED,
+  mcpRuntime: McpRuntimeSnapshot = EMPTY_MCP_RUNTIME,
 ) {
   const [vm, setVm] = useState<ChatMessageVM[]>([])
   const [busy, setBusy] = useState(false)
   const [webToolsUnsupported, setWebToolsUnsupported] = useState(false)
+  const [pendingToolApproval, setPendingToolApproval] = useState<McpToolApprovalRequest | null>(null)
   // Hoistés au niveau du hook : useRef dans une callback violerait les règles
   // des hooks. Le verrou ref ferme la fenêtre avant le prochain rendu React.
   const inFlightRef = useRef(false)
   const accRef = useRef("")
   const abortRef = useRef<AbortController | null>(null)
-  const mcpRequestRef = useRef<string | null>(null)
   const unsupportedToolsRef = useRef(new Set<string>())
   const loadSeqRef = useRef(0)
+  const approvalResolverRef = useRef<((decision: "allow" | "deny") => void) | null>(null)
+  const activeTurnIdRef = useRef<string | null>(null)
 
   useEffect(() => {
     const key = modelSelection
@@ -144,6 +157,33 @@ export function useChat(
       return [...persisted, ...transients]
     })
   }, [])
+
+  const settleApproval = useCallback((decision: "allow" | "deny") => {
+    const resolve = approvalResolverRef.current
+    approvalResolverRef.current = null
+    setPendingToolApproval(null)
+    setVm((messages) =>
+      messages.map((message) =>
+        message.toolApproval ? { ...message, toolApproval: undefined } : message,
+      ),
+    )
+    resolve?.(decision)
+  }, [])
+
+  const allowTool = useCallback(() => settleApproval("allow"), [settleApproval])
+  const denyTool = useCallback(() => settleApproval("deny"), [settleApproval])
+
+  const approvalHandlerFor = useCallback(
+    (update: (patch: Partial<ChatMessageVM>) => void) =>
+      (request: McpToolApprovalRequest): Promise<"allow" | "deny"> =>
+        new Promise((resolve) => {
+          approvalResolverRef.current?.("deny")
+          approvalResolverRef.current = resolve
+          setPendingToolApproval(request)
+          update({ toolApproval: request })
+        }),
+    [],
+  )
 
   const send = useCallback(
     async (
@@ -361,7 +401,7 @@ export function useChat(
               name: knowledge.name,
               content: knowledge.content,
             })),
-            webEnabled: webAccess.enabled && webAccess.configured,
+            webEnabled: mcpRuntime.webAccess.enabled && mcpRuntime.webAccess.configured,
           })
           const history = await messagesDb.listByConversation(conversationId)
           const apiMessages = buildChatMessages({
@@ -381,38 +421,48 @@ export function useChat(
             messagesCount: apiMessages.length,
           })
 
-          const web = webAccess.enabled && webAccess.configured
+          activeTurnIdRef.current = assistantId
+          const approve = approvalHandlerFor(upsertLast)
+
+          const tools = mcpRuntime.activeTools.length > 0
             ? {
-                webClient: {
-                  call: async (requestId: string, request: WebToolRequest) => {
-                    mcpRequestRef.current = requestId
-                    try {
-                      return await tinyfish.call(requestId, request)
-                    } finally {
-                      if (mcpRequestRef.current === requestId) mcpRequestRef.current = null
-                    }
-                  },
+                toolClient: {
+                  call: (serverId: string, turnId: string, callId: string, nativeName: string, arguments_: Record<string, unknown>) =>
+                    mcp.callTool(serverId, turnId, callId, nativeName, arguments_),
                 },
-                toolChoice: resolveWebChoice(fullContent, options.forceWeb ?? false),
-                requestId: assistantId,
+                tools: mcpRuntime.activeTools,
+                webIntent: resolveWebIntent(fullContent, options.forceWeb ?? false),
+                turnId: assistantId,
                 compatibilityKey: `${provider.id}/${modelId}`,
                 unsupportedTools: unsupportedToolsRef.current,
-                onStatus: (webStatus: WebStatus | undefined) => upsertLast({ webStatus }),
+                approve,
+                onWebStatus: (webStatus: WebStatus | undefined) => upsertLast({ webStatus }),
               }
             : undefined
 
-          const result = await runAssistantTurn({
-            provider: apiProvider,
-            request: { messages: apiMessages },
-            apiKey: activeApiKey,
-            modelId,
-            callbacks: turnCallbacks,
-            signal: controller.signal,
-            ...(web ? { web } : {}),
-          })
+          const result = await runAssistantTurn(
+            tools
+              ? {
+                  provider: apiProvider,
+                  request: { messages: apiMessages },
+                  apiKey: activeApiKey,
+                  modelId,
+                  callbacks: turnCallbacks,
+                  signal: controller.signal,
+                  tools,
+                }
+              : {
+                  provider: apiProvider,
+                  request: { messages: apiMessages },
+                  apiKey: activeApiKey,
+                  modelId,
+                  callbacks: turnCallbacks,
+                  signal: controller.signal,
+                }
+          )
           if (controller.signal.aborted) throw controller.signal.reason
           accRef.current = result.text
-          if (web) {
+          if (tools) {
             setWebToolsUnsupported(unsupportedToolsRef.current.has(`${provider.id}/${modelId}`))
           }
           let metrics: TurnMetrics | null = null
@@ -421,7 +471,7 @@ export function useChat(
             const providerMetrics = result.usage
               ? metricsFromProviderUsage(result.usage, pricingProvider, modelId)
               : null
-            metrics = providerMetrics ?? (web
+            metrics = providerMetrics ?? (tools
               ? null
               : estimateTurnMetrics(apiMessages, result.text, pricingProvider, modelId))
           } catch (metricsError) {
@@ -461,13 +511,16 @@ export function useChat(
       } finally {
         // Le runner et la persistance assistant sont terminés avant de rendre
         // l'input, y compris après erreur ou interruption.
+        approvalResolverRef.current?.("deny")
+        approvalResolverRef.current = null
+        setPendingToolApproval(null)
+        activeTurnIdRef.current = null
         inFlightRef.current = false
         setBusy(false)
         abortRef.current = null
-        mcpRequestRef.current = null
       }
     },
-    [modelSelection, webAccess],
+    [modelSelection, mcpRuntime, approvalHandlerFor],
   )
 
   const recoverLast = useCallback(
@@ -481,7 +534,6 @@ export function useChat(
       setBusy(true)
       const controller = new AbortController()
       abortRef.current = controller
-      mcpRequestRef.current = null
       let activeApiKey = ""
       let recoveryAcc = ""
       const safeRecoveryError = (error: unknown) =>
@@ -527,7 +579,7 @@ export function useChat(
             name: knowledge.name,
             content: knowledge.content,
           })),
-          webEnabled: webAccess.enabled && webAccess.configured,
+          webEnabled: mcpRuntime.webAccess.enabled && mcpRuntime.webAccess.configured,
         })
         const apiMessages = buildChatMessages({
           system,
@@ -546,34 +598,42 @@ export function useChat(
           },
         }
         const requestId = crypto.randomUUID()
-        const web = webAccess.enabled && webAccess.configured
+        activeTurnIdRef.current = requestId
+        const recoveryTools = mcpRuntime.activeTools.length > 0
           ? {
-              webClient: {
-                call: async (mcpRequestId: string, request: WebToolRequest) => {
-                  mcpRequestRef.current = mcpRequestId
-                  try {
-                    return await tinyfish.call(mcpRequestId, request)
-                  } finally {
-                    if (mcpRequestRef.current === mcpRequestId) mcpRequestRef.current = null
-                  }
-                },
+              toolClient: {
+                call: (serverId: string, turnId: string, callId: string, nativeName: string, arguments_: Record<string, unknown>) =>
+                  mcp.callTool(serverId, turnId, callId, nativeName, arguments_),
               },
-              toolChoice: resolveWebChoice(plan.triggerUserContent, false),
-              requestId,
+              tools: mcpRuntime.activeTools,
+              webIntent: resolveWebIntent(plan.triggerUserContent, false),
+              turnId: requestId,
               compatibilityKey: `${provider.id}/${modelId}`,
               unsupportedTools: unsupportedToolsRef.current,
-              onStatus: (webStatus: WebStatus | undefined) => upsertTarget({ webStatus }),
+              approve: approvalHandlerFor(upsertTarget),
+              onWebStatus: (webStatus: WebStatus | undefined) => upsertTarget({ webStatus }),
             }
           : undefined
-        const result = await runAssistantTurn({
-          provider: apiProvider,
-          request: { messages: apiMessages },
-          apiKey: activeApiKey,
-          modelId,
-          callbacks,
-          signal: controller.signal,
-          ...(web ? { web } : {}),
-        })
+        const result = await runAssistantTurn(
+          recoveryTools
+            ? {
+                provider: apiProvider,
+                request: { messages: apiMessages },
+                apiKey: activeApiKey,
+                modelId,
+                callbacks,
+                signal: controller.signal,
+                tools: recoveryTools,
+              }
+            : {
+                provider: apiProvider,
+                request: { messages: apiMessages },
+                apiKey: activeApiKey,
+                modelId,
+                callbacks,
+                signal: controller.signal,
+              }
+        )
         if (controller.signal.aborted) throw controller.signal.reason
         const finalContent = result.text || recoveryAcc
         if (finalContent.trim() === "") throw new Error("Réponse vide du fournisseur")
@@ -584,7 +644,7 @@ export function useChat(
           const providerMetrics = result.usage
             ? metricsFromProviderUsage(result.usage, pricingProvider, modelId)
             : null
-          metrics = providerMetrics ?? (web
+          metrics = providerMetrics ?? (recoveryTools
             ? null
             : estimateTurnMetrics(apiMessages, finalContent, pricingProvider, modelId))
         } catch (metricsError) {
@@ -622,7 +682,7 @@ export function useChat(
           recoveryMode: undefined,
           recoveryFailed: undefined,
         })
-        if (web) {
+        if (recoveryTools) {
           setWebToolsUnsupported(unsupportedToolsRef.current.has(`${provider.id}/${modelId}`))
         }
         await conversations.touch(conversationId).catch((error) => {
@@ -638,13 +698,16 @@ export function useChat(
         })
         return false
       } finally {
+        approvalResolverRef.current?.("deny")
+        approvalResolverRef.current = null
+        setPendingToolApproval(null)
+        activeTurnIdRef.current = null
         inFlightRef.current = false
         setBusy(false)
         abortRef.current = null
-        mcpRequestRef.current = null
       }
     },
-    [modelSelection, webAccess],
+    [modelSelection, mcpRuntime, approvalHandlerFor],
   )
 
   const retryLast = useCallback(
@@ -660,13 +723,17 @@ export function useChat(
   )
 
   const interrupt = useCallback(() => {
+    approvalResolverRef.current?.("deny")
+    approvalResolverRef.current = null
+    setPendingToolApproval(null)
     abortRef.current?.abort()
-    const requestId = mcpRequestRef.current
-    if (requestId) {
-      void tinyfish.cancel(requestId).catch((error) => {
+    const turnId = activeTurnIdRef.current
+    if (turnId) {
+      void mcp.cancelTurn(turnId).catch((error) => {
         logger.error({ kind: "mcp_cancel", message: safeErrorMessage(error) })
       })
     }
+    activeTurnIdRef.current = null
   }, [])
   return {
     vm,
@@ -677,6 +744,9 @@ export function useChat(
     interrupt,
     load,
     webToolsUnsupported,
+    pendingToolApproval,
+    allowTool,
+    denyTool,
   }
 }
 
