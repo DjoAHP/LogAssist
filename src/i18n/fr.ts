@@ -55,6 +55,10 @@ export const fr = {
     outputShort: "out",
     newResponse: "Nouvelle réponse",
     backToBottom: "Revenir en bas de la conversation",
+    toolApprovalTitle: "Autorisation requise",
+    toolApprovalHint: "Cet outil peut modifier des données. Vérifiez les arguments avant de continuer.",
+    allowToolOnce: "Autoriser une fois",
+    denyTool: "Refuser",
   },
   settings: {
     title: "Fournisseur",
