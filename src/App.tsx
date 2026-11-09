@@ -124,7 +124,9 @@ function App() {
     interrupt,
     load,
     webToolsUnsupported,
-  } = useChat(modelSelection, mcpRuntime.webAccess)
+    allowTool,
+    denyTool,
+  } = useChat(modelSelection, mcpRuntime)
 
   // Chargement de l'historique à chaque changement de conversation active.
   useEffect(() => {
@@ -191,6 +193,14 @@ function App() {
     [activeId, regenerateLast],
   )
 
+  const selectConversation = useCallback(
+    (id: string) => {
+      if (busy) interrupt()
+      setActiveId(id)
+    },
+    [busy, interrupt],
+  )
+
   const toggleSidebar = useCallback(() => {
     setSidebarCollapsed((prev) => !prev)
   }, [])
@@ -200,7 +210,7 @@ function App() {
       <Sidebar
         conversations={list}
         activeId={activeId}
-        onSelect={setActiveId}
+        onSelect={selectConversation}
         onNew={() => void onNew().catch(console.error)}
         onDelete={(id) => void onDelete(id).catch(console.error)}
         onRename={onRename}
@@ -274,6 +284,8 @@ function App() {
             options: modelOptions,
             onSelect: onModelSelect,
           }}
+          onAllowTool={allowTool}
+          onDenyTool={denyTool}
         />
         <InputBar
           disabled={activeId === null || modelSelection === null}

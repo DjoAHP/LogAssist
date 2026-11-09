@@ -32,3 +32,12 @@ describe("bouton MCP du header", () => {
     expect(source).toContain("title={t.settings.modelsSettings}")
   })
 })
+
+describe("App — runtime MCP et galerie", () => {
+  it("l'application transmet le snapshot MCP au chat et au modal", () => {
+    const source = readFileSync(new URL("./App.tsx", import.meta.url), "utf8")
+    expect(source).toContain("useMcpRuntime()")
+    expect(source).toContain("useChat(modelSelection, mcpRuntime)")
+    expect(source).toContain("snapshot={mcpRuntime}")
+  })
+})
