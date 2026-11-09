@@ -10,8 +10,6 @@ import { snapshot, genericTool, tinyfishTool } from "@/test/mcpFixtures"
 
 const runTurnMock = vi.hoisted(() => vi.fn())
 const systemPromptMock = vi.hoisted(() => vi.fn())
-const runWebAgentMock = vi.hoisted(() => vi.fn())
-const resolveWebChoiceMock = vi.hoisted(() => vi.fn(() => "auto"))
 const tinyfishCallMock = vi.hoisted(() => vi.fn())
 const tinyfishCancelMock = vi.hoisted(() => vi.fn())
 const loggerErrorMock = vi.hoisted(() => vi.fn())
@@ -37,27 +35,8 @@ const metricsFromProviderUsageMock = vi.hoisted(() => vi.fn<
 })))
 const runAssistantTurnMock = vi.hoisted(() => vi.fn(async (input: any) => {
   if (input.tools) {
-    // Tool agent path - convert to web input for runWebAgentMock compatibility
-    return runWebAgentMock({
-      provider: input.provider,
-      request: input.request,
-      apiKey: input.apiKey,
-      modelId: input.modelId,
-      callbacks: input.callbacks,
-      signal: input.signal,
-      web: {
-        webClient: input.tools.toolClient,
-        toolChoice: input.tools.webIntent,
-        requestId: input.tools.turnId,
-        compatibilityKey: input.tools.compatibilityKey,
-        unsupportedTools: input.tools.unsupportedTools,
-        onStatus: input.tools.onWebStatus,
-      },
-    })
-  }
-  if (input.web) {
-    // Web agent path
-    return runWebAgentMock(input)
+    // Tool agent path
+    return runTurnMock(input.request, input.apiKey, input.modelId, { tools: [], toolChoice: "auto" }, input.callbacks, input.signal)
   }
   // Direct provider path
   return runTurnMock(input.request, input.apiKey, input.modelId, {}, input.callbacks, input.signal)
@@ -117,7 +96,6 @@ vi.mock("@/lib/token", () => ({
   metricsFromProviderUsage: metricsFromProviderUsageMock,
   resolvePricingProvider: resolvePricingProviderMock,
 }))
-vi.mock("@/lib/mcp/webAgent", () => ({ runWebAgent: runWebAgentMock }))
 vi.mock("@/lib/mcp/webIntent", () => ({ resolveWebIntent: resolveWebIntentMock }))
 vi.mock("@/lib/mcp/client", () => ({
   mcp: { callTool: mcpCallToolMock, cancelTurn: mcpCancelTurnMock },
@@ -166,8 +144,6 @@ function messageRow(overrides: Partial<MessageRow>): MessageRow {
 beforeEach(() => {
   vi.clearAllMocks()
   systemPromptMock.mockReset()
-  resolveWebChoiceMock.mockReset()
-  runWebAgentMock.mockReset()
   runTurnMock.mockReset()
   estimateTurnMetricsMock.mockReset()
   metricsFromProviderUsageMock.mockReset()
@@ -180,7 +156,6 @@ beforeEach(() => {
   mcpCancelTurnMock.mockReset()
   resolveWebIntentMock.mockReset()
   systemPromptMock.mockReturnValue("")
-  resolveWebChoiceMock.mockReturnValue("auto")
   resolveWebIntentMock.mockReturnValue("auto")
   vi.mocked(messagesDb.insert).mockReset().mockResolvedValue("row-1")
   vi.mocked(messagesDb.updateAssistant).mockReset().mockResolvedValue(undefined)
@@ -200,18 +175,10 @@ beforeEach(() => {
   })
   runAssistantTurnMock.mockImplementation(async (input: any) => {
     if (input.tools) {
-      return runWebAgentMock(input)
-    }
-    if (input.web) {
-      return runWebAgentMock(input)
+      // Tool agent path - use runTurnMock with tools config
+      return runTurnMock(input.request, input.apiKey, input.modelId, { tools: [], toolChoice: "auto" }, input.callbacks, input.signal)
     }
     return runTurnMock(input.request, input.apiKey, input.modelId, {}, input.callbacks, input.signal)
-  })
-  runWebAgentMock.mockResolvedValue({
-    text: "Réponse Web",
-    firstTokenMs: 5,
-    totalMs: 20,
-    sources: [],
   })
   estimateTurnMetricsMock.mockReturnValue({
     inputTokens: 7,
@@ -267,7 +234,7 @@ describe("useChat.send — contract anti-perte", () => {
       .toBeLessThan(runTurnMock.mock.invocationCallOrder[0])
     expect(runTurnMock.mock.calls[0][5]).toBeInstanceOf(AbortSignal)
     expect(result.current.busy).toBe(false)
-    expect(runWebAgentMock).not.toHaveBeenCalled()
+    expect(runAssistantTurnMock).toHaveBeenCalledTimes(1)
   })
 
   it("estime les métriques quand le fournisseur ne fournit pas d'usage", async () => {
@@ -444,9 +411,28 @@ describe("useChat.send — contract anti-perte", () => {
     })
   })
 
+  it("persiste uniquement la réponse finale de l'assistant, sans contenu Web brut", async () => {
+    const sources = [{ url: "https://example.com", title: "Doc", origin: "search" as const }]
+    runAssistantTurnMock.mockResolvedValueOnce({
+      text: "Réponse finale",
+      firstTokenMs: 5,
+      totalMs: 20,
+      sources,
+    })
+    const { result } = renderHook(() => useChat(modelSelection, runtimeWithTools()))
+    await act(async () => {
+      await result.current.send("conv-1", "Question", [], {})
+    })
+    const assistantInsert = vi.mocked(messagesDb.insert).mock.calls
+      .map(([row]) => row)
+      .find((row) => row.role === "assistant")
+    expect(assistantInsert).toBeDefined()
+    expect(assistantInsert!.content).toBe("Réponse finale")
+  })
+
   it("ne fabrique pas de métriques pour un usage Web invalide", async () => {
     metricsFromProviderUsageMock.mockReturnValueOnce(null)
-    runWebAgentMock.mockResolvedValueOnce({
+    runAssistantTurnMock.mockResolvedValueOnce({
       text: "Réponse Web",
       firstTokenMs: 4,
       totalMs: 20,
@@ -527,7 +513,7 @@ describe("useChat.send — contract anti-perte", () => {
   })
 
   it("retourne true et matérialise l'erreur si l'orchestration échoue après l'insert user", async () => {
-    runWebAgentMock.mockRejectedValueOnce(new Error("MCP inattendu"))
+    runAssistantTurnMock.mockRejectedValueOnce(new Error("MCP inattendu"))
     const { result } = renderHook(() =>
       useChat(modelSelection, runtimeWithWeb()),
     )
@@ -793,7 +779,7 @@ describe("useChat.send — contract anti-perte", () => {
     vi.mocked(messagesDb.insert)
       .mockResolvedValueOnce("user-1")
       .mockResolvedValueOnce("assistant-1")
-    runWebAgentMock.mockResolvedValueOnce({
+    runAssistantTurnMock.mockResolvedValueOnce({
       text: "Réponse Web",
       firstTokenMs: 2,
       totalMs: 15,
@@ -1490,7 +1476,7 @@ describe("useChat — récupération de la dernière réponse", () => {
   it("réutilise le Web automatique et remplace les sources après un retry", async () => {
     const sources = [{ url: "https://example.com", title: "Source", origin: "search" as const }]
     vi.mocked(messagesDb.listByConversation).mockResolvedValue([userRow, failedRow])
-    runWebAgentMock.mockResolvedValueOnce({
+    runAssistantTurnMock.mockResolvedValueOnce({
       text: "Réponse Web",
       firstTokenMs: 12,
       totalMs: 80,

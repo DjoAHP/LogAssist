@@ -354,4 +354,49 @@ describe("runToolAgent", () => {
     await expect(runToolAgent(harness.input)).rejects.toBe(abort)
     expect(harness.callTool).not.toHaveBeenCalled()
   })
+
+  it("conserve les sources TinyFish validées et dédupliquées", async () => {
+    const harness = createHarness({
+      tools: [tinyfishTool("search")],
+      turns: [turn("", [call("c1", "tinyfish__search", { query: "Tauri" })]), turn("Réponse")],
+      webIntent: "required",
+    })
+    harness.callTool.mockResolvedValue({
+      content: "Résultat",
+      structuredContent: { ok: true },
+      resourceLinks: [],
+      isError: false,
+      sources: [
+        { url: "https://example.com", title: "Doc", origin: "search" },
+        { url: "https://example.com", title: "Doublon", origin: "search" },
+      ],
+    })
+    const result = await runToolAgent(harness.input)
+    expect(result.sources).toEqual([{ url: "https://example.com", title: "Doc", origin: "search" }])
+  })
+
+  it("enveloppe les résultats génériques dans un bloc externe non fiable (jamais bruts dans messages)", async () => {
+    const harness = createHarness({
+      tools: [genericTool("github", "search", "github__search")],
+      turns: [turn("", [call("c1", "github__search", { q: "test" })]), turn("Réponse finale")],
+    })
+    harness.callTool.mockResolvedValue({
+      content: "Résultat",
+      structuredContent: { data: "raw" },
+      resourceLinks: [],
+      sources: [],
+      isError: false,
+    })
+    await runToolAgent(harness.input)
+    // Le résultat d'outil est wrappé dans un bloc external_mcp_result (comportement normal) :
+    // invariant anti-injection — le structuredContent brut ne doit jamais être persisté
+    // directement dans messages.toolResults.
+    const toolMessages = harness.runTurn.mock.calls[1][0].messages.filter(
+      (m: { role: string }) => m.role === "tool"
+    )
+    expect(toolMessages).toHaveLength(1)
+    const toolContent = toolMessages[0].content
+    expect(toolContent).toContain("external_mcp_result")
+    expect(toolContent).toContain('{"data":"raw"}') // structuredContent enveloppé dans le bloc externe
+  })
 })

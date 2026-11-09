@@ -109,7 +109,7 @@ src-tauri/
   intacte tant que le remplacement SQLite n'a pas réussi.
 - **Métriques** : elles appartiennent à chaque réponse. Un coût n'est affiché que si
   l'endpoint, le modèle, l'usage et les tokens cachés permettent un calcul fiable.
-- **MCP TinyFish** : `runWebAgent` autorise deux tours d'outils et quatre appels MCP
+- **MCP TinyFish** : `runToolAgent` autorise deux tours d'outils et quatre appels MCP
   maximum. Le modèle reçoit les résultats dans un bloc externe non fiable. Le repli
   sans outils ne s'exécute qu'une fois et l'incompatibilité est mémorisée par session.
 - **Sources** : la migration V5 ajoute `messages.sources`. Les URL sont validées côté

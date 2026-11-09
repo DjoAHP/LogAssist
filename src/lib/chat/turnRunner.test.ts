@@ -1,14 +1,8 @@
 import { describe, expect, it, vi } from "vitest"
 import type { IProvider } from "@/lib/ai/openai-compat"
 import type { ChatRequest, TurnCallbacks } from "@/lib/ai/types"
-import type { WebAgentInput } from "@/lib/mcp/webAgent"
 import type { ToolAgentInput } from "@/lib/mcp/toolAgent"
 import { runAssistantTurn } from "./turnRunner"
-
-type WebTurnOptions = Omit<
-  WebAgentInput,
-  "provider" | "request" | "apiKey" | "modelId" | "callbacks" | "signal"
->
 
 type ToolTurnOptions = Omit<
   ToolAgentInput,
@@ -23,18 +17,6 @@ const callbacks: TurnCallbacks = {}
 
 function providerWithRunTurn(runTurn: ReturnType<typeof vi.fn>): IProvider {
   return { runTurn } as unknown as IProvider
-}
-
-function createWebOptions(): WebTurnOptions {
-  return {
-    webClient: {
-      call: vi.fn().mockResolvedValue({ content: "Résultat", sources: [] }),
-    },
-    toolChoice: "auto",
-    requestId: "assistant-1",
-    compatibilityKey: "provider/model",
-    unsupportedTools: new Set<string>(),
-  }
 }
 
 function createToolOptions(): ToolTurnOptions {
@@ -111,53 +93,20 @@ describe("runAssistantTurn", () => {
     expect(runTurn).toHaveBeenCalledWith(request, "secret", "model", {}, callbacks, signal)
   })
 
-  it("reconstruit l'entrée Web avec les champs communs de la racine", async () => {
-    const runWeb = vi.fn().mockResolvedValue({
-      text: "Réponse Web",
-      sources: [{ url: "https://example.com", origin: "search" }],
-      firstTokenMs: 15,
-      totalMs: 90,
-    })
-    const provider = providerWithRunTurn(vi.fn())
-    const web = createWebOptions()
-
-    const result = await runAssistantTurn({
-      provider,
-      request,
-      apiKey: "secret",
-      modelId: "model",
-      callbacks,
-      signal,
-      web,
-      runWeb,
-    })
-
-    expect(runWeb).toHaveBeenCalledWith({
-      ...web,
-      provider,
-      request,
-      apiKey: "secret",
-      modelId: "model",
-      callbacks,
-      signal,
-    })
-    expect(result.text).toBe("Réponse Web")
-  })
-
-  it("écrase défensivement les champs communs étrangers présents à l'exécution", async () => {
-    const runWeb = vi.fn().mockResolvedValue({
-      text: "Réponse Web",
+  it("écrase défensivement les champs communs étrangers présents à l'exécution (outils)", async () => {
+    const runTools = vi.fn().mockResolvedValue({
+      text: "Réponse outils",
       sources: [],
       firstTokenMs: 15,
       totalMs: 90,
     })
     const provider = providerWithRunTurn(vi.fn())
     const foreignSignal = new AbortController().signal
-    const web = {
-      ...createWebOptions(),
+    const tools = {
+      ...createToolOptions(),
       modelId: "modèle étranger",
       signal: foreignSignal,
-    } as unknown as WebTurnOptions
+    } as unknown as ToolTurnOptions
 
     await runAssistantTurn({
       provider,
@@ -166,25 +115,25 @@ describe("runAssistantTurn", () => {
       modelId: "model",
       callbacks,
       signal,
-      web,
-      runWeb,
+      tools,
+      runTools,
     })
 
-    expect(runWeb).toHaveBeenCalledWith(expect.objectContaining({
+    expect(runTools).toHaveBeenCalledWith(expect.objectContaining({
       modelId: "model",
       signal,
     }))
-    expect(runWeb.mock.calls[0]?.[0].signal).not.toBe(foreignSignal)
+    expect(runTools.mock.calls[0]?.[0].signal).not.toBe(foreignSignal)
   })
 
-  it("propage le warning, l'usage et les sources du résultat Web", async () => {
+  it("propage le warning, l'usage et les sources du résultat outils", async () => {
     const sources = [{ url: "https://example.com", origin: "search" as const }]
-    const runWeb = vi.fn().mockResolvedValue({
-      text: "Réponse Web dégradée",
+    const runTools = vi.fn().mockResolvedValue({
+      text: "Réponse outils",
       sources,
       firstTokenMs: 15,
       totalMs: 90,
-      warning: "Accès Web indisponible",
+      warning: "Outil indisponible",
       usage: { inputTokens: 20, outputTokens: 8 },
     })
 
@@ -195,12 +144,12 @@ describe("runAssistantTurn", () => {
       modelId: "model",
       callbacks,
       signal,
-      web: createWebOptions(),
-      runWeb,
+      tools: createToolOptions(),
+      runTools,
     })
 
     expect(result).toMatchObject({
-      warning: "Accès Web indisponible",
+      warning: "Outil indisponible",
       usage: { inputTokens: 20, outputTokens: 8 },
       sources,
     })
@@ -234,9 +183,9 @@ describe("runAssistantTurn", () => {
     })).rejects.toBe(abort)
   })
 
-  it("laisse remonter une erreur Web par identité", async () => {
-    const error = new Error("Échec Web")
-    const runWeb = vi.fn().mockRejectedValue(error)
+  it("laisse remonter une erreur outils par identité", async () => {
+    const error = new Error("Échec outils")
+    const runTools = vi.fn().mockRejectedValue(error)
 
     await expect(runAssistantTurn({
       provider: providerWithRunTurn(vi.fn()),
@@ -245,14 +194,14 @@ describe("runAssistantTurn", () => {
       modelId: "model",
       callbacks,
       signal,
-      web: createWebOptions(),
-      runWeb,
+      tools: createToolOptions(),
+      runTools,
     })).rejects.toBe(error)
   })
 
-  it("laisse remonter un AbortError Web par identité", async () => {
+  it("laisse remonter un AbortError outils par identité", async () => {
     const abort = new DOMException("aborted", "AbortError")
-    const runWeb = vi.fn().mockRejectedValue(abort)
+    const runTools = vi.fn().mockRejectedValue(abort)
 
     await expect(runAssistantTurn({
       provider: providerWithRunTurn(vi.fn()),
@@ -261,8 +210,8 @@ describe("runAssistantTurn", () => {
       modelId: "model",
       callbacks,
       signal,
-      web: createWebOptions(),
-      runWeb,
+      tools: createToolOptions(),
+      runTools,
     })).rejects.toBe(abort)
   })
 })

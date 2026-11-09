@@ -92,20 +92,22 @@ export interface WebSource {
 
 export type WebStatus = "searching" | "fetching"
 
-export type McpErrorKind =
-  | "not_configured"
-  | "invalid_config"
-  | "auth"
-  | "timeout"
-  | "rate_limit"
-  | "offline"
-  | "tool_not_found"
-  | "invalid_arguments"
-  | "protocol"
-  | "cancelled"
-  | "tool_denied"
-  | "invalid_response"
-  | "unknown"
+export const MCP_ERROR_KINDS = [
+  "not_configured",
+  "invalid_config",
+  "auth",
+  "offline",
+  "timeout",
+  "rate_limit",
+  "tool_not_found",
+  "tool_denied",
+  "invalid_arguments",
+  "protocol",
+  "invalid_response",
+  "cancelled",
+  "unknown",
+] as const
+export type McpErrorKind = typeof MCP_ERROR_KINDS[number]
 
 export type WebToolRequest =
   | { tool: "search"; arguments: { query: string; purpose?: string } }
