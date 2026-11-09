@@ -40,4 +40,23 @@ describe("McpImportDialog", () => {
     expect(await screen.findByRole("alert")).toBeTruthy()
     expect(onApply).not.toHaveBeenCalled()
   })
+
+  it("affiche l'erreur spécifique pour fichier trop gros (> 256 Kio)", async () => {
+    const onApply = vi.fn()
+    render(<McpImportDialog existing={[]} onValidate={vi.fn()} onApply={onApply} onClose={vi.fn()} />)
+    const largeContent = "x".repeat(257 * 1024) // 257 Kio
+    const file = new File([largeContent], "large.json", { type: "application/json" })
+    fireEvent.change(screen.getByLabelText("Fichier de configuration MCP"), { target: { files: [file] } })
+    const alert = await screen.findByRole("alert")
+    expect(alert.textContent).toContain("Le fichier dépasse 256 Kio")
+    expect(onApply).not.toHaveBeenCalled()
+  })
+
+  it("ferme le dialog sur Escape", async () => {
+    const onClose = vi.fn()
+    render(<McpImportDialog existing={[]} onValidate={vi.fn()} onApply={vi.fn()} onClose={onClose} />)
+    // Focus the dialog by clicking the file input label
+    fireEvent.keyDown(document, { key: "Escape" })
+    expect(onClose).toHaveBeenCalledTimes(1)
+  })
 })

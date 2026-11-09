@@ -1,8 +1,9 @@
-import { useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { Upload, X } from "lucide-react"
 import { t } from "@/i18n/fr"
 import { diffMcpImport, parseMcpImport, type McpImportDiff } from "@/lib/mcp/importConfig"
 import type { McpServerConfig } from "@/lib/mcp/types"
+import { HEADER_TOOL_DIALOG_SIZE_CLASS } from "@/components/settings/headerToolDialog"
 
 interface Props {
   existing: McpServerConfig[]
@@ -12,21 +13,73 @@ interface Props {
 }
 
 export function McpImportDialog({ existing, onValidate, onApply, onClose }: Props) {
+  const dialogRef = useRef<HTMLDivElement>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
   const [diff, setDiff] = useState<McpImportDiff[]>([])
   const [error, setError] = useState<string>()
   const [applying, setApplying] = useState(false)
+  const [hintId] = useState("mcp-import-hint")
+
+  // Focus trap + initial focus + Escape
+  useEffect(() => {
+    const dialog = dialogRef.current
+    if (!dialog) return
+
+    const focusableSelector =
+      'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+    const focusableElements = dialog.querySelectorAll<HTMLElement>(focusableSelector)
+    const firstElement = focusableElements[0]
+    const lastElement = focusableElements[focusableElements.length - 1]
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault()
+        onClose()
+        return
+      }
+      if (event.key === "Tab") {
+        if (event.shiftKey) {
+          if (document.activeElement === firstElement) {
+            event.preventDefault()
+            lastElement?.focus()
+          }
+        } else {
+          if (document.activeElement === lastElement) {
+            event.preventDefault()
+            firstElement?.focus()
+          }
+        }
+      }
+    }
+
+    document.addEventListener("keydown", handleKeyDown)
+    // Initial focus on file input (or first focusable)
+    fileInputRef.current?.focus()
+
+    return () => document.removeEventListener("keydown", handleKeyDown)
+  }, [onClose])
 
   const pick = async (file?: File) => {
     if (!file) return
     setError(undefined)
     try {
-      if (file.size > 256 * 1024) throw new Error("Fichier MCP supérieur à 256 Kio")
+      if (file.size > 256 * 1024) throw new Error("TOO_LARGE")
       const parsed = parseMcpImport(await file.text())
       await onValidate(parsed.servers)
       setDiff(diffMcpImport(parsed.servers, existing))
-    } catch (cause) {
+    } catch (cause: unknown) {
       setDiff([])
-      setError(t.mcp.importInvalid)
+      if (cause instanceof Error) {
+        if (cause.message === "TOO_LARGE") {
+          setError(t.mcp.importTooLarge)
+        } else if (cause.message === "Le document JSON MCP est invalide") {
+          setError(t.mcp.importParseError)
+        } else {
+          setError(t.mcp.importValidationError)
+        }
+      } else {
+        setError(t.mcp.importValidationError)
+      }
     }
   }
 
@@ -35,8 +88,8 @@ export function McpImportDialog({ existing, onValidate, onApply, onClose }: Prop
     try {
       await onApply(diff)
       onClose()
-    } catch {
-      setError(t.mcp.importInvalid)
+    } catch (cause: unknown) {
+      setError(t.mcp.importValidationError)
     } finally {
       setApplying(false)
     }
@@ -46,10 +99,12 @@ export function McpImportDialog({ existing, onValidate, onApply, onClose }: Prop
   return (
     <div className="fixed inset-0 z-[60] grid place-items-center bg-black/65 p-4" onClick={onClose}>
       <section
+        ref={dialogRef}
         role="dialog"
         aria-modal="true"
         aria-labelledby="mcp-import-title"
-        className="w-[720px] max-w-[94vw] rounded-lg border border-border bg-background p-4"
+        aria-describedby={error ? undefined : hintId}
+        className={`${HEADER_TOOL_DIALOG_SIZE_CLASS} rounded-lg border border-border bg-background p-4`}
         onClick={(event) => event.stopPropagation()}
       >
         <header className="mb-3 flex items-center justify-between">
@@ -66,6 +121,7 @@ export function McpImportDialog({ existing, onValidate, onApply, onClose }: Prop
           <Upload className="size-4" />
           {t.mcp.importFile}
           <input
+            ref={fileInputRef}
             className="sr-only"
             type="file"
             accept=".json,application/json"
@@ -73,7 +129,7 @@ export function McpImportDialog({ existing, onValidate, onApply, onClose }: Prop
             onChange={(event) => void pick(event.target.files?.[0])}
           />
         </label>
-        {error && <p role="alert" className="mt-3 text-sm text-destructive">{error}</p>}
+        {error && <p id="mcp-import-error" role="alert" className="mt-3 text-sm text-destructive">{error}</p>}
         {diff.length > 0 && (
           <div className="mt-3">
             <h4 className="text-xs font-medium">{t.mcp.importPreview}</h4>
@@ -94,7 +150,9 @@ export function McpImportDialog({ existing, onValidate, onApply, onClose }: Prop
                 </li>
               ))}
             </ul>
-            <p className="mt-2 text-xs text-muted-foreground">{t.mcp.importHint}</p>
+            <p id={hintId} className="mt-2 text-xs text-muted-foreground">
+              {t.mcp.importHint}
+            </p>
           </div>
         )}
         <footer className="mt-4 flex justify-end gap-2">

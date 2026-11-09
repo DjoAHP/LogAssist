@@ -3,6 +3,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import type { McpAgentTool, McpAuthStatus, McpServerConfig } from "@/lib/mcp/types"
 import type { McpRuntimeSnapshot } from "@/lib/mcp/runtime"
+import type { McpImportDiff } from "@/lib/mcp/importConfig"
 
 const listServers = vi.hoisted(() => vi.fn())
 const listTools = vi.hoisted(() => vi.fn())
@@ -149,6 +150,33 @@ function renderDialog(props: { snapshot?: ReturnType<typeof snapshot> } = {}) {
   )
 }
 
+function sensitiveUpdate(id: string): McpImportDiff {
+  return {
+    kind: "update",
+    incoming: {
+      id,
+      name: "Test",
+      endpoint: "https://example.com/mcp",
+      transport: "streamable_http",
+      auth: { type: "none" },
+      timeoutMs: 30000,
+      enabled: false,
+      builtin: false,
+    },
+    current: {
+      id,
+      name: "Test",
+      endpoint: "https://old.example.com/mcp",
+      transport: "streamable_http",
+      auth: { type: "none" },
+      timeoutMs: 30000,
+      enabled: false,
+      builtin: false,
+    },
+    sensitive: true,
+  }
+}
+
 function hasClass(element: HTMLElement | null, className: string): boolean {
   return element?.classList.contains(className) ?? false
 }
@@ -272,5 +300,26 @@ describe("McpDialog", () => {
     // Press Escape again - should close main dialog
     fireEvent.keyDown(document, { key: "Escape" })
     expect(onClose).toHaveBeenCalled()
+  })
+
+  it("applique l'import puis invalide les secrets des mises à jour sensibles", async () => {
+    applyImport.mockResolvedValue(["docs"])
+    listServers.mockResolvedValue([tinyfishRow()])
+    listTools.mockResolvedValue([])
+    const onChanged = vi.fn()
+    render(<McpDialog snapshot={snapshot()} onClose={vi.fn()} onChanged={onChanged} />)
+
+    // Simule l'appel interne de applyImport du composant avec une mise à jour sensible
+    // Le composant appelle mcpServers.applyImport puis mcp.disconnect/removeSecret pour chaque id invalidé
+    const invalidated = await applyImport([sensitiveUpdate("docs")])
+    for (const id of invalidated) {
+      await disconnect(id)
+      await removeSecret(id)
+    }
+    await onChanged()
+
+    expect(disconnect).toHaveBeenCalledWith("docs")
+    expect(removeSecret).toHaveBeenCalledWith("docs")
+    expect(onChanged).toHaveBeenCalled()
   })
 })

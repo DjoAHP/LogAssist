@@ -6,6 +6,7 @@ import { mcpUiError } from "@/lib/mcp/errorMessages"
 import { mcp } from "@/lib/mcp/client"
 import { mcpServers, serverConfigFromRow } from "@/lib/db/mcpServers"
 import { buildActiveToolCatalog } from "@/lib/mcp/catalog"
+import { logger } from "@/lib/logger"
 import { diffMcpImport, type McpImportDiff } from "@/lib/mcp/importConfig"
 import { confirm as dialogConfirm } from "@tauri-apps/plugin-dialog"
 import type {
@@ -38,6 +39,7 @@ export function McpDialog({ snapshot, onClose, onChanged }: Props) {
   const [editing, setEditing] = useState<McpServerConfig | null>(null)
   const [browsing, setBrowsing] = useState<McpServerConfig | null>(null)
   const [actionError, setActionError] = useState<string>()
+  const [busyServers, setBusyServers] = useState<Set<string>>(new Set())
   const searchRef = useRef<HTMLInputElement>(null)
   const returnFocusRef = useRef<HTMLElement | null>(null)
 
@@ -67,8 +69,7 @@ export function McpDialog({ snapshot, onClose, onChanged }: Props) {
   // Initial refresh
   useEffect(() => {
     void refresh().catch((error) => {
-      // eslint-disable-next-line no-console
-      console.error("[mcp.dialog.refresh]", error)
+      logger.error({ context: "mcp.dialog.refresh", message: String(error) })
     })
   }, [refresh])
 
@@ -110,7 +111,6 @@ export function McpDialog({ snapshot, onClose, onChanged }: Props) {
       const kind = error instanceof Error && "kind" in error ? (error as { kind: string }).kind : "unknown"
       const state = kind === "auth" ? "auth" : kind === "timeout" ? "timeout" : kind === "protocol" ? "protocol" : "offline"
       setStatuses((current) => ({ ...current, [server.id]: { state } }))
-      throw error
     }
   }
 
@@ -140,21 +140,27 @@ export function McpDialog({ snapshot, onClose, onChanged }: Props) {
   }
 
   const toggleServer = async (server: McpServerConfig, enabled: boolean) => {
+    if (busyServers.has(server.id)) return
     if (enabled) {
       const status = snapshot.authStatuses[server.id]
       if (
         !(["configured", "not_required"] as McpAuthStatus[]).includes(status) ||
         (tools[server.id] ?? []).length === 0
       ) {
-        setStatuses((current) => ({
-          ...current,
-          [server.id]: { state: status === "missing" || status === "stale" ? "auth" : "offline" },
-        }))
         return
       }
     }
-    await mcpServers.setEnabled(server.id, enabled)
-    await afterChange()
+    setBusyServers((prev) => new Set(prev).add(server.id))
+    try {
+      await mcpServers.setEnabled(server.id, enabled)
+      await afterChange()
+    } finally {
+      setBusyServers((prev) => {
+        const next = new Set(prev)
+        next.delete(server.id)
+        return next
+      })
+    }
   }
 
   const runManualTool = async (serverId: string, nativeName: string, arguments_: Record<string, unknown>) => {
@@ -177,7 +183,7 @@ export function McpDialog({ snapshot, onClose, onChanged }: Props) {
         approvalMode: row.approval_mode,
         kind: server.id === "tinyfish" ? "tinyfish_web" : "generic",
       }
-      buildActiveToolCatalog([...snapshot.activeTools, candidate])
+      await buildActiveToolCatalog([...snapshot.activeTools, candidate])
     }
     await mcpServers.setToolEnabled(server.id, nativeName, enabled)
     await afterChange()
