@@ -145,7 +145,7 @@ export const fr = {
   mcp: {
     open: "MCP",
     title: "MCP",
-    description: "Connectez TinyFish pour autoriser la recherche et la lecture de pages Web.",
+    description: "Connectez des serveurs MCP distants et choisissez les outils accessibles à l'assistant.",
     tinyfish: "TinyFish",
     allowedTools: "Outils autorisés : recherche Web et lecture de pages.",
     apiKey: "Clé API TinyFish",
@@ -157,7 +157,7 @@ export const fr = {
     connectionFailed: "Échec de connexion",
     webEnabled: "Activer l'accès Web",
     deleteKey: "Supprimer la clé",
-    deleteConfirm: "Supprimer la clé TinyFish et désactiver l'accès Web ?",
+    deleteConfirm: "Supprimer ce serveur MCP, ses outils et son identifiant du Credential Manager ?",
     close: "Fermer",
     // Import JSON
     importConfig: "Importer une configuration JSON",
@@ -206,6 +206,8 @@ export const fr = {
     enableServer: "Activer le serveur",
     disableServer: "Désactiver le serveur",
     activeTools: "outil(s) actif(s)",
+    // Galerie
+    searchServers: "Rechercher un serveur MCP",
     // Navigateur d'outils et console
     searchTools: "Rechercher un outil",
     readOnly: "Lecture seule",
