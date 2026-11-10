@@ -75,7 +75,7 @@ vi.mock("@/lib/db/messages", () => ({
   },
 }))
 vi.mock("@/lib/db/messageMedia", () => ({
-  messageMedia: { insertRows: vi.fn(), listByMessageIds: vi.fn(), removeByMessageIds: vi.fn() },
+  messageMedia: { insertRows: vi.fn(), listByMessageIds: vi.fn(), listByIds: vi.fn(), removeByMessageIds: vi.fn() },
 }))
 vi.mock("@/lib/db/images", () => ({ images: { create: vi.fn(), get: vi.fn(), remove: vi.fn() } }))
 vi.mock("@/lib/db/conversations", () => ({ conversations: { touch: vi.fn(), create: vi.fn(), rename: vi.fn(), remove: vi.fn() } }))
@@ -203,6 +203,7 @@ beforeEach(() => {
   // messageMedia mocks (added for multimodal media persistence)
   vi.mocked(messageMediaDb.insertRows).mockReset().mockResolvedValue(undefined)
   vi.mocked(messageMediaDb.listByMessageIds).mockReset().mockResolvedValue([])
+  vi.mocked(messageMediaDb.listByIds).mockReset().mockResolvedValue([])
   vi.mocked(messageMediaDb.removeByMessageIds).mockReset().mockResolvedValue(undefined)
 })
 

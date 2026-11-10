@@ -78,4 +78,30 @@ describe("messageMedia", () => {
     expect(sql).toBe("DELETE FROM message_media WHERE message_id IN (?)")
     expect(bind).toEqual(["msg-1"])
   })
+
+  it("hydrate les refs par IDS de médias (colonne id, pas message_id)", async () => {
+    mockSelect.mockResolvedValueOnce([
+      {
+        id: "media-1", message_id: "msg-1", kind: "image", mime_type: "image/png",
+        tool_label: "Cloudflare · generate_image", base64: "AAEB",
+        created_at: "2026-11-10 00:00:00",
+      },
+    ])
+
+    const rows = await messageMedia.listByIds(["media-1", "media-2"])
+
+    // Régression flash média : la colonne ciblée est id (les refs de
+    // messages.media sont des ids de médias), jamais message_id.
+    const [sql, bind] = mockSelect.mock.calls[0]
+    expect(sql).toBe(
+      "SELECT id, message_id, kind, mime_type, tool_label, base64, created_at FROM message_media WHERE id IN (?,?)",
+    )
+    expect(bind).toEqual(["media-1", "media-2"])
+    expect(rows).toHaveLength(1)
+  })
+
+  it("listByIds retourne [] sans jamais émettre d'IN vide", async () => {
+    expect(await messageMedia.listByIds([])).toEqual([])
+    expect(mockSelect).not.toHaveBeenCalled()
+  })
 })

@@ -15,6 +15,7 @@ const mockMessagesDb = vi.hoisted(() => ({
 const mockMessageMediaDb = vi.hoisted(() => ({
   insertRows: vi.fn(),
   listByMessageIds: vi.fn(),
+  listByIds: vi.fn(),
   removeByMessageIds: vi.fn(),
 }))
 const mockRunAssistantTurn = vi.hoisted(() => vi.fn())
@@ -95,6 +96,7 @@ beforeEach(() => {
   mockMessagesDb.updateAssistant.mockResolvedValue(undefined)
   mockMessageMediaDb.insertRows.mockResolvedValue(undefined)
   mockMessageMediaDb.listByMessageIds.mockResolvedValue([])
+  mockMessageMediaDb.listByIds.mockResolvedValue([])
   mockMessageMediaDb.removeByMessageIds.mockResolvedValue(undefined)
   // Les modules annexes doivent retourner des promesses complètes (cf. le
   // pattern du test principal useChat.test.tsx : sans cela, undefined.catch /
@@ -163,7 +165,7 @@ describe("useChat — persistance des médias MCP", () => {
     mockMessagesDb.listByConversation.mockResolvedValue([
       blankRow({ id: "msg-1", content: "Voilà votre image.", media: '["media-1"]' }),
     ])
-    mockMessageMediaDb.listByMessageIds.mockResolvedValue([
+    mockMessageMediaDb.listByIds.mockResolvedValue([
       {
         id: "media-1", message_id: "msg-1", kind: "image", mime_type: "image/png",
         tool_label: "Cloudflare · generate_image", base64: "AAEB",
@@ -176,7 +178,9 @@ describe("useChat — persistance des médias MCP", () => {
       await result.current.load("conv-1")
     })
 
-    expect(mockMessageMediaDb.listByMessageIds).toHaveBeenCalledWith(["media-1"])
+    // Les refs sont des IDS de médias : la requête doit cibler la colonne id,
+    // pas message_id (régression du flash média corrigée).
+    expect(mockMessageMediaDb.listByIds).toHaveBeenCalledWith(["media-1"])
     const last = result.current.vm[result.current.vm.length - 1]!
     expect(last.media![0]).toEqual({
       id: "media-1",

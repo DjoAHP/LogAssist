@@ -38,6 +38,17 @@ export const messageMedia = {
       messageIds,
     )
   },
+  // Hydratation des refs messages.media : les refs sont des IDS de médias
+  // (colonne id), jamais des message_id — requête distincte pour éviter toute
+  // confusion sémantique.
+  async listByIds(mediaIds: string[]): Promise<MessageMediaRow[]> {
+    if (mediaIds.length === 0) return []
+    const placeholders = mediaIds.map(() => "?").join(",")
+    return select<MessageMediaRow>(
+      `SELECT id, message_id, kind, mime_type, tool_label, base64, created_at FROM message_media WHERE id IN (${placeholders})`,
+      mediaIds,
+    )
+  },
   async removeByMessageIds(messageIds: string[]): Promise<void> {
     if (messageIds.length === 0) return
     const placeholders = messageIds.map(() => "?").join(",")
