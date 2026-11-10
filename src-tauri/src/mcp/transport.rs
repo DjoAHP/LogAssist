@@ -3187,11 +3187,12 @@ mod tests {
         let raw = call_result(
             vec![
                 ContentBlock::text("avant"),
-                // Longueur multiple de 4 : le base64 doit être VALIDE pour que
-                // le test démontre que le payload accepté ne fuit jamais dans
-                // le texte injecté au LLM.
-                ContentBlock::image("IMAGE-BASE64", "image/png"),
-                ContentBlock::audio("AUDIO-BASE64", "audio/wav"),
+                // Secrets de longueur multiple de 4 SANS tiret (le '-' est
+                // hors alphabet RFC 4648) : le base64 doit être VALIDE pour
+                // que le test démontre que le payload accepté ne fuit jamais
+                // dans le texte injecté au LLM.
+                ContentBlock::image("IMAGEPAYLOAD", "image/png"),
+                ContentBlock::audio("AUDIOPAYLOAD", "audio/wav"),
                 ContentBlock::resource(ResourceContents::blob(
                     "RESOURCE-BASE64-SECRET",
                     "https://example.com/blob",
@@ -3209,7 +3210,7 @@ mod tests {
         let normalized = normalize_tool_result("remote-docs", "lookup", raw);
 
         // Aucun payload binaire ne fuit dans le contenu textuel injecté au LLM.
-        for secret in ["IMAGE-BASE64", "AUDIO-BASE64", "RESOURCE-BASE64-SECRET"] {
+        for secret in ["IMAGEPAYLOAD", "AUDIOPAYLOAD", "RESOURCE-BASE64-SECRET"] {
             assert!(!normalized.content.contains(secret));
         }
         assert!(normalized.content.contains("avant"));
@@ -3227,14 +3228,14 @@ mod tests {
             normalized.media[0],
             McpMedia::Image {
                 mime_type: "image/png".to_owned(),
-                base64: "IMAGE-BASE64".to_owned(),
+                base64: "IMAGEPAYLOAD".to_owned(),
             }
         );
         assert_eq!(
             normalized.media[1],
             McpMedia::Audio {
                 mime_type: "audio/wav".to_owned(),
-                base64: "AUDIO-BASE64".to_owned(),
+                base64: "AUDIOPAYLOAD".to_owned(),
             }
         );
         assert!(!normalized.is_error);
