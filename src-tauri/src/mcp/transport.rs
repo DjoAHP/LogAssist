@@ -42,12 +42,12 @@ use url::{Host, Url};
 
 use super::credentials::binding_fingerprint;
 use super::security::{
-    MAX_CATALOG_BYTES, MAX_RESULT_CHARS, MAX_SSE_EVENT_BYTES, MAX_TOOLS_PER_SERVER,
-    validate_api_key_header, validate_endpoint_static, validate_public_ip, validate_public_web_url,
-    validate_tool_schema,
+    MAX_CATALOG_BYTES, MAX_MEDIA_PER_RESULT, MAX_RESULT_CHARS, MAX_SSE_EVENT_BYTES,
+    MAX_TOOLS_PER_SERVER, MediaRefusal, validate_api_key_header, validate_endpoint_static,
+    validate_media_block, validate_public_ip, validate_public_web_url, validate_tool_schema,
 };
 use super::types::{
-    McpAuthConfig, McpErrorKind, McpErrorPayload, McpResourceLink, McpRuntimeServer,
+    McpAuthConfig, McpErrorKind, McpErrorPayload, McpMedia, McpResourceLink, McpRuntimeServer,
     McpToolDescriptor, McpToolResult, WebSource, WebToolName,
 };
 
@@ -1568,8 +1568,49 @@ fn bounded_structured_content(value: Option<Value>) -> (Option<Value>, bool) {
     }
 }
 
+fn media_refusal_marker(reason: MediaRefusal) -> &'static str {
+    match reason {
+        MediaRefusal::DisallowedMime | MediaRefusal::InvalidBase64 => OMITTED_BINARY_MARKER,
+        MediaRefusal::TooLarge => "[Média omis : trop grand]",
+    }
+}
+
+/// Pousse un média accepté, sinon dépose le marqueur de refus. Le type du
+/// média est déduit du bloc d'origine : un serveur mentant (Image avec MIME
+/// audio) est refusé par la validation elle-même, pas reclassé.
+fn push_media(
+    media: &mut Vec<McpMedia>,
+    content: &mut String,
+    content_chars: &mut usize,
+    expected_kind: &str,
+    mime_type: &str,
+    base64: &str,
+) {
+    match validate_media_block(expected_kind, mime_type, base64) {
+        Ok(()) => {
+            if media.len() >= MAX_MEDIA_PER_RESULT {
+                append_result_text(content, content_chars, OMITTED_BINARY_MARKER);
+                return;
+            }
+            media.push(match expected_kind {
+                "image" => McpMedia::Image {
+                    mime_type: mime_type.to_owned(),
+                    base64: base64.to_owned(),
+                },
+                _ => McpMedia::Audio {
+                    mime_type: mime_type.to_owned(),
+                    base64: base64.to_owned(),
+                },
+            });
+        }
+        Err(reason) => append_result_text(content, content_chars, media_refusal_marker(reason)),
+    }
+}
+
 /// Convertit un résultat MCP distant en un contrat local borné. Les blocs
-/// binaires ne sont jamais recopiés : seul un marqueur constant subsiste.
+/// image/audio respectant la liste fermée de MIME et la borne de taille sont
+/// retenus dans `media` ; le repli « binaire omis » reste actif pour tout le
+/// reste : aucun payload non validé ne franchit le pont Rust→React.
 pub fn normalize_tool_result(
     server_id: &str,
     native_name: &str,
@@ -1582,6 +1623,7 @@ pub fn normalize_tool_result(
         bounded_structured_content(result.structured_content);
     let mut content = String::new();
     let mut content_chars = 0;
+    let mut media = Vec::new();
     let mut resource_links = Vec::new();
     if structured_omitted {
         append_result_text(&mut content, &mut content_chars, OMITTED_STRUCTURED_MARKER);
@@ -1592,15 +1634,46 @@ pub fn normalize_tool_result(
             ContentBlock::Text(text) => {
                 append_result_text(&mut content, &mut content_chars, &text.text);
             }
-            ContentBlock::Image(_) | ContentBlock::Audio(_) => {
-                append_result_text(&mut content, &mut content_chars, OMITTED_BINARY_MARKER);
+            ContentBlock::Image(image) => {
+                push_media(
+                    &mut media,
+                    &mut content,
+                    &mut content_chars,
+                    "image",
+                    &image.mime_type,
+                    &image.data,
+                );
+            }
+            ContentBlock::Audio(audio) => {
+                push_media(
+                    &mut media,
+                    &mut content,
+                    &mut content_chars,
+                    "audio",
+                    &audio.mime_type,
+                    &audio.data,
+                );
             }
             ContentBlock::Resource(resource) => match resource.resource {
                 ResourceContents::TextResourceContents { text, .. } => {
                     append_result_text(&mut content, &mut content_chars, &text);
                 }
-                ResourceContents::BlobResourceContents { .. } => {
-                    append_result_text(&mut content, &mut content_chars, OMITTED_BINARY_MARKER);
+                ResourceContents::BlobResourceContents { mime_type, blob, .. } => {
+                    // Un blob ne porte pas son genre : le MIME seul décide
+                    // (image/* → image, audio/* → audio, sinon marqueur).
+                    let mime = mime_type.as_deref().unwrap_or("");
+                    let kind = if mime.starts_with("image/") {
+                        "image"
+                    } else if mime.starts_with("audio/") {
+                        "audio"
+                    } else {
+                        ""
+                    };
+                    if kind.is_empty() {
+                        append_result_text(&mut content, &mut content_chars, OMITTED_BINARY_MARKER);
+                    } else {
+                        push_media(&mut media, &mut content, &mut content_chars, kind, mime, &blob);
+                    }
                 }
                 _ => {
                     append_result_text(&mut content, &mut content_chars, OMITTED_BINARY_MARKER);
@@ -1620,6 +1693,7 @@ pub fn normalize_tool_result(
     McpToolResult {
         content,
         structured_content,
+        media,
         resource_links,
         sources,
         is_error: result.is_error.unwrap_or(false),
@@ -1653,10 +1727,10 @@ mod tests {
 
     use super::*;
     use crate::mcp::security::{
-        MAX_CATALOG_BYTES, MAX_RESULT_CHARS, MAX_SSE_EVENT_BYTES, MAX_TOOLS_PER_SERVER,
-        validate_endpoint_static,
+        MAX_CATALOG_BYTES, MAX_MEDIA_BASE64_CHARS, MAX_RESULT_CHARS, MAX_SSE_EVENT_BYTES,
+        MAX_TOOLS_PER_SERVER, validate_endpoint_static,
     };
-    use crate::mcp::types::{McpAuthConfig, McpRuntimeServer, McpTransportKind};
+    use crate::mcp::types::{McpAuthConfig, McpMedia, McpRuntimeServer, McpTransportKind};
     use serde_json::json;
 
     fn remote_server(auth: McpAuthConfig) -> McpRuntimeServer {
@@ -3104,11 +3178,12 @@ mod tests {
         );
         assert!(normalized.resource_links.is_empty());
         assert!(normalized.sources.is_empty());
+        assert!(normalized.media.is_empty());
         assert!(normalized.is_error);
     }
 
     #[test]
-    fn normalization_omits_every_binary_payload_with_a_fixed_marker() {
+    fn normalization_accepts_bounded_media_and_keeps_markers_for_the_rest() {
         let raw = call_result(
             vec![
                 ContentBlock::text("avant"),
@@ -3130,21 +3205,86 @@ mod tests {
 
         let normalized = normalize_tool_result("remote-docs", "lookup", raw);
 
-        for secret in [
-            "IMAGE-BASE64-SECRET",
-            "AUDIO-BASE64-SECRET",
-            "RESOURCE-BASE64-SECRET",
-        ] {
+        // Aucun payload binaire ne fuit dans le contenu textuel injecté au LLM.
+        for secret in ["IMAGE-BASE64-SECRET", "AUDIO-BASE64-SECRET", "RESOURCE-BASE64-SECRET"] {
             assert!(!normalized.content.contains(secret));
         }
         assert!(normalized.content.contains("avant"));
         assert!(normalized.content.contains("ressource textuelle"));
         assert!(normalized.content.contains("après"));
+        // Uniquement le blob sans MIME reste omis.
         assert_eq!(
             normalized.content.matches("[Contenu binaire omis]").count(),
-            3
+            1
+        );
+
+        // Les médias valides sont portés par le champ dédié.
+        assert_eq!(normalized.media.len(), 2);
+        assert_eq!(
+            normalized.media[0],
+            McpMedia::Image {
+                mime_type: "image/png".to_owned(),
+                base64: "IMAGE-BASE64-SECRET".to_owned(),
+            }
+        );
+        assert_eq!(
+            normalized.media[1],
+            McpMedia::Audio {
+                mime_type: "audio/wav".to_owned(),
+                base64: "AUDIO-BASE64-SECRET".to_owned(),
+            }
         );
         assert!(!normalized.is_error);
+    }
+
+    #[test]
+    fn normalization_refuses_lying_oversized_and_invalid_medias() {
+        let oversized = "A".repeat(MAX_MEDIA_BASE64_CHARS + 4);
+        let raw = call_result(
+            vec![
+                ContentBlock::text("texte conservé"),
+                // Bloc Image « menteur » portant un MIME audio.
+                ContentBlock::image("AAEB", "audio/mpeg"),
+                // Base64 valide mais au-delà de la borne.
+                ContentBlock::image(oversized.as_str(), "image/png"),
+                // Longueur non multiple de 4.
+                ContentBlock::image("AAA", "image/png"),
+            ],
+            None,
+            None,
+        );
+
+        let normalized = normalize_tool_result("remote-docs", "lookup", raw);
+
+        // Aucun média n'est retenu ; les marqueurs décrivent les refus sans
+        // jamais livrer le base64.
+        assert_eq!(normalized.media.len(), 0);
+        assert_eq!(
+            normalized.content.matches("[Contenu binaire omis]").count(),
+            2
+        );
+        assert!(normalized.content.contains("[Média omis : trop grand]"));
+        assert!(normalized.content.contains("texte conservé"));
+    }
+
+    #[test]
+    fn normalization_caps_media_at_the_quota_of_eight() {
+        // Payloads de 4 caractères : multiple de 4, alphabet standard.
+        let raw = call_result(
+            (0..9)
+                .map(|index| ContentBlock::image(format!("AAE{index}"), "image/png"))
+                .collect::<Vec<_>>(),
+            None,
+            None,
+        );
+
+        let normalized = normalize_tool_result("remote-docs", "lookup", raw);
+
+        assert_eq!(normalized.media.len(), 8);
+        assert_eq!(
+            normalized.content.matches("[Contenu binaire omis]").count(),
+            1
+        );
     }
 
     #[test]
