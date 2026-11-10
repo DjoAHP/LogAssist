@@ -171,6 +171,10 @@ src-tauri/
   ne jamais committer la base SQLite.
 - Un commit = un sujet cohérent ; les tests doivent passer avant le commit.
 - Branche principale GitHub : `feat/m1-socle-chat`. Ne jamais forcer-push sur une branche partagée.
+- **Worktrees locaux interdits** : ne pas créer de worktree local (`.worktrees/`) — cela
+  consomme de l'espace disque inutilement. Pour toute nouvelle fonctionnalité, créer une
+  branche directement sur le dépôt GitHub (`git checkout -b feat/ma-fonctionnalité`) et
+  pousser vers l'origine. Le travail s'effectue dans la branche courante du dépôt principal.
 
 ---
 
@@ -215,3 +219,19 @@ Priorisés dans l'ordre du rapport d'audit :
 - Redaction renforcée des clés dans les erreurs, logs, réglages et données historiques.
 - Migrations V6 à V8 ; comportement éphémère des captures conservé.
 - 496 tests TypeScript validés dans le worktree de release ; build Vite Windows validé.
+
+---
+
+## 7. Workflow nouvelles fonctionnalités (depuis v3.2.0)
+
+**Fin des worktrees locaux** — trop lourds, source de confusion WSL/Windows.
+
+Pour chaque nouvelle fonctionnalité ou correctif significatif :
+
+1. **Créer une branche** directement sur GitHub (ou `git checkout -b feat/nom-court` en local) depuis `feat/m1-socle-chat`.
+2. **Développer dans la branche** : code, tests, docs, commits conventionnels (`feat:`, `fix:`, `chore:`).
+3. **Ouvrir une PR** vers `feat/m1-socle-chat` — CI lance les gates (`npm run build`, `cargo test`, `clippy`, `tsc`).
+4. **Merge après revue** — `git merge --no-ff` pour garder l'historique clair.
+5. **Supprimer la branche** (locale + remote) après merge.
+
+**Avantages** : pas de duplication WSL/Windows, pas de nettoyage manuel, historique Git linéaire et lisible, CI unique sur GitHub. Le repo principal (`C:\dev\LogAssist`) reste le seul lieu de travail.
