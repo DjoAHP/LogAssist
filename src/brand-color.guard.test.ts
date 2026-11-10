@@ -40,9 +40,13 @@ describe("garde-fou de l'accent de marque", () => {
       if (!filePath.endsWith(".tsx")) return []
       return readFileSync(filePath, "utf-8")
         .split("\n")
-        .flatMap((line, index) => line.includes("bg-brand-from") && !line.includes("text-brand-foreground")
-          ? [`${path.relative(import.meta.dirname, filePath)}:${index + 1}`]
-          : [])
+        .flatMap((line, index) => {
+          // On autorise les variantes avec opacité (ex: bg-brand-from/10) utilisées en hover sur éléments muets
+          const hasBrandFrom = /bg-brand-from(?!\/\d)/.test(line)
+          return hasBrandFrom && !line.includes("text-brand-foreground")
+            ? [`${path.relative(import.meta.dirname, filePath)}:${index + 1}`]
+            : []
+        })
     })
 
     expect(offenders).toEqual([])
