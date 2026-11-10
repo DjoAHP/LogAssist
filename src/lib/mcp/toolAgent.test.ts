@@ -226,6 +226,7 @@ function result(content: string, sources: WebSource[] = [], structuredContent?: 
   return {
     content,
     structuredContent,
+    media: [],
     resourceLinks: [],
     sources,
     isError,
@@ -364,6 +365,7 @@ describe("runToolAgent", () => {
     harness.callTool.mockResolvedValue({
       content: "Résultat",
       structuredContent: { ok: true },
+      media: [],
       resourceLinks: [],
       isError: false,
       sources: [
@@ -383,6 +385,7 @@ describe("runToolAgent", () => {
     harness.callTool.mockResolvedValue({
       content: "Résultat",
       structuredContent: { data: "raw" },
+      media: [],
       resourceLinks: [],
       sources: [],
       isError: false,
