@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/logo/logo3.png" alt="DeepSeek MCP Server" />
+  <img src="assets/logo/logo3.png" alt="DeepSeek MCP Server" width="300"/>
 </p>
 
 <h1 align="center">LogAssist</h1>
