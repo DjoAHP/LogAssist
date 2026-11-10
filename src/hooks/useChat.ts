@@ -12,6 +12,7 @@ import { loadPromptSettings } from "@/lib/prompts/store"
 import { knowledge as knowledgeDb } from "@/lib/db/knowledge"
 import { conversationKnowledge } from "@/lib/db/conversationKnowledge"
 import { messages as messagesDb, type MessageRow } from "@/lib/db/messages"
+import { messageMedia as messageMediaDb, type MessageMediaInsert } from "@/lib/db/messageMedia"
 import { images as imagesDb } from "@/lib/db/images"
 import { conversations } from "@/lib/db/conversations"
 import { secrets } from "@/lib/secrets/service"
@@ -20,12 +21,14 @@ import { resolveWebIntent } from "@/lib/mcp/webIntent"
 import type { McpRuntimeSnapshot } from "@/lib/mcp/runtime"
 import type {
   McpToolApprovalRequest,
+  MessageMedia,
   WebSource,
   WebStatus,
 } from "@/lib/mcp/types"
 import { buildChatMessages } from "@/lib/chat/contextBuilder"
 import { createRecoveryPlan, type RecoveryMode } from "@/lib/chat/recoveryPolicy"
 import { runAssistantTurn, type AssistantTurnResult } from "@/lib/chat/turnRunner"
+import type { ToolMedia } from "@/lib/mcp/toolAgent"
 import {
   estimateTurnMetrics,
   metricsFromProviderUsage,
@@ -66,6 +69,7 @@ export interface ChatMessageVM {
   apiError?: ApiErrorPayload
   interrupted?: boolean
   sources?: WebSource[]
+  media?: MessageMedia[]
   webStatus?: WebStatus
   webWarning?: string
   conversationId?: string
@@ -80,6 +84,8 @@ export interface SendOptions {
 }
 
 const PERSISTENCE_ERROR_MESSAGE = "La réponse n'a pas pu être enregistrée."
+const MEDIA_PERSIST_WARNING =
+  "Réponse enregistrée, mais les médias n'ont pas pu être sauvegardés."
 const EMPTY_MCP_RUNTIME: McpRuntimeSnapshot = {
   servers: [],
   activeTools: [],
@@ -99,6 +105,83 @@ function normalizeDuration(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) && value >= 0
     ? Math.round(value)
     : null
+}
+
+/** Réfs JSON ordonnées des médias : tolérant aux valeurs historiques invalides. */
+function parseMediaRefs(json: string | undefined | null): string[] {
+  try {
+    const parsed = JSON.parse(json ?? "[]") as unknown
+    return Array.isArray(parsed)
+      ? parsed.filter((v): v is string => typeof v === "string")
+      : []
+  } catch {
+    return []
+  }
+}
+
+/** Médias du tour, tolérant : une réponse sans champ média (fixtures ou
+ * contrats anciens) est traitée comme « aucun média » — une absence ne doit
+ * jamais casser la persistance du message. */
+function mediaOf(result: AssistantTurnResult): ToolMedia[] {
+  return Array.isArray(result.media) ? result.media : []
+}
+
+/** Insère les médias d'une réponse et pose les refs sur le message. Retourne
+ * les entrées hydratées (id posé) ou null si la persistance a échoué : les
+ * médias sont optionnels et ne requalifient jamais une réponse réussie. */
+async function persistMediaRows(
+  messageId: string,
+  media: ToolMedia[],
+): Promise<MessageMedia[] | null> {
+  const entries: MessageMedia[] = media.map((item) => ({ ...item, id: crypto.randomUUID() }))
+  try {
+    const rows: MessageMediaInsert[] = entries.map((entry) => ({
+      id: entry.id,
+      message_id: messageId,
+      kind: entry.type,
+      mime_type: entry.mimeType,
+      tool_label: entry.toolLabel,
+      base64: entry.base64,
+    }))
+    await messageMediaDb.insertRows(rows)
+    await messagesDb.setMediaRefs(messageId, JSON.stringify(entries.map((entry) => entry.id)))
+    return entries
+  } catch (error) {
+    logger.error({
+      kind: "assistant_media_persistence",
+      message: safeErrorMessage(error),
+    })
+    return null
+  }
+}
+
+/** Hydrate les refs messages.media en entrées typées (un seul IN global). */
+async function hydrateMedia(
+  refsByMessage: Map<string, string[]>,
+): Promise<Map<string, MessageMedia[]>> {
+  const ids = [...new Set([...refsByMessage.values()].flat())]
+  if (ids.length === 0) return new Map()
+  const rows = await messageMediaDb.listByMessageIds(ids)
+  const byId = new Map(
+    rows.map((row) => [
+      row.id,
+      {
+        id: row.id,
+        type: row.kind,
+        mimeType: row.mime_type,
+        base64: row.base64,
+        toolLabel: row.tool_label,
+      } satisfies MessageMedia,
+    ]),
+  )
+  const result = new Map<string, MessageMedia[]>()
+  for (const [messageId, refs] of refsByMessage) {
+    const hydrated = refs
+      .map((ref) => byId.get(ref))
+      .filter((entry): entry is MessageMedia => Boolean(entry))
+    if (hydrated.length > 0) result.set(messageId, hydrated)
+  }
+  return result
 }
 
 export function useChat(
@@ -132,6 +215,12 @@ export function useChat(
     const seq = ++loadSeqRef.current
     const rows = await messagesDb.listByConversation(conversationId)
     if (seq !== loadSeqRef.current) return
+    const refsByMessage = new Map<string, string[]>()
+    for (const row of rows) {
+      const refs = parseMediaRefs(row.media)
+      if (refs.length > 0) refsByMessage.set(row.id, refs)
+    }
+    const mediaByMessage = await hydrateMedia(refsByMessage)
     setVm((current) => {
       const warningsById = new Map(
         current
@@ -145,6 +234,7 @@ export function useChat(
       )
       const persisted = rows.map((row): ChatMessageVM => ({
         ...mapRow(row),
+        ...(mediaByMessage.has(row.id) ? { media: mediaByMessage.get(row.id) } : {}),
         ...(warningsById.has(row.id) ? { webWarning: warningsById.get(row.id) } : {}),
         ...(recoveryFailedIds.has(row.id) ? { recoveryFailed: true } : {}),
       }))
@@ -299,6 +389,11 @@ export function useChat(
               usage_source: metrics?.usageSource ?? null,
               cost_microusd: metrics?.costMicrousd ?? null,
             })
+            // Les médias sont optionnels : leur échec ne requalifie jamais la
+            // réponse en erreur (note via webWarning, bulle conservée).
+            const persistedMedia = mediaOf(result).length > 0
+              ? await persistMediaRows(id, mediaOf(result))
+              : []
             upsertLast({
               id,
               content: finalContent,
@@ -309,7 +404,10 @@ export function useChat(
               usageSource: metrics?.usageSource,
               costMicrousd: metrics?.costMicrousd ?? undefined,
               sources: result.sources,
-              webWarning: result.warning,
+              media: persistedMedia ?? [],
+              webWarning: persistedMedia === null
+                ? [result.warning, MEDIA_PERSIST_WARNING].filter(Boolean).join(" ")
+                : result.warning,
               webStatus: undefined,
               persistenceFailed: undefined,
             })
@@ -549,6 +647,11 @@ export function useChat(
         const plan = createRecoveryPlan(rows, targetId, mode)
         if (!plan) return false
 
+        // Les anciens médias sont retirés avant réécriture (l'ancienne
+        // réponse ne repart pas dans l'historique rechargé) ; un échec de
+        // nettoyage suit le chemin recoveryFailed existant.
+        await messageMediaDb.removeByMessageIds([targetId])
+
         upsertTarget({
           recoveryMode: mode,
           recoveryFailed: undefined,
@@ -665,6 +768,10 @@ export function useChat(
           usage_source: metrics?.usageSource ?? null,
           cost_microusd: metrics?.costMicrousd ?? null,
         })
+        // Remplacement des médias analogiquement à la réécriture du contenu.
+        const persistedMedia = mediaOf(result).length > 0
+          ? await persistMediaRows(targetId, mediaOf(result))
+          : []
         upsertTarget({
           content: finalContent,
           modelLabel: label,
@@ -677,7 +784,10 @@ export function useChat(
           apiError: undefined,
           interrupted: undefined,
           sources: result.sources,
-          webWarning: result.warning,
+          media: persistedMedia ?? [],
+          webWarning: persistedMedia === null
+            ? [result.warning, MEDIA_PERSIST_WARNING].filter(Boolean).join(" ")
+            : result.warning,
           webStatus: undefined,
           recoveryMode: undefined,
           recoveryFailed: undefined,
