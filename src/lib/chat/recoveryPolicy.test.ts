@@ -18,6 +18,7 @@ function row(overrides: Partial<MessageRow> & Pick<MessageRow, "id" | "role" | "
     latency_ms: null,
     error: null,
     sources: "[]",
+    media: "[]",
     ...metrics,
     ...overrides,
   }

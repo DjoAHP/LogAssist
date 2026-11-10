@@ -146,7 +146,7 @@ describe("messages.updateError / removeByConversation", () => {
 })
 
 describe("messages.setMediaRefs", () => {
-  it("écrit les refs médiam en SQL paramétré ciblé", async () => {
+  it("écrit les refs médias en SQL paramétré ciblé", async () => {
     mockExecute.mockResolvedValueOnce({ rowsAffected: 1 })
 
     await messages.setMediaRefs("assistant-1", '["media-1","media-2"]')
