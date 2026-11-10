@@ -68,6 +68,9 @@ L'architecture retenue sépare les responsabilités :
 
 - TypeScript et SQLite gèrent les métadonnées non sensibles, l'import, la
   galerie et le catalogue découvert ;
+- les lectures simples continuent d'utiliser `tauri-plugin-sql`, tandis que les
+  lots d'écritures atomiques passent par une commande Tauri qui ouvre une vraie
+  `sqlx::Transaction` sur une connexion unique du pool SQLite existant ;
 - Rust valide les destinations, construit les headers, accède au Credential
   Manager, gère les clients `rmcp`, découvre les outils et exécute les appels ;
 - React transforme les outils activés en définitions LLM et orchestre les tours
@@ -75,8 +78,11 @@ L'architecture retenue sépare les responsabilités :
 - TinyFish utilise le registre commun, avec un adaptateur spécialisé pour les
   sources Web.
 
-Cette approche évite une seconde couche de persistance SQLite côté Rust tout en
-empêchant le frontend de lire les secrets pendant l'usage normal.
+Cette approche évite une seconde base ou un second pool côté Rust : le pont
+transactionnel réutilise `tauri_plugin_sql::DbInstances`. Elle empêche aussi le
+frontend de lire les secrets pendant l'usage normal. Une séquence
+`BEGIN`/écritures/`COMMIT` via plusieurs appels JavaScript est interdite, car le
+plugin peut choisir une connexion différente du pool à chaque appel.
 
 ### 4.2 Portée globale
 
@@ -154,12 +160,23 @@ Une découverte réussie est appliquée dans une transaction :
 2. les nouveaux outils sont ajoutés désactivés et avec confirmation obligatoire ;
 3. les outils disparus sont supprimés ;
 4. une hausse de risque dans les annotations remet `approval_mode` à `confirm` ;
-5. les schémas invalides ou trop grands sont refusés, pas partiellement stockés.
+5. les schémas non objets, structurellement hors limites ou trop grands sont
+   refusés, pas partiellement stockés.
+
+Le frontend prépare uniquement des statements SQL paramétrés sur des données
+MCP non sensibles. Le pont Rust valide les bornes et les types des binds, puis
+exécute le lot dans une transaction SQLx unique. Aucun SQL ni bind n'est inclus
+dans les erreurs publiques ou les logs.
 
 Un changement de nom ou de timeout serveur conserve le catalogue. Un changement
 d'endpoint, de type d'authentification ou de header désactive le serveur et
 supprime son catalogue devenu obsolète. Une nouvelle découverte est alors
 obligatoire.
+
+Une découverte transporte la configuration sensible qui l'a initiée. Avant de
+remplacer le catalogue, le repository relit la ligne serveur et compare endpoint,
+transport et authentification. Si ce binding a changé pendant l'appel réseau,
+le résultat obsolète est refusé sans supprimer ni réinsérer d'outil.
 
 ### 5.4 Alias LLM
 
@@ -167,7 +184,10 @@ L'alias commence systématiquement par l'identifiant serveur, par exemple
 `github__search`. Les caractères non compatibles sont normalisés. Une
 troncature ou une collision ajoute un suffixe déterministe court dérivé du
 couple `(server_id, native_name)`. L'alias est persisté afin de rester stable
-entre deux découvertes et ne dépasse jamais 64 caractères.
+entre deux découvertes et ne dépasse jamais 64 caractères. Son allocation
+consulte l'ensemble global des aliases déjà réservés, pas seulement le serveur
+courant, afin de respecter l'unicité SQLite même lorsque deux identifiants se
+normalisent vers le même nom.
 
 ## 6. TinyFish intégré
 
@@ -242,7 +262,8 @@ Règles :
 
 L'import classe chaque entrée en création, inchangée, mise à jour ou erreur.
 L'utilisateur doit confirmer l'aperçu. L'écriture SQLite est atomique : une
-erreur empêche l'ensemble de l'import.
+erreur empêche l'ensemble de l'import. Cette atomicité est fournie par le pont
+transactionnel Rust, pas par une série d'appels `Database.execute()`.
 
 Une mise à jour sensible — endpoint ou authentification — désactive le serveur,
 invalide sa connexion et exige un nouveau secret d'accès. Le secret précédent ne
@@ -316,6 +337,11 @@ valeur candidate avant de quitter Rust.
 - refus des identifiants URL intégrés et des fragments ;
 - paramètres de requête admis comme métadonnées visibles, jamais comme stockage
   recommandé d'un secret.
+
+Avant la normalisation WHATWG, l'import exige une forme brute `http(s)://`,
+refuse les espaces et caractères de contrôle non encodés, et inspecte
+explicitement l'autorité pour interdire tout userinfo. La limite de 2 048
+caractères est vérifiée avant et après normalisation.
 
 ### 9.2 Protection SSRF
 
@@ -391,10 +417,11 @@ même serveur. La connexion et la découverte ont un timeout de 15 secondes.
 - 1 Mio de catalogue sérialisé par serveur ;
 - 2 000 caractères par description.
 
-Les schémas doivent être des objets JSON Schema valides. Les noms, titres,
-descriptions et annotations restent des données externes non fiables.
-Seules les références JSON Schema locales (`#…`) sont admises. La validation ne
-récupère jamais de `$ref` distant et dispose d'un budget de temps borné.
+Les schémas doivent être des objets structurellement bornés. LogAssist ne les
+compile ni ne les exécute localement : le serveur MCP reste l'autorité
+sémantique pour `required`, `type`, `pattern` et les autres mots-clés. Le client
+borne taille, profondeur, nombre de sous-schémas et patterns, et n'admet que des
+références locales (`#…`) sans jamais les résoudre.
 
 ### 10.3 Exécution
 
@@ -403,7 +430,8 @@ Avant le réseau, Rust vérifie :
 
 - l'allowlist ;
 - un objet JSON de 64 Kio maximum et de profondeur 32 maximum ;
-- la conformité au `inputSchema` découvert ;
+- un objet d'arguments borné en taille et profondeur ; le serveur valide ensuite
+  sa conformité au `inputSchema` ;
 - le budget de concurrence et l'absence d'annulation.
 
 Le timeout générique est celui du serveur, par défaut 60 secondes et borné entre
@@ -702,7 +730,8 @@ L'implémentation suit le TDD.
 - remplacement transactionnel et rédaction ;
 - synchronisation atomique de l'allowlist ;
 - pagination `tools/list` et plafonds ;
-- validation des arguments JSON Schema ;
+- validation structurelle des schémas et des enveloppes d'arguments, puis
+  validation sémantique par le serveur MCP ;
 - normalisation et troncature des résultats ;
 - classification 401, offline et timeout ;
 - couverture i18n exhaustive de chaque catégorie d'erreur MCP ;

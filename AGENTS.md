@@ -39,8 +39,9 @@ Credential Manager Windows.
    jamais ; `false` = échec AVANT persistence du message utilisateur ⇒ InputBar restaure
    le contenu. Ne pas renvoyer d'exception à la place.
 8. **Version sync** : `npm run sync:version` maintient `package.json`, `Cargo.toml` et `tauri.conf.json` alignés.
-9. **MCP fermé côté Rust** : endpoint TinyFish compilé en dur, seuls `search` et
-   `fetch_content` sont exposés. React ne fournit jamais d'endpoint MCP.
+9. **MCP côté Rust** : TinyFish reste compilé en dur ; les endpoints importés sont
+   validés côté Rust, liés à leur secret et limités à HTTPS public/HTTP loopback.
+   React ne fournit jamais d'endpoint MCP : tout appel passe par le pont Rust.
 10. **Données Web non fiables** : ne jamais persister le contenu brut TinyFish. Seules
     les sources finales validées (`url`, `title`, `origin`) vivent dans `messages.sources`.
 
@@ -109,13 +110,24 @@ src-tauri/
   intacte tant que le remplacement SQLite n'a pas réussi.
 - **Métriques** : elles appartiennent à chaque réponse. Un coût n'est affiché que si
   l'endpoint, le modèle, l'usage et les tokens cachés permettent un calcul fiable.
-- **MCP TinyFish** : `runWebAgent` autorise deux tours d'outils et quatre appels MCP
+- **MCP TinyFish** : `runToolAgent` autorise deux tours d'outils et quatre appels MCP
   maximum. Le modèle reçoit les résultats dans un bloc externe non fiable. Le repli
   sans outils ne s'exécute qu'une fois et l'incompatibilité est mémorisée par session.
+- **Galerie MCP distante** : la migration V9 ajoute `mcp_servers` (endpoint, transport
+  `streamable_http`, `auth_type` `none`/`bearer`/`api_key`, `header_name`, timeout,
+  `enabled`, `builtin`) et `mcp_tools` (nom natif, alias `llm_name` au format
+  `serveur__outil`, titre, description, schémas, annotations, `enabled`,
+  `approval_mode`, `schema_hash`). TinyFish est amorcé `builtin` avec ses deux outils
+  d'origine. Le secret d'un serveur vit uniquement dans le Credential Manager sous
+  `logassist/mcp/<server_id>` — rien d'authentifiable n'est stocké en SQLite. Les
+  résultats bruts des serveurs distants restent des données externes non fiables et ne
+  sont jamais persistés ; seules les sources finales validées vivent dans
+  `messages.sources`.
 - **Sources** : la migration V5 ajoute `messages.sources`. Les URL sont validées côté
   Rust avant le retour vers React puis filtrées à nouveau avant rendu.
-- **Schéma courant** : V8. V6 ajoute les métriques, V7 nettoie les anciennes erreurs
-  potentiellement sensibles, V8 répare les assistants historiques vides.
+- **Schéma courant** : V9. V6 ajoute les métriques, V7 nettoie les anciennes erreurs
+  potentiellement sensibles, V8 répare les assistants historiques vides et V9 crée le
+  registre MCP distant (`mcp_servers`, `mcp_tools`) avec amorçage de TinyFish.
 - **Images** : le base64 n'est jamais persisté. Après rechargement, seule la puce de
   métadonnées reste visible ; ne pas introduire de cache binaire durable.
 
@@ -144,7 +156,8 @@ src-tauri/
   configurables. Le trafic MCP TinyFish passe déjà entièrement côté Rust ; déplacer
   aussi le trafic LLM reste une amélioration ultérieure.
 - Le secret TinyFish suit la convention `logassist/mcp/tinyfish`. Une clé candidate
-  est vérifiée en mémoire avant de remplacer la clé existante.
+  est vérifiée en mémoire avant de remplacer la clé existante. Les serveurs MCP
+  importés utilisent la même convention `logassist/mcp/<server_id>`.
 - Ne jamais logger de secret, ne jamais persist `detail` d'erreur API contenant
   potentiellement un `Bearer` sans l'éduler (redaction) avant `messages.error`.
 - Ne pas ajouter `dangerouslySetInnerHTML`, `eval`, ou de rendu markdown sans échappement.

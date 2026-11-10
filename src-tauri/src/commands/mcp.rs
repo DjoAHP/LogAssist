@@ -3,18 +3,18 @@
 
 use std::sync::Arc;
 
+use serde_json::Value;
 use tauri::State;
-use tokio::time::Duration;
-use tokio_util::sync::CancellationToken;
 
-use crate::mcp::client::{McpService, McpState, SecretStore, TinyfishExecutor, secret_ref_for};
-use crate::mcp::transport::RmcpTinyfishClient;
+use crate::mcp::client::McpService;
+pub use crate::mcp::client::SecretStore;
+use crate::mcp::registry::{CallScope, RegistrySyncResult};
+use crate::mcp::security::validate_server_config;
+use crate::mcp::transport::McpConnectionPool;
 use crate::mcp::types::{
-    McpErrorKind, McpErrorPayload, McpServerId, WebToolRequest, WebToolResult,
+    McpAuthStatus, McpErrorKind, McpErrorPayload, McpRuntimeServer, McpToolDescriptor,
+    McpToolResult,
 };
-
-const SEARCH_TIMEOUT: Duration = Duration::from_secs(15);
-const FETCH_TIMEOUT: Duration = Duration::from_secs(120);
 
 /// Coffre réel : délègue aux helpers Credential Manager internes.
 pub struct CredentialStore;
@@ -31,145 +31,187 @@ impl SecretStore for CredentialStore {
     }
 }
 
-/// Exécuteur neutre : les commandes qui ne touchent pas le réseau n'en ont pas.
-struct NullExecutor;
+/// Service branché sur le Credential Manager Windows : l'instance gérée par
+/// Tauri partage le registre et le pool de connexions de la fenêtre.
+pub type ProductionMcpService = McpService<CredentialStore>;
 
-#[async_trait::async_trait]
-impl TinyfishExecutor for NullExecutor {
-    async fn verify(&self, _api_key: &str) -> Result<(), McpErrorPayload> {
-        Err(McpErrorPayload::unknown("Vérification non disponible"))
+/// Valide la forme serveur (endpoint, auth, timeouts, outillage) et l'unicité
+/// des identifiants, sans toucher au réseau ni au registre.
+#[tauri::command]
+pub fn mcp_validate_configs(servers: Vec<McpRuntimeServer>) -> Result<(), McpErrorPayload> {
+    let mut ids = std::collections::HashSet::new();
+    for server in &servers {
+        validate_server_config(server)?;
+        if !ids.insert(server.id.as_str()) {
+            return Err(McpErrorPayload::new(
+                McpErrorKind::InvalidConfig,
+                "Identifiant MCP dupliqué",
+            ));
+        }
     }
-    async fn call(&self, _request: &WebToolRequest) -> Result<WebToolResult, McpErrorPayload> {
-        Err(McpErrorPayload::unknown("Appel non disponible"))
-    }
-}
-
-fn service_with(
-    executor: Arc<dyn TinyfishExecutor>,
-) -> McpService<dyn TinyfishExecutor, CredentialStore> {
-    McpService::new(executor, Arc::new(CredentialStore))
-}
-
-/// Retire l'entrée d'annulation à la fin de la portée (succès ou erreur).
-struct CancelGuard<'a> {
-    state: &'a McpState,
-    request_id: String,
-}
-
-impl Drop for CancelGuard<'_> {
-    fn drop(&mut self) {
-        self.state.remove(&self.request_id);
-    }
-}
-
-fn register_request<'a>(
-    state: &'a McpState,
-    request_id: &str,
-) -> (CancellationToken, CancelGuard<'a>) {
-    let token = state.register(request_id);
-    let guard = CancelGuard {
-        state,
-        request_id: request_id.to_owned(),
-    };
-    (token, guard)
-}
-
-#[tauri::command]
-pub fn mcp_has_secret(server_id: McpServerId) -> Result<bool, McpErrorPayload> {
-    service_with(Arc::new(NullExecutor)).has_secret(server_id)
-}
-
-#[tauri::command]
-pub async fn mcp_configure(server_id: McpServerId, api_key: String) -> Result<(), McpErrorPayload> {
-    let service = service_with(Arc::new(RmcpTinyfishClient {
-        api_key: api_key.clone(),
-    }));
-    service.configure(server_id, &api_key).await
-}
-
-#[tauri::command]
-pub fn mcp_delete_secret(server_id: McpServerId) -> Result<(), McpErrorPayload> {
-    service_with(Arc::new(NullExecutor)).delete_secret(server_id)
-}
-
-#[tauri::command]
-pub async fn mcp_call(
-    state: State<'_, McpState>,
-    server_id: McpServerId,
-    request_id: String,
-    request: WebToolRequest,
-) -> Result<WebToolResult, McpErrorPayload> {
-    // L'enregistrement précède tout accès au coffre : une annulation concurrente
-    // reste observable même si le Credential Manager Windows bloque brièvement.
-    let (token, _guard) = register_request(&state, &request_id);
-
-    let key = CredentialStore
-        .get(&secret_ref_for(server_id))
-        .map_err(McpErrorPayload::unknown)?
-        .ok_or(McpErrorPayload {
-            kind: McpErrorKind::NotConfigured,
-            message: format!("Serveur MCP non configuré : {}", server_id.as_str()),
-        })?;
-
-    let service = service_with(Arc::new(RmcpTinyfishClient { api_key: key }));
-    let timeout = match &request {
-        WebToolRequest::Search { .. } => SEARCH_TIMEOUT,
-        WebToolRequest::FetchContent { .. } => FETCH_TIMEOUT,
-    };
-    match tokio::time::timeout(timeout, service.call(server_id, &token, &request)).await {
-        Ok(outcome) => outcome,
-        Err(_) => Err(McpErrorPayload {
-            kind: McpErrorKind::Timeout,
-            message: "Le serveur MCP n'a pas répondu à temps".to_owned(),
-        }),
-    }
-}
-
-#[tauri::command]
-pub fn mcp_cancel(state: State<'_, McpState>, request_id: String) -> Result<(), McpErrorPayload> {
-    state.cancel(&request_id);
     Ok(())
+}
+
+/// Publie la liste courante des serveurs MCP et coupe les sessions dont la
+/// liaison a changé. La révision est gérée côté Rust (compteur interne).
+#[tauri::command]
+pub async fn mcp_sync_registry(
+    service: State<'_, ProductionMcpService>,
+    servers: Vec<McpRuntimeServer>,
+) -> Result<RegistrySyncResult, McpErrorPayload> {
+    service.sync_registry(servers).await
+}
+
+/// Statut d'authentification du serveur : lecture du coffre uniquement.
+#[tauri::command]
+pub fn mcp_auth_status(
+    service: State<'_, ProductionMcpService>,
+    server_id: String,
+) -> Result<McpAuthStatus, McpErrorPayload> {
+    service.auth_status(&server_id)
+}
+
+/// Teste une clé candidate EN MÉMOIRE avant remplacement transactionnel.
+#[tauri::command]
+pub async fn mcp_configure_auth(
+    service: State<'_, ProductionMcpService>,
+    server_id: String,
+    secret: String,
+) -> Result<Vec<McpToolDescriptor>, McpErrorPayload> {
+    service.configure_auth(&server_id, &secret).await
+}
+
+/// Connecte (ou réutilise) la session du serveur et liste ses outils.
+#[tauri::command]
+pub async fn mcp_connect_and_list_tools(
+    service: State<'_, ProductionMcpService>,
+    server_id: String,
+) -> Result<Vec<McpToolDescriptor>, McpErrorPayload> {
+    service.discover(&server_id).await
+}
+
+/// Appel d'outil dans le scope assistant : allowlist du registre appliquée.
+#[tauri::command]
+pub async fn mcp_call_tool(
+    service: State<'_, ProductionMcpService>,
+    server_id: String,
+    turn_id: String,
+    call_id: String,
+    native_name: String,
+    arguments: Value,
+) -> Result<McpToolResult, McpErrorPayload> {
+    service
+        .call_tool(
+            &server_id,
+            &turn_id,
+            &call_id,
+            &native_name,
+            arguments,
+            CallScope::Assistant,
+        )
+        .await
+}
+
+/// Appel d'outil manuel (réglages), tour dédié `manual:{call_id}` : les outils
+/// désactivés restent testables par l'utilisateur.
+#[tauri::command]
+pub async fn mcp_test_tool(
+    service: State<'_, ProductionMcpService>,
+    server_id: String,
+    call_id: String,
+    native_name: String,
+    arguments: Value,
+) -> Result<McpToolResult, McpErrorPayload> {
+    service
+        .call_tool(
+            &server_id,
+            &format!("manual:{call_id}"),
+            &call_id,
+            &native_name,
+            arguments,
+            CallScope::Manual,
+        )
+        .await
+}
+
+/// Annule tous les appels en cours du tour ; idempotent si le tour est inconnu.
+#[tauri::command]
+pub fn mcp_cancel_turn(
+    service: State<'_, ProductionMcpService>,
+    turn_id: String,
+) -> Result<(), McpErrorPayload> {
+    service.cancel_turn(&turn_id)
+}
+
+/// Libère le tour à la fin de chaque tour de chat (budget registre
+/// restitué) ; idempotent si le tour est inconnu ou déjà terminé.
+#[tauri::command]
+pub fn mcp_finish_turn(
+    service: State<'_, ProductionMcpService>,
+    turn_id: String,
+) -> Result<(), McpErrorPayload> {
+    service.finish_turn(&turn_id)
+}
+
+/// Ferme explicitement la session du serveur (réglages, diagnostique).
+#[tauri::command]
+pub async fn mcp_disconnect(
+    pool: State<'_, Arc<McpConnectionPool>>,
+    server_id: String,
+) -> Result<(), McpErrorPayload> {
+    pool.disconnect(&server_id).await;
+    Ok(())
+}
+
+/// Coupe la session et efface le secret du coffre.
+#[tauri::command]
+pub async fn mcp_delete_secret(
+    service: State<'_, ProductionMcpService>,
+    server_id: String,
+) -> Result<(), McpErrorPayload> {
+    service.delete_secret(&server_id).await
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::mcp::registry::McpState;
+    use crate::mcp::types::McpTransportKind;
 
-    #[test]
-    fn timeouts_match_the_spec() {
-        assert_eq!(SEARCH_TIMEOUT, Duration::from_secs(15));
-        assert_eq!(FETCH_TIMEOUT, Duration::from_secs(120));
-    }
-
-    #[test]
-    fn cancel_guard_removes_the_entry_on_drop() {
-        let state = McpState::default();
-        {
-            let _guard = CancelGuard {
-                state: &state,
-                request_id: "r1".to_owned(),
-            };
-            let _token = state.register("r1");
+    fn runtime_server(id: &str) -> McpRuntimeServer {
+        McpRuntimeServer {
+            id: id.to_owned(),
+            name: "Serveur de test".to_owned(),
+            endpoint: "https://mcp.example.com/mcp".to_owned(),
+            transport: McpTransportKind::StreamableHttp,
+            auth: crate::mcp::types::McpAuthConfig::None,
+            timeout_ms: 15_000,
+            enabled: true,
+            builtin: false,
+            tools: Vec::new(),
         }
-        // Après drop, une nouvelle inscription ne doit pas annuler l'ancien jeton :
-        // l'entrée a été retirée.
-        let token = state.register("r1");
-        assert!(!token.is_cancelled());
     }
 
     #[test]
-    fn secret_ref_uses_the_generic_convention() {
-        assert_eq!(
-            secret_ref_for(McpServerId::Tinyfish),
-            "logassist/mcp/tinyfish"
+    fn validate_configs_accepts_a_coherent_list() {
+        mcp_validate_configs(vec![runtime_server("docs"), runtime_server("other")])
+            .expect("liste cohérente");
+    }
+
+    #[test]
+    fn validate_configs_rejects_duplicate_ids() {
+        let error = mcp_validate_configs(vec![runtime_server("docs"), runtime_server("docs")])
+            .expect_err("doublon refusé");
+        assert_eq!(error.kind, McpErrorKind::InvalidConfig);
+    }
+
+    #[test]
+    fn production_service_binds_the_real_credential_store() {
+        let service = McpService::new(
+            Arc::new(McpState::default()),
+            Arc::new(McpConnectionPool::production()),
+            Arc::new(CredentialStore),
         );
-    }
-
-    #[test]
-    fn request_registration_is_cancellable_before_credentials_are_read() {
-        let state = McpState::default();
-        let (token, _guard) = register_request(&state, "early");
-        state.cancel("early");
-        assert!(token.is_cancelled());
+        let _typed: ProductionMcpService = service;
     }
 }

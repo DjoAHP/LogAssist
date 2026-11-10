@@ -7,6 +7,7 @@ import type { ChatMessageVM } from "@/hooks/useChat"
 import { formatCostMicrousd, formatTokens } from "@/lib/token"
 import { isNearChatBottom } from "@/lib/chat/scrollPolicy"
 import { MarkdownMessage } from "./MarkdownMessage"
+import { ToolApprovalCard } from "./ToolApprovalCard"
 
 // Latence en secondes (format français : virgule décimale) — les ms
 // brutes sont peu lisibles au-dessus de la seconde.
@@ -28,6 +29,8 @@ interface Props {
   onRetry?: (messageId: string) => Promise<boolean>
   onRegenerate?: (messageId: string) => Promise<boolean>
   modelSelector?: ModelSelectorProps | null
+  onAllowTool?: () => void
+  onDenyTool?: () => void
 }
 
 function createRenderSignature(vm: ChatMessageVM[]): string {
@@ -40,6 +43,7 @@ function createRenderSignature(vm: ChatMessageVM[]): string {
     interrupted: message.interrupted ?? false,
     webStatus: message.webStatus ?? null,
     webWarning: message.webWarning ?? null,
+    toolApproval: message.toolApproval ?? null,
     sources: (message.sources ?? []).map((source) => ({
       url: source.url,
       title: source.title,
@@ -83,6 +87,8 @@ export function ChatView({
   onRetry,
   onRegenerate,
   modelSelector,
+  onAllowTool,
+  onDenyTool,
 }: Props) {
   const scrollRef = useRef<HTMLDivElement>(null)
   const contentRef = useRef<HTMLDivElement>(null)
@@ -239,6 +245,8 @@ export function ChatView({
                 isGenerating={isGenerating}
                 onRetry={onRetry}
                 onRegenerate={onRegenerate}
+                onAllowTool={onAllowTool}
+                onDenyTool={onDenyTool}
               />
             ))}
           </div>
@@ -323,6 +331,8 @@ function MessageBubble({
   isGenerating,
   onRetry,
   onRegenerate,
+  onAllowTool,
+  onDenyTool,
 }: {
   m: ChatMessageVM
   onImageClick: (img: { src: string; alt: string }) => void
@@ -330,6 +340,8 @@ function MessageBubble({
   isGenerating: boolean
   onRetry?: (messageId: string) => Promise<boolean>
   onRegenerate?: (messageId: string) => Promise<boolean>
+  onAllowTool?: () => void
+  onDenyTool?: () => void
 }) {
   const isUser = m.role === "user"
   const attachments = m.attachments ?? []
@@ -440,18 +452,25 @@ function MessageBubble({
           ) : (
             <MarkdownMessage content={m.content} />
           )
-        ) : !isUser && !m.apiError && !m.interrupted && webStatusLabel ? (
+        ) : !isUser && m.toolApproval && onAllowTool && onDenyTool ? (
+          // Carte d'approbation d'outil : rend null pour le contenu vide,
+          // puis la carte ToolApprovalCard sera rendue après ce bloc.
+          null
+        ) : !isUser && !m.apiError && !m.interrupted && !m.toolApproval && webStatusLabel ? (
           <span role="status" className="inline-flex items-center gap-2 text-xs text-muted-foreground">
             <Search className="size-3.5 animate-pulse" />
             {webStatusLabel}
           </span>
-        ) : !isUser && !m.apiError && !m.interrupted ? (
+        ) : !isUser && !m.apiError && !m.interrupted && !m.toolApproval ? (
           // Attente du 1er token : anneau de réflexion au lieu du « … »
           <span role="status" aria-label={t.chat.thinking}>
             <span className="thinking-spinner" />
           </span>
         ) : (
           <pre className="whitespace-pre-wrap font-sans text-sm">{m.content}</pre>
+        )}
+        {!isUser && m.toolApproval && onAllowTool && onDenyTool && (
+          <ToolApprovalCard request={m.toolApproval} onAllow={onAllowTool} onDeny={onDenyTool} />
         )}
         {m.content && isUser && (
           // Le bouton utilisateur reste autonome et toujours visible.

@@ -1,15 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
-const mockGet = vi.hoisted(() => vi.fn())
-const mockSet = vi.hoisted(() => vi.fn())
-const mockHasSecret = vi.hoisted(() => vi.fn())
+const mockLoadMcpRuntime = vi.hoisted(() => vi.fn())
+const mockSetEnabled = vi.hoisted(() => vi.fn())
 
-vi.mock("@/lib/db/settings", () => ({
-  settings: { get: mockGet, set: mockSet },
+vi.mock("@/lib/mcp/runtime", () => ({
+  loadMcpRuntime: mockLoadMcpRuntime,
 }))
 
-vi.mock("@/lib/mcp/client", () => ({
-  tinyfish: { hasSecret: mockHasSecret },
+vi.mock("@/lib/db/mcpServers", () => ({
+  mcpServers: { setEnabled: mockSetEnabled },
 }))
 
 import { loadWebAccess, setWebEnabled } from "@/lib/mcp/settings"
@@ -18,34 +17,42 @@ beforeEach(() => {
   vi.clearAllMocks()
 })
 
-describe("réglage d'accès Web", () => {
-  it("est désactivé par défaut", async () => {
-    mockGet.mockResolvedValueOnce(null)
-    mockHasSecret.mockResolvedValueOnce(false)
+describe("réglage d'accès Web (SQLite V9)", () => {
+  it("délègue à loadMcpRuntime", async () => {
+    mockLoadMcpRuntime.mockResolvedValueOnce({
+      servers: [],
+      activeTools: [],
+      authStatuses: {},
+      webAccess: { enabled: false, configured: false },
+    })
 
-    await expect(loadWebAccess()).resolves.toEqual({ enabled: false, configured: false })
-    expect(mockGet).toHaveBeenCalledWith("web.enabled")
+    await loadWebAccess()
+
+    expect(mockLoadMcpRuntime).toHaveBeenCalledTimes(1)
   })
 
-  it("ne retourne jamais enabled=true sans clé configurée", async () => {
-    mockGet.mockResolvedValueOnce("true")
-    mockHasSecret.mockResolvedValueOnce(false)
-
-    await expect(loadWebAccess()).resolves.toEqual({ enabled: false, configured: false })
-  })
-
-  it("restaure l'activation quand la clé existe", async () => {
-    mockGet.mockResolvedValueOnce("true")
-    mockHasSecret.mockResolvedValueOnce(true)
+  it("retourne le webAccess du runtime", async () => {
+    mockLoadMcpRuntime.mockResolvedValueOnce({
+      servers: [],
+      activeTools: [],
+      authStatuses: {},
+      webAccess: { enabled: true, configured: true },
+    })
 
     await expect(loadWebAccess()).resolves.toEqual({ enabled: true, configured: true })
   })
 
-  it("persiste uniquement le booléen d'activation", async () => {
-    mockSet.mockResolvedValueOnce(undefined)
+  it("setWebEnabled active/désactive tinyfish via mcpServers", async () => {
+    mockSetEnabled.mockResolvedValueOnce(undefined)
 
     await setWebEnabled(true)
 
-    expect(mockSet).toHaveBeenCalledWith("web.enabled", "true")
+    expect(mockSetEnabled).toHaveBeenCalledWith("tinyfish", true)
+
+    mockSetEnabled.mockResolvedValueOnce(undefined)
+
+    await setWebEnabled(false)
+
+    expect(mockSetEnabled).toHaveBeenCalledWith("tinyfish", false)
   })
 })

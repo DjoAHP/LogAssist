@@ -10,14 +10,13 @@ import { getActiveModel, type ActiveModel } from "@/lib/db/activeModel"
 import { providers, type ProviderRow, type ModelRow } from "@/lib/db/providers"
 import { useConversations } from "@/hooks/useConversations"
 import { useChat, type Attachment, type SendOptions } from "@/hooks/useChat"
+import { useMcpRuntime } from "@/hooks/useMcpRuntime"
 import { Sidebar } from "@/components/sidebar/Sidebar"
 import { ChatView } from "@/components/chat/ChatView"
 import { InputBar } from "@/components/chat/InputBar"
 import { SettingsDialog } from "@/components/settings/SettingsDialog"
 import { AssistantDialog } from "@/components/settings/AssistantDialog"
 import { McpDialog } from "@/components/settings/McpDialog"
-import { loadWebAccess } from "@/lib/mcp/settings"
-import type { WebAccessConfig } from "@/lib/mcp/types"
 
 const DEFAULT_SIDEBAR_WIDTH = 280
 
@@ -29,15 +28,10 @@ function App() {
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [assistantOpen, setAssistantOpen] = useState(false)
   const [mcpOpen, setMcpOpen] = useState(false)
-  const [webAccess, setWebAccess] = useState<WebAccessConfig>({ enabled: false, configured: false })
   const [sidebarWidth, setSidebarWidth] = useState(DEFAULT_SIDEBAR_WIDTH)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
 
-  const refetchWebAccess = useCallback(() => {
-    void loadWebAccess().then(setWebAccess).catch(console.error)
-  }, [])
-
-  useEffect(() => refetchWebAccess(), [refetchWebAccess])
+  const { snapshot: mcpRuntime, refresh: refreshMcpRuntime } = useMcpRuntime()
 
   // Dark mode (défaut dark) — persisté dans localStorage
   const [isDark, setIsDark] = useState(() => {
@@ -130,7 +124,9 @@ function App() {
     interrupt,
     load,
     webToolsUnsupported,
-  } = useChat(modelSelection, webAccess)
+    allowTool,
+    denyTool,
+  } = useChat(modelSelection, mcpRuntime)
 
   // Chargement de l'historique à chaque changement de conversation active.
   useEffect(() => {
@@ -197,6 +193,14 @@ function App() {
     [activeId, regenerateLast],
   )
 
+  const selectConversation = useCallback(
+    (id: string) => {
+      if (busy) interrupt()
+      setActiveId(id)
+    },
+    [busy, interrupt],
+  )
+
   const toggleSidebar = useCallback(() => {
     setSidebarCollapsed((prev) => !prev)
   }, [])
@@ -206,7 +210,7 @@ function App() {
       <Sidebar
         conversations={list}
         activeId={activeId}
-        onSelect={setActiveId}
+        onSelect={selectConversation}
         onNew={() => void onNew().catch(console.error)}
         onDelete={(id) => void onDelete(id).catch(console.error)}
         onRename={onRename}
@@ -280,13 +284,15 @@ function App() {
             options: modelOptions,
             onSelect: onModelSelect,
           }}
+          onAllowTool={allowTool}
+          onDenyTool={denyTool}
         />
         <InputBar
           disabled={activeId === null || modelSelection === null}
           busy={busy}
           onSend={onSend}
           onInterrupt={interrupt}
-          webAvailable={webAccess.enabled && webAccess.configured && !webToolsUnsupported}
+          webAvailable={mcpRuntime.webAccess.enabled && mcpRuntime.webAccess.configured && !webToolsUnsupported}
           webUnavailableReason={webToolsUnsupported ? t.chat.webModelUnsupported : t.chat.webUnavailable}
         />
       </section>
@@ -296,8 +302,12 @@ function App() {
       {assistantOpen && <AssistantDialog onClose={() => setAssistantOpen(false)} conversationId={activeId} />}
       {mcpOpen && (
         <McpDialog
+          snapshot={mcpRuntime}
           onClose={() => setMcpOpen(false)}
-          onChanged={refetchWebAccess}
+          onChanged={async () => {
+            await refreshMcpRuntime()
+            // Note: refetchWebAccess is no longer needed as webAccess comes from mcpRuntime
+          }}
         />
       )}
     </main>

@@ -1,30 +1,28 @@
+// Client IPC MCP générique : un appel = une commande Rust enregistrée dans
+// src-tauri/src/commands/mcp.rs. Les erreurs Rust { kind, message } sont
+// normalisées en McpClientError ; toute forme inattendue devient "unknown"
+// afin que l'UI ne rende jamais un message réseau brut.
 import { invoke } from "@tauri-apps/api/core"
 
 import type {
+  McpAuthStatus,
+  McpDiscoveredTool,
   McpErrorKind,
-  McpServerId,
+  McpRuntimeServer,
+  McpToolResult,
   WebToolRequest,
-  WebToolResult,
-} from "@/lib/mcp/types"
+} from "./types"
 
 const ERROR_KINDS = new Set<McpErrorKind>([
-  "not_configured",
-  "auth",
-  "rate_limit",
-  "timeout",
-  "network",
-  "tool_denied",
-  "invalid_response",
-  "unknown",
+  "not_configured", "invalid_config", "auth", "offline", "timeout", "rate_limit",
+  "tool_not_found", "tool_denied", "invalid_arguments", "protocol",
+  "invalid_response", "cancelled", "unknown",
 ])
 
 export class McpClientError extends Error {
-  readonly kind: McpErrorKind
-
-  constructor(kind: McpErrorKind, message: string) {
+  constructor(readonly kind: McpErrorKind, message: string) {
     super(message)
     this.name = "McpClientError"
-    this.kind = kind
   }
 }
 
@@ -51,27 +49,35 @@ async function invokeMcp<T>(command: string, args: Record<string, unknown>): Pro
 }
 
 export const mcp = {
-  hasSecret: (serverId: McpServerId): Promise<boolean> =>
-    invokeMcp("mcp_has_secret", { serverId }),
-  configure: (serverId: McpServerId, apiKey: string): Promise<void> =>
-    invokeMcp("mcp_configure", { serverId, apiKey }),
-  removeSecret: (serverId: McpServerId): Promise<void> =>
-    invokeMcp("mcp_delete_secret", { serverId }),
-  call: (
-    serverId: McpServerId,
-    requestId: string,
-    request: WebToolRequest,
-  ): Promise<WebToolResult> => invokeMcp("mcp_call", { serverId, requestId, request }),
-  cancel: (requestId: string): Promise<void> => invokeMcp("mcp_cancel", { requestId }),
+  validateConfigs: (servers: McpRuntimeServer[]) => invokeMcp<void>("mcp_validate_configs", { servers }),
+  syncRegistry: (servers: McpRuntimeServer[]) => invokeMcp<void>("mcp_sync_registry", { servers }),
+  authStatus: (serverId: string) => invokeMcp<McpAuthStatus>("mcp_auth_status", { serverId }),
+  configureAuth: (serverId: string, secret: string) =>
+    invokeMcp<McpDiscoveredTool[]>("mcp_configure_auth", { serverId, secret }),
+  connectAndListTools: (serverId: string) =>
+    invokeMcp<McpDiscoveredTool[]>("mcp_connect_and_list_tools", { serverId }),
+  removeSecret: (serverId: string) => invokeMcp<void>("mcp_delete_secret", { serverId }),
+  callTool: (serverId: string, turnId: string, callId: string, nativeName: string, arguments_: Record<string, unknown>) =>
+    invokeMcp<McpToolResult>("mcp_call_tool", {
+      serverId, turnId, callId, nativeName, arguments: arguments_,
+    }),
+  testTool: (serverId: string, callId: string, nativeName: string, arguments_: Record<string, unknown>) =>
+    invokeMcp<McpToolResult>("mcp_test_tool", { serverId, callId, nativeName, arguments: arguments_ }),
+  cancelTurn: (turnId: string) => invokeMcp<void>("mcp_cancel_turn", { turnId }),
+  disconnect: (serverId: string) => invokeMcp<void>("mcp_disconnect", { serverId }),
+  // Contrat anti-perte : l'orchestrateur Rust est notifié de la fin du tour de
+  // chat (purge des pouvoirs temporaires). Le branchement chat est Task 21/23 ;
+  // exposer seul le contrat ici.
+  finishTurn: (turnId: string) => invokeMcp<void>("mcp_finish_turn", { turnId }),
 }
 
-const TINYFISH_SERVER_ID: McpServerId = "tinyfish"
-
 export const tinyfish = {
-  hasSecret: (): Promise<boolean> => mcp.hasSecret(TINYFISH_SERVER_ID),
-  configure: (apiKey: string): Promise<void> => mcp.configure(TINYFISH_SERVER_ID, apiKey),
-  removeSecret: (): Promise<void> => mcp.removeSecret(TINYFISH_SERVER_ID),
-  call: (requestId: string, request: WebToolRequest): Promise<WebToolResult> =>
-    mcp.call(TINYFISH_SERVER_ID, requestId, request),
-  cancel: (requestId: string): Promise<void> => mcp.cancel(requestId),
+  hasSecret: async () => (await mcp.authStatus("tinyfish")) === "configured",
+  configure: async (secret: string) => {
+    await mcp.configureAuth("tinyfish", secret)
+  },
+  removeSecret: () => mcp.removeSecret("tinyfish"),
+  call: (requestId: string, request: WebToolRequest) =>
+    mcp.callTool("tinyfish", requestId, requestId, request.tool, request.arguments),
+  cancel: (requestId: string) => mcp.cancelTurn(requestId),
 }

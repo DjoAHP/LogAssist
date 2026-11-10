@@ -9,6 +9,7 @@ import {
   SCHEMA_V6_STATEMENTS,
   SCHEMA_V7_STATEMENTS,
   SCHEMA_V8_STATEMENTS,
+  SCHEMA_V9_STATEMENTS,
   SCHEMA_VERSION,
 } from "./migrations"
 import { executeSchema } from "./database"
@@ -37,7 +38,7 @@ describe("SCHEMA_V1_STATEMENTS", () => {
     expect(SCHEMA_V1).toBe(SCHEMA_V1_STATEMENTS.join(";\n"))
   })
   it("SCHEMA_VERSION correspond à la dernière migration", () => {
-    expect(SCHEMA_VERSION).toBe(8)
+    expect(SCHEMA_VERSION).toBe(9)
     expect(SCHEMA_V1).toContain("CREATE TABLE IF NOT EXISTS conversations")
     expect(SCHEMA_V1).toContain("idx_conversations_project")
   })
@@ -113,7 +114,7 @@ describe("SCHEMA_V7_STATEMENTS", () => {
     expect(SCHEMA_V7_STATEMENTS).toEqual([ERROR_CLEANUP_STATEMENT])
   })
 
-  it("applique V7 puis V8 à une base déjà en V6", async () => {
+  it("applique V7 à V9 à une base déjà en V6", async () => {
     const { db, execute } = createMigrationDbMock()
 
     await executeSchema(db, 6)
@@ -121,10 +122,11 @@ describe("SCHEMA_V7_STATEMENTS", () => {
     expect(execute.mock.calls.map(([statement]) => statement)).toEqual([
       ERROR_CLEANUP_STATEMENT,
       EMPTY_ASSISTANT_REPAIR_STATEMENT,
+      ...SCHEMA_V9_STATEMENTS,
     ])
   })
 
-  it("applique V6, V7 puis V8 à une base en V5", async () => {
+  it("applique V6 à V9 à une base en V5", async () => {
     const { db, execute } = createMigrationDbMock()
 
     await executeSchema(db, 5)
@@ -133,6 +135,7 @@ describe("SCHEMA_V7_STATEMENTS", () => {
       ...SCHEMA_V6_STATEMENTS,
       ERROR_CLEANUP_STATEMENT,
       EMPTY_ASSISTANT_REPAIR_STATEMENT,
+      ...SCHEMA_V9_STATEMENTS,
     ])
   })
 })
@@ -142,13 +145,40 @@ describe("SCHEMA_V8_STATEMENTS", () => {
     expect(SCHEMA_V8_STATEMENTS).toEqual([EMPTY_ASSISTANT_REPAIR_STATEMENT])
   })
 
-  it("applique seulement V8 à une base déjà en V7", async () => {
+  it("applique V8 puis V9 à une base déjà en V7", async () => {
     const { db, execute } = createMigrationDbMock()
 
     await executeSchema(db, 7)
 
     expect(execute.mock.calls.map(([statement]) => statement)).toEqual([
       EMPTY_ASSISTANT_REPAIR_STATEMENT,
+      ...SCHEMA_V9_STATEMENTS,
     ])
+  })
+})
+
+describe("SCHEMA_V9_STATEMENTS", () => {
+  it("crée le registre MCP sans colonne de secret", () => {
+    const schema = SCHEMA_V9_STATEMENTS.join(";\n")
+    expect(schema).toContain("CREATE TABLE IF NOT EXISTS mcp_servers")
+    expect(schema).toContain("id TEXT PRIMARY KEY NOT NULL")
+    expect(schema).toContain("CREATE TABLE IF NOT EXISTS mcp_tools")
+    expect(schema).toContain("CHECK (auth_type IN ('none','bearer','api_key'))")
+    expect(schema).toContain("REFERENCES mcp_servers(id) ON DELETE CASCADE")
+    expect(schema).not.toMatch(/api_key\s+TEXT|token\s+TEXT|secret\s+TEXT/i)
+  })
+
+  it("amorce TinyFish et ses aliases sans écraser les données", () => {
+    const schema = SCHEMA_V9_STATEMENTS.join(";\n")
+    expect(schema).toContain("INSERT OR IGNORE INTO mcp_servers")
+    expect(schema).toContain("'tinyfish__search'")
+    expect(schema).toContain("'tinyfish__fetch_content'")
+    expect(schema).toContain("WHERE key = 'web.enabled'")
+  })
+
+  it("applique uniquement V9 à une base V8", async () => {
+    const { db, execute } = createMigrationDbMock()
+    await executeSchema(db, 8)
+    expect(execute.mock.calls.map(([statement]) => statement)).toEqual(SCHEMA_V9_STATEMENTS)
   })
 })

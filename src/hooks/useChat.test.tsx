@@ -1,14 +1,15 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
-import { renderHook, act, cleanup } from "@testing-library/react"
+import { renderHook, act, cleanup, waitFor } from "@testing-library/react"
 import { useChat, type Attachment } from "@/hooks/useChat"
 import type { MessageRow } from "@/lib/db/messages"
 import type { ProviderConfig } from "@/lib/ai/types"
+import type { McpRuntimeSnapshot } from "@/lib/mcp/runtime"
+import type { AssistantTurnResult } from "@/lib/chat/turnRunner"
+import { snapshot, genericTool, tinyfishTool } from "@/test/mcpFixtures"
 
 const runTurnMock = vi.hoisted(() => vi.fn())
 const systemPromptMock = vi.hoisted(() => vi.fn())
-const runWebAgentMock = vi.hoisted(() => vi.fn())
-const resolveWebChoiceMock = vi.hoisted(() => vi.fn(() => "auto"))
 const tinyfishCallMock = vi.hoisted(() => vi.fn())
 const tinyfishCancelMock = vi.hoisted(() => vi.fn())
 const loggerErrorMock = vi.hoisted(() => vi.fn())
@@ -32,6 +33,36 @@ const metricsFromProviderUsageMock = vi.hoisted(() => vi.fn<
   usageSource: "provider",
   costMicrousd: 12,
 })))
+const runAssistantTurnMock = vi.hoisted(() => vi.fn(async (input: any) => {
+  if (input.tools) {
+    // Tool agent path
+    return runTurnMock(input.request, input.apiKey, input.modelId, { tools: [], toolChoice: "auto" }, input.callbacks, input.signal)
+  }
+  // Direct provider path
+  return runTurnMock(input.request, input.apiKey, input.modelId, {}, input.callbacks, input.signal)
+}))
+const mcpCallToolMock = vi.hoisted(() => vi.fn())
+const mcpCancelTurnMock = vi.hoisted(() => vi.fn())
+const resolveWebIntentMock = vi.hoisted(() => vi.fn(() => "auto"))
+
+const runtimeWithTools = (): McpRuntimeSnapshot => snapshot({
+  activeTools: [genericTool("db", "delete", "db__delete", "confirm")],
+})
+
+const runtimeWithWeb = (): McpRuntimeSnapshot => snapshot({
+  activeTools: [tinyfishTool("search"), tinyfishTool("fetch_content")],
+  webAccess: { enabled: true, configured: true },
+})
+
+const assistantResult = (text: string): AssistantTurnResult => ({
+  text, sources: [], firstTokenMs: 5, totalMs: 20,
+})
+
+function actSend(current: ReturnType<typeof useChat>): Promise<boolean> {
+  let sending!: Promise<boolean>
+  act(() => { sending = current.send("conv-1", "Question", [], {}) })
+  return sending
+}
 
 vi.mock("@/lib/db/messages", () => ({
   messages: {
@@ -65,14 +96,14 @@ vi.mock("@/lib/token", () => ({
   metricsFromProviderUsage: metricsFromProviderUsageMock,
   resolvePricingProvider: resolvePricingProviderMock,
 }))
-vi.mock("@/lib/mcp/webAgent", () => ({ runWebAgent: runWebAgentMock }))
-vi.mock("@/lib/mcp/webIntent", () => ({ resolveWebChoice: resolveWebChoiceMock }))
+vi.mock("@/lib/mcp/webIntent", () => ({ resolveWebIntent: resolveWebIntentMock }))
 vi.mock("@/lib/mcp/client", () => ({
-  tinyfish: { call: tinyfishCallMock, cancel: tinyfishCancelMock },
+  mcp: { callTool: mcpCallToolMock, cancelTurn: mcpCancelTurnMock },
 }))
 vi.mock("@/lib/logger", () => ({
   logger: { debug: vi.fn(), error: loggerErrorMock },
 }))
+vi.mock("@/lib/chat/turnRunner", () => ({ runAssistantTurn: runAssistantTurnMock }))
 
 import { messages as messagesDb } from "@/lib/db/messages"
 import { conversations } from "@/lib/db/conversations"
@@ -113,8 +144,6 @@ function messageRow(overrides: Partial<MessageRow>): MessageRow {
 beforeEach(() => {
   vi.clearAllMocks()
   systemPromptMock.mockReset()
-  resolveWebChoiceMock.mockReset()
-  runWebAgentMock.mockReset()
   runTurnMock.mockReset()
   estimateTurnMetricsMock.mockReset()
   metricsFromProviderUsageMock.mockReset()
@@ -122,8 +151,12 @@ beforeEach(() => {
   tinyfishCancelMock.mockReset()
   loggerErrorMock.mockReset()
   resolvePricingProviderMock.mockReset().mockReturnValue(null)
+  runAssistantTurnMock.mockReset()
+  mcpCallToolMock.mockReset()
+  mcpCancelTurnMock.mockReset()
+  resolveWebIntentMock.mockReset()
   systemPromptMock.mockReturnValue("")
-  resolveWebChoiceMock.mockReturnValue("auto")
+  resolveWebIntentMock.mockReturnValue("auto")
   vi.mocked(messagesDb.insert).mockReset().mockResolvedValue("row-1")
   vi.mocked(messagesDb.updateAssistant).mockReset().mockResolvedValue(undefined)
   vi.mocked(messagesDb.listByConversation).mockReset().mockResolvedValue([])
@@ -140,6 +173,13 @@ beforeEach(() => {
     totalMs: 100,
     usage: { inputTokens: 40, outputTokens: 10 },
   })
+  runAssistantTurnMock.mockImplementation(async (input: any) => {
+    if (input.tools) {
+      // Tool agent path - use runTurnMock with tools config
+      return runTurnMock(input.request, input.apiKey, input.modelId, { tools: [], toolChoice: "auto" }, input.callbacks, input.signal)
+    }
+    return runTurnMock(input.request, input.apiKey, input.modelId, {}, input.callbacks, input.signal)
+  })
   estimateTurnMetricsMock.mockReturnValue({
     inputTokens: 7,
     outputTokens: 3,
@@ -153,6 +193,7 @@ beforeEach(() => {
     costMicrousd: 12,
   })
   tinyfishCancelMock.mockResolvedValue(undefined)
+  mcpCancelTurnMock.mockResolvedValue(undefined)
 })
 
 afterEach(cleanup)
@@ -193,7 +234,7 @@ describe("useChat.send — contract anti-perte", () => {
       .toBeLessThan(runTurnMock.mock.invocationCallOrder[0])
     expect(runTurnMock.mock.calls[0][5]).toBeInstanceOf(AbortSignal)
     expect(result.current.busy).toBe(false)
-    expect(runWebAgentMock).not.toHaveBeenCalled()
+    expect(runAssistantTurnMock).toHaveBeenCalledTimes(1)
   })
 
   it("estime les métriques quand le fournisseur ne fournit pas d'usage", async () => {
@@ -315,7 +356,7 @@ describe("useChat.send — contract anti-perte", () => {
 
   it("utilise le Web après l'insert user et persiste uniquement les sources finales", async () => {
     const sources = [{ url: "https://example.com", title: "Doc", origin: "search" as const }]
-    runWebAgentMock.mockResolvedValueOnce({
+    runAssistantTurnMock.mockResolvedValueOnce({
       text: "Réponse Web",
       firstTokenMs: 2,
       totalMs: 15,
@@ -323,7 +364,7 @@ describe("useChat.send — contract anti-perte", () => {
       warning: "Web partiel",
     })
     const { result } = renderHook(() =>
-      useChat(modelSelection, { enabled: true, configured: true }),
+      useChat(modelSelection, runtimeWithWeb()),
     )
 
     let outcome: boolean | undefined
@@ -333,8 +374,8 @@ describe("useChat.send — contract anti-perte", () => {
 
     expect(outcome).toBe(true)
     expect(runTurnMock).not.toHaveBeenCalled()
-    expect(resolveWebChoiceMock).toHaveBeenCalledWith("Cherche ceci", true)
-    expect(runWebAgentMock).toHaveBeenCalledTimes(1)
+    expect(resolveWebIntentMock).toHaveBeenCalledWith("Cherche ceci", true)
+    expect(runAssistantTurnMock).toHaveBeenCalledTimes(1)
     expect(messagesDb.insert).toHaveBeenCalledWith(
       expect.objectContaining({
         role: "assistant",
@@ -357,18 +398,41 @@ describe("useChat.send — contract anti-perte", () => {
       firstTokenMs: 2,
     })
     expect(result.current.vm[result.current.vm.length - 1].inputTokens).toBeUndefined()
-    const webInput = runWebAgentMock.mock.calls[0][0]
-    expect(webInput.signal).toBeInstanceOf(AbortSignal)
-    expect(webInput).toMatchObject({
-      requestId: expect.any(String),
+    const turnInput = runAssistantTurnMock.mock.calls[0][0]
+    expect(turnInput.signal).toBeInstanceOf(AbortSignal)
+    expect(turnInput.tools).toMatchObject({
+      turnId: expect.any(String),
       compatibilityKey: "p1/m1",
-      toolChoice: "auto",
+      webIntent: "auto",
+      tools: expect.arrayContaining([
+        expect.objectContaining({ nativeName: "search", kind: "tinyfish_web" }),
+        expect.objectContaining({ nativeName: "fetch_content", kind: "tinyfish_web" }),
+      ]),
     })
+  })
+
+  it("persiste uniquement la réponse finale de l'assistant, sans contenu Web brut", async () => {
+    const sources = [{ url: "https://example.com", title: "Doc", origin: "search" as const }]
+    runAssistantTurnMock.mockResolvedValueOnce({
+      text: "Réponse finale",
+      firstTokenMs: 5,
+      totalMs: 20,
+      sources,
+    })
+    const { result } = renderHook(() => useChat(modelSelection, runtimeWithTools()))
+    await act(async () => {
+      await result.current.send("conv-1", "Question", [], {})
+    })
+    const assistantInsert = vi.mocked(messagesDb.insert).mock.calls
+      .map(([row]) => row)
+      .find((row) => row.role === "assistant")
+    expect(assistantInsert).toBeDefined()
+    expect(assistantInsert!.content).toBe("Réponse finale")
   })
 
   it("ne fabrique pas de métriques pour un usage Web invalide", async () => {
     metricsFromProviderUsageMock.mockReturnValueOnce(null)
-    runWebAgentMock.mockResolvedValueOnce({
+    runAssistantTurnMock.mockResolvedValueOnce({
       text: "Réponse Web",
       firstTokenMs: 4,
       totalMs: 20,
@@ -376,7 +440,7 @@ describe("useChat.send — contract anti-perte", () => {
       usage: { inputTokens: -1, outputTokens: 2 },
     })
     const { result } = renderHook(() =>
-      useChat(modelSelection, { enabled: true, configured: true }),
+      useChat(modelSelection, runtimeWithWeb()),
     )
 
     await act(async () => {
@@ -449,9 +513,9 @@ describe("useChat.send — contract anti-perte", () => {
   })
 
   it("retourne true et matérialise l'erreur si l'orchestration échoue après l'insert user", async () => {
-    runWebAgentMock.mockRejectedValueOnce(new Error("MCP inattendu"))
+    runAssistantTurnMock.mockRejectedValueOnce(new Error("MCP inattendu"))
     const { result } = renderHook(() =>
-      useChat(modelSelection, { enabled: true, configured: true }),
+      useChat(modelSelection, runtimeWithWeb()),
     )
 
     let outcome: boolean | undefined
@@ -465,43 +529,42 @@ describe("useChat.send — contract anti-perte", () => {
     )
   })
 
-  it("interrompt le LLM et l'appel MCP actif avec le même requestId", async () => {
-    let activeRequestId = ""
+  it("interrompt le LLM et l'appel MCP actif avec le même turnId", async () => {
+    let activeTurnId = ""
     let rootSignal: AbortSignal | undefined
     let rejectMcp: ((reason: unknown) => void) | undefined
-    runWebAgentMock.mockImplementationOnce(async (input) => {
+    runAssistantTurnMock.mockImplementationOnce(async (input) => {
       rootSignal = input.signal
-      await input.webClient.call("mcp-active", {
-        tool: "search",
-        arguments: { query: "Tauri" },
-      })
+      if (input.tools) {
+        await input.tools.toolClient.call("tinyfish", input.tools.turnId, "call-1", "search", { query: "Tauri" })
+      }
       return { text: "tardif", firstTokenMs: 0, totalMs: 1, sources: [] }
     })
-    tinyfishCallMock.mockImplementationOnce((requestId: string, _request: unknown) => {
-      activeRequestId = requestId
+    mcpCallToolMock.mockImplementationOnce((_serverId: string, turnId: string, _callId: string, _nativeName: string, _args: Record<string, unknown>) => {
+      activeTurnId = turnId
       return new Promise((_resolve, reject) => {
         rejectMcp = reject
       })
     })
-    tinyfishCancelMock.mockImplementationOnce(async () => {
+    mcpCancelTurnMock.mockImplementationOnce(async () => {
       rejectMcp?.(new DOMException("aborted", "AbortError"))
     })
     const { result } = renderHook(() =>
-      useChat(modelSelection, { enabled: true, configured: true }),
+      useChat(modelSelection, runtimeWithWeb()),
     )
     let sendPromise: Promise<boolean>
 
     act(() => {
       sendPromise = result.current.send("conv-1", "Question")
     })
-    await vi.waitFor(() => expect(activeRequestId).toBe("mcp-active"))
+    await vi.waitFor(() => expect(activeTurnId).not.toBe(""))
 
     act(() => result.current.interrupt())
     await act(async () => {
       expect(await sendPromise!).toBe(true)
     })
 
-    expect(tinyfishCancelMock).toHaveBeenCalledWith("mcp-active")
+    expect(mcpCancelTurnMock).toHaveBeenCalledWith(activeTurnId)
     expect(rootSignal?.aborted).toBe(true)
     expect(messagesDb.insert).toHaveBeenCalledWith(
       expect.objectContaining({ error: JSON.stringify({ interrupted: true }) }),
@@ -510,27 +573,27 @@ describe("useChat.send — contract anti-perte", () => {
   })
 
   it("expose les statuts searching et fetching pendant l'orchestration", async () => {
-    let capturedInput: { onStatus?: (status: "searching" | "fetching" | undefined) => void } | undefined
+    let capturedOnWebStatus: ((status: "searching" | "fetching" | undefined) => void) | undefined
     let finish: ((value: unknown) => void) | undefined
-    runWebAgentMock.mockImplementationOnce((input) => {
-      capturedInput = input
+    runAssistantTurnMock.mockImplementationOnce((input) => {
+      capturedOnWebStatus = input.tools?.onWebStatus
       return new Promise((resolve) => {
         finish = resolve
       })
     })
     const { result } = renderHook(() =>
-      useChat(modelSelection, { enabled: true, configured: true }),
+      useChat(modelSelection, runtimeWithWeb()),
     )
     let sendPromise: Promise<boolean>
 
     act(() => {
       sendPromise = result.current.send("conv-1", "Question")
     })
-    await vi.waitFor(() => expect(capturedInput).toBeDefined())
+    await vi.waitFor(() => expect(capturedOnWebStatus).toBeDefined())
 
-    act(() => capturedInput?.onStatus?.("searching"))
+    act(() => capturedOnWebStatus?.("searching"))
     expect(result.current.vm[result.current.vm.length - 1].webStatus).toBe("searching")
-    act(() => capturedInput?.onStatus?.("fetching"))
+    act(() => capturedOnWebStatus?.("fetching"))
     expect(result.current.vm[result.current.vm.length - 1].webStatus).toBe("fetching")
 
     finish?.({ text: "Réponse", firstTokenMs: 1, totalMs: 2, sources: [] })
@@ -538,9 +601,9 @@ describe("useChat.send — contract anti-perte", () => {
   })
 
   it("persiste une interruption Web après l'insert utilisateur", async () => {
-    runWebAgentMock.mockRejectedValueOnce(new DOMException("aborted", "AbortError"))
+    runAssistantTurnMock.mockRejectedValueOnce(new DOMException("aborted", "AbortError"))
     const { result } = renderHook(() =>
-      useChat(modelSelection, { enabled: true, configured: true }),
+      useChat(modelSelection, runtimeWithWeb()),
     )
 
     await act(async () => {
@@ -556,9 +619,9 @@ describe("useChat.send — contract anti-perte", () => {
   })
 
   it("traite l'annulation du plugin Windows comme une interruption", async () => {
-    runWebAgentMock.mockRejectedValueOnce(new Error("Request cancelled"))
+    runAssistantTurnMock.mockRejectedValueOnce(new Error("Request cancelled"))
     const { result } = renderHook(() =>
-      useChat(modelSelection, { enabled: true, configured: true }),
+      useChat(modelSelection, runtimeWithWeb()),
     )
 
     await act(async () => {
@@ -571,12 +634,12 @@ describe("useChat.send — contract anti-perte", () => {
   })
 
   it("expose l'incompatibilité tools du modèle courant", async () => {
-    runWebAgentMock.mockImplementationOnce(async (input) => {
-      input.unsupportedTools.add(input.compatibilityKey)
+    runAssistantTurnMock.mockImplementationOnce(async (input) => {
+      input.tools?.unsupportedTools.add(input.tools.compatibilityKey)
       return { text: "Sans Web", firstTokenMs: 1, totalMs: 2, sources: [] }
     })
     const { result } = renderHook(() =>
-      useChat(modelSelection, { enabled: true, configured: true }),
+      useChat(modelSelection, runtimeWithWeb()),
     )
 
     await act(async () => {
@@ -716,7 +779,7 @@ describe("useChat.send — contract anti-perte", () => {
     vi.mocked(messagesDb.insert)
       .mockResolvedValueOnce("user-1")
       .mockResolvedValueOnce("assistant-1")
-    runWebAgentMock.mockResolvedValueOnce({
+    runAssistantTurnMock.mockResolvedValueOnce({
       text: "Réponse Web",
       firstTokenMs: 2,
       totalMs: 15,
@@ -724,7 +787,7 @@ describe("useChat.send — contract anti-perte", () => {
       warning: "Web partiel",
     })
     const { result } = renderHook(() =>
-      useChat(modelSelection, { enabled: true, configured: true }),
+      useChat(modelSelection, runtimeWithWeb()),
     )
 
     await act(async () => {
@@ -1413,14 +1476,14 @@ describe("useChat — récupération de la dernière réponse", () => {
   it("réutilise le Web automatique et remplace les sources après un retry", async () => {
     const sources = [{ url: "https://example.com", title: "Source", origin: "search" as const }]
     vi.mocked(messagesDb.listByConversation).mockResolvedValue([userRow, failedRow])
-    runWebAgentMock.mockResolvedValueOnce({
+    runAssistantTurnMock.mockResolvedValueOnce({
       text: "Réponse Web",
       firstTokenMs: 12,
       totalMs: 80,
       sources,
     })
     const { result } = renderHook(() =>
-      useChat(modelSelection, { enabled: true, configured: true }),
+      useChat(modelSelection, runtimeWithWeb()),
     )
     await act(async () => result.current.load("conv-1"))
 
@@ -1428,11 +1491,79 @@ describe("useChat — récupération de la dernière réponse", () => {
       expect(await result.current.retryLast("conv-1", failedRow.id)).toBe(true)
     })
 
-    expect(resolveWebChoiceMock).toHaveBeenCalledWith("Question d'origine", false)
+    expect(resolveWebIntentMock).toHaveBeenCalledWith("Question d'origine", false)
     expect(runTurnMock).not.toHaveBeenCalled()
     expect(messagesDb.updateAssistant).toHaveBeenCalledWith(
       failedRow.id,
       expect.objectContaining({ content: "Réponse Web", sources: JSON.stringify(sources) }),
     )
+  })
+})
+
+describe("useChat — outils MCP, approbation et annulation", () => {
+  it("route un outil actif et expose l'approbation dans la bulle assistant", async () => {
+    runAssistantTurnMock.mockImplementation(async (input) => {
+      const decision = await input.tools.approve({ id: "c1", serverId: "db", serverName: "Database", toolName: "delete", arguments: { id: 7 } })
+      expect(decision).toBe("allow")
+      return assistantResult("Terminé")
+    })
+    const { result } = renderHook(() => useChat(modelSelection, runtimeWithTools()))
+    let sending!: Promise<boolean>
+    act(() => { sending = result.current.send("conv", "supprime", [], {}) })
+    await waitFor(() => expect(result.current.vm[result.current.vm.length - 1]?.toolApproval?.toolName).toBe("delete"))
+    act(() => result.current.allowTool())
+    await expect(sending).resolves.toBe(true)
+    expect(result.current.vm[result.current.vm.length - 1]?.toolApproval).toBeUndefined()
+  })
+
+  it("un refus poursuit le tour sans casser le contrat anti-perte", async () => {
+    runAssistantTurnMock.mockImplementation(async (input) => {
+      expect(await input.tools.approve({ id: "c1", serverId: "db", serverName: "Database", toolName: "delete", arguments: { id: 7 } })).toBe("deny")
+      return assistantResult("Action refusée")
+    })
+    const { result } = renderHook(() => useChat(modelSelection, runtimeWithTools()))
+    const sending = actSend(result.current)
+    await waitFor(() => expect(result.current.pendingToolApproval).toBeTruthy())
+    act(() => result.current.denyTool())
+    await expect(sending).resolves.toBe(true)
+  })
+
+  it("interrupt résout l'attente et annule tout le turnId", async () => {
+    runAssistantTurnMock.mockImplementation(async (input) => { await input.tools.approve({ id: "c1", serverId: "db", serverName: "Database", toolName: "delete", arguments: { id: 7 } }); throw new DOMException("aborted", "AbortError") })
+    const { result } = renderHook(() => useChat(modelSelection, runtimeWithTools()))
+    const sending = actSend(result.current)
+    await waitFor(() => expect(result.current.pendingToolApproval).toBeTruthy())
+    act(() => result.current.interrupt())
+    await sending
+    expect(mcpCancelTurnMock).toHaveBeenCalledWith(expect.any(String))
+  })
+
+  it("redemande l'approbation à chaque régénération", async () => {
+    const answeredRow = messageRow({
+      id: "assistant-ok",
+      role: "assistant",
+      content: "Ancienne réponse",
+    })
+    vi.mocked(messagesDb.listByConversation).mockResolvedValue([
+      messageRow({ id: "user-1", role: "user", content: "Question d'origine" }),
+      answeredRow,
+    ])
+    runAssistantTurnMock.mockImplementation(async (input) => {
+      expect(await input.tools.approve({ id: "c1", serverId: "db", serverName: "Database", toolName: "delete", arguments: { id: 7 } })).toBe("allow")
+      return assistantResult("Régénérée")
+    })
+    const { result } = renderHook(() => useChat(modelSelection, runtimeWithTools()))
+    await act(async () => result.current.load("conv-1"))
+    let first!: Promise<boolean>
+    act(() => { first = result.current.regenerateLast("conv-1", answeredRow.id) })
+    await waitFor(() => expect(result.current.pendingToolApproval).toBeTruthy())
+    act(() => result.current.allowTool())
+    await first
+    let second!: Promise<boolean>
+    act(() => { second = result.current.regenerateLast("conv-1", answeredRow.id) })
+    await waitFor(() => expect(result.current.pendingToolApproval).toBeTruthy())
+    expect(runAssistantTurnMock).toHaveBeenCalledTimes(2)
+    act(() => result.current.allowTool())
+    await second
   })
 })

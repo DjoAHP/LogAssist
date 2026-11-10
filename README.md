@@ -2,7 +2,7 @@
 
 # LogAssist
 
-LogAssist est un assistant IA de bureau pour Windows conçu pour apprendre des logiciels. Il combine conversations persistées, fournisseurs LLM configurables et accès Web contrôlé via MCP TinyFish.
+LogAssist est un assistant IA de bureau pour Windows conçu pour apprendre des logiciels. Il combine conversations persistées, fournisseurs LLM configurables et accès Web contrôlé via MCP (galerie de serveurs importables, TinyFish intégré).
 
 ## Fonctionnalités
 
@@ -36,7 +36,10 @@ LogAssist est un assistant IA de bureau pour Windows conçu pour apprendre des l
   <img src="src/assets/screen_system_prompt.png" width="60%" alt="Le system prompt" />
 </p>
 
-- Accès Web MCP TinyFish limité à `search` et `fetch_content`.
+- Galerie de serveurs MCP Streamable HTTP importables par JSON.
+- Authentification sans secret, Bearer ou API Key dans un header personnalisé.
+- Activation explicite des serveurs et outils, avec confirmation des actions risquées.
+- TinyFish reste intégré pour la recherche Web, la lecture d'URL et les sources.
 
 <p align="center">
   <img src="src/assets/screen_mcp_settings.png" width="60%" alt="MCP server" />
@@ -51,7 +54,7 @@ LogAssist est un assistant IA de bureau pour Windows conçu pour apprendre des l
 - Rust stable avec la cible MSVC.
 - Microsoft C++ Build Tools pour compiler Tauri.
 - Une clé de fournisseur LLM OpenAI-compatible.
-- Une clé TinyFish pour activer l'accès Web MCP.
+- Une clé TinyFish pour l'accès Web intégré ; les serveurs MCP importés peuvent rester sans authentification ou utiliser Bearer ou une API Key.
 
 ## Installation
 
@@ -125,7 +128,7 @@ La version 3.0.0 est couverte par 496 tests TypeScript et 21 tests Rust. TypeScr
 
 ## Sécurité
 
-- Le registre MCP Rust verrouille l'endpoint TinyFish et la liste des outils autorisés.
+- Le registre MCP Rust valide les endpoints importés, lie chaque serveur à son secret et limite les appels aux outils activés.
 - Rust valide les arguments, les schémas et hôtes URL, les délais et les limites avant tout appel MCP.
 - Les résultats Web sont traités comme des données externes non fiables.
 - React échappe le contenu distant et n'utilise jamais `innerHTML` ou `dangerouslySetInnerHTML`.

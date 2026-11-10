@@ -4,6 +4,7 @@ import { act, render, screen, cleanup, fireEvent } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { ChatView } from "./ChatView"
 import type { ChatMessageVM } from "@/hooks/useChat"
+import type { McpToolApprovalRequest } from "@/lib/mcp/types"
 
 const originalScrollTo = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "scrollTo")
 
@@ -49,6 +50,16 @@ function setScrollMetrics(
     scrollHeight: { configurable: true, value: metrics.scrollHeight },
   })
 }
+
+const approvalRequest = (over: Partial<McpToolApprovalRequest> = {}): McpToolApprovalRequest => ({
+  id: "approval-1",
+  serverId: "mcp-server",
+  serverName: "Test Server",
+  toolName: "test_tool",
+  toolTitle: "Test Tool",
+  arguments: { param: "value" },
+  ...over,
+})
 
 function mockReducedMotion(matches: boolean): void {
   vi.stubGlobal("matchMedia", vi.fn().mockReturnValue({ matches }))
@@ -1133,6 +1144,57 @@ describe("ChatView — erreurs historiques", () => {
 
     expect(screen.getByText("Réponse non enregistrée localement")).toBeTruthy()
     expect(screen.queryByText("Erreur inattendue du fournisseur")).toBeNull()
+  })
+})
+
+describe("ChatView — approbation d'outil MCP", () => {
+  it("rend la carte d'approbation dans la bulle assistant", () => {
+    const onAllowTool = vi.fn()
+    const onDenyTool = vi.fn()
+    render(
+      <ChatView
+        {...base}
+        onAllowTool={onAllowTool}
+        onDenyTool={onDenyTool}
+        vm={[msg({ role: "assistant", content: "", toolApproval: approvalRequest() })]}
+      />
+    )
+    fireEvent.click(screen.getByRole("button", { name: "Autoriser une fois" }))
+    expect(onAllowTool).toHaveBeenCalled()
+  })
+
+  it("ne montre pas le spinner de réflexion quand une approbation est visible", () => {
+    const onAllowTool = vi.fn()
+    const onDenyTool = vi.fn()
+    render(
+      <ChatView
+        {...base}
+        onAllowTool={onAllowTool}
+        onDenyTool={onDenyTool}
+        vm={[msg({ role: "assistant", content: "", toolApproval: approvalRequest() })]}
+      />
+    )
+    expect(screen.queryByRole("status", { name: "Le modèle réfléchit…" })).toBeNull()
+  })
+
+  it("ne rend pas le fallback de contenu vide avant la carte d'approbation", () => {
+    const onAllowTool = vi.fn()
+    const onDenyTool = vi.fn()
+    render(
+      <ChatView
+        {...base}
+        onAllowTool={onAllowTool}
+        onDenyTool={onDenyTool}
+        vm={[msg({ role: "assistant", content: "", toolApproval: approvalRequest(), attachments: [] })]}
+      />
+    )
+    // Le contenu vide ne doit pas afficher le fallback <pre class="whitespace-pre-wrap font-sans text-sm">
+    // seul le <pre> interne à ToolApprovalCard (arguments JSON) est attendu
+    const assistantBubble = screen.getByTestId("message-assistant")
+    const fallbackPre = assistantBubble.querySelector('pre.whitespace-pre-wrap.font-sans.text-sm')
+    expect(fallbackPre).toBeNull()
+    // La carte d'approbation est bien présente
+    expect(screen.getByText("Test Server — Test Tool")).toBeTruthy()
   })
 })
 

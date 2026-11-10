@@ -1,4 +1,4 @@
-export const SCHEMA_VERSION = 8
+export const SCHEMA_VERSION = 9
 
 // Chaque statement est un item distinct : audit-able, et exécution séquentielle
 // garantie (sqlx rejette le multi-statement dans un seul execute).
@@ -158,6 +158,68 @@ export const SCHEMA_V7_STATEMENTS: string[] = [
 // visible au risque de classer comme erreur une rare réponse réellement vide.
 export const SCHEMA_V8_STATEMENTS: string[] = [
   `UPDATE messages SET error = '{"kind":"unknown","message":""}' WHERE role = 'assistant' AND content = '' AND error IS NULL`,
+]
+
+// Migration V9 : registre MCP distant et amorçage TinyFish. Aucun secret
+// d'authentification n'est stocké en SQLite ; les inserts restent rejouables.
+export const SCHEMA_V9_STATEMENTS: string[] = [
+  `CREATE TABLE IF NOT EXISTS mcp_servers (
+  id TEXT PRIMARY KEY NOT NULL,
+  name TEXT NOT NULL,
+  endpoint TEXT NOT NULL,
+  transport TEXT NOT NULL CHECK (transport = 'streamable_http'),
+  auth_type TEXT NOT NULL CHECK (auth_type IN ('none','bearer','api_key')),
+  header_name TEXT,
+  timeout_ms INTEGER NOT NULL DEFAULT 60000 CHECK (timeout_ms BETWEEN 5000 AND 300000),
+  enabled INTEGER NOT NULL DEFAULT 0 CHECK (enabled IN (0,1)),
+  builtin INTEGER NOT NULL DEFAULT 0 CHECK (builtin IN (0,1)),
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  CHECK (
+    (auth_type = 'api_key' AND header_name IS NOT NULL AND length(trim(header_name)) > 0)
+    OR (auth_type IN ('none','bearer') AND header_name IS NULL)
+  )
+)`,
+  `CREATE TABLE IF NOT EXISTS mcp_tools (
+  server_id TEXT NOT NULL REFERENCES mcp_servers(id) ON DELETE CASCADE,
+  native_name TEXT NOT NULL,
+  llm_name TEXT NOT NULL UNIQUE,
+  title TEXT,
+  description TEXT,
+  input_schema TEXT NOT NULL,
+  output_schema TEXT,
+  annotations TEXT,
+  enabled INTEGER NOT NULL DEFAULT 0 CHECK (enabled IN (0,1)),
+  approval_mode TEXT NOT NULL DEFAULT 'confirm' CHECK (approval_mode IN ('confirm','auto')),
+  schema_hash TEXT NOT NULL,
+  discovered_at TEXT NOT NULL,
+  PRIMARY KEY (server_id, native_name)
+)`,
+  `CREATE INDEX IF NOT EXISTS idx_mcp_tools_enabled ON mcp_tools(server_id, enabled)`,
+  `INSERT OR IGNORE INTO mcp_servers
+   (id, name, endpoint, transport, auth_type, header_name, timeout_ms, enabled, builtin)
+   VALUES (
+     'tinyfish', 'TinyFish', 'https://agent.tinyfish.ai/mcp',
+     'streamable_http', 'bearer', NULL, 60000,
+     COALESCE((SELECT CASE value WHEN 'true' THEN 1 ELSE 0 END FROM settings WHERE key = 'web.enabled'), 0),
+     1
+   )`,
+  `INSERT OR IGNORE INTO mcp_tools
+   (server_id, native_name, llm_name, title, description, input_schema, output_schema, annotations, enabled, approval_mode, schema_hash, discovered_at)
+   VALUES (
+     'tinyfish', 'search', 'tinyfish__search', 'Recherche Web',
+     'Rechercher des informations récentes sur le Web.',
+     '{"type":"object","additionalProperties":false,"properties":{"query":{"type":"string"},"purpose":{"type":"string"}},"required":["query"]}',
+     NULL, '{"readOnlyHint":true,"destructiveHint":false}', 1, 'auto', 'builtin-v1', datetime('now')
+   )`,
+  `INSERT OR IGNORE INTO mcp_tools
+   (server_id, native_name, llm_name, title, description, input_schema, output_schema, annotations, enabled, approval_mode, schema_hash, discovered_at)
+   VALUES (
+     'tinyfish', 'fetch_content', 'tinyfish__fetch_content', 'Lecture Web',
+     'Lire le contenu d''une à trois pages Web publiques.',
+     '{"type":"object","additionalProperties":false,"properties":{"urls":{"type":"array","items":{"type":"string"},"minItems":1,"maxItems":3},"purpose":{"type":"string"}},"required":["urls"]}',
+     NULL, '{"readOnlyHint":true,"destructiveHint":false}', 1, 'auto', 'builtin-v1', datetime('now')
+   )`,
 ]
 
 export const SCHEMA_V1 = SCHEMA_V1_STATEMENTS.join(";\n")
