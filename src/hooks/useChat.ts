@@ -394,8 +394,9 @@ export function useChat(
             const persistedMedia = mediaOf(result).length > 0
               ? await persistMediaRows(id, mediaOf(result))
               : []
+            // NE PAS changer l'id : l'ID optimiste (assistantId) est déjà stable.
+            // Le changer ferait varier la clé React → remount → flash média.
             upsertLast({
-              id,
               content: finalContent,
               latencyMs: latencyMs ?? undefined,
               firstTokenMs: firstTokenMs ?? undefined,
