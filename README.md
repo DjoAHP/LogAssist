@@ -1,8 +1,16 @@
-![Démo animée du projet](assets/gifs/presentation.gif)
+<p align="center">
+  <img src="assets/logo/logo3.png" alt="DeepSeek MCP Server" width="120" />
+</p>
 
-# LogAssist
+<h1 align="center">LogAssist</h1>
 
+<p align="center">
 LogAssist est un assistant IA de bureau pour Windows conçu pour apprendre des logiciels. Il combine conversations persistées, fournisseurs LLM configurables et accès Web contrôlé via MCP (galerie de serveurs importables, TinyFish intégré).
+</p>
+
+<p align="center">
+  <img src="https://img.shields.io/github/package-json/v/DjoAHP/LogAssist?label=version&logo=github" alt="package version" />
+</p>
 
 ## Fonctionnalités
 
