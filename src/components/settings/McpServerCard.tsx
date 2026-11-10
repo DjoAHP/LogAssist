@@ -84,55 +84,58 @@ export function McpServerCard({
           {server.builtin && (
             <span className="rounded-full border border-brand-to/40 px-1.5 text-[9px] text-brand-to">{t.mcp.integrated}</span>
           )}
+          <span className="text-muted-foreground opacity-60 text-sm" aria-hidden="true">|</span>
+          <span className={`inline-flex items-center gap-1 truncate text-sm shrink-0 ${statusToneClass[status.state]}`} role="status" aria-live="polite">
+            <StatusIcon
+              className={`size-3.5 shrink-0 ${busy ? "animate-spin motion-reduce:animate-none" : ""}`}
+            />
+            {statusLabel(status)}
+          </span>
         </div>
         <p className="truncate text-xs text-muted-foreground" title={server.endpoint}>
           {server.endpoint}
         </p>
       </div>
 
-      <span
-        role="status"
-        className={`inline-flex min-w-[120px] min-h-8 items-center gap-1 text-xs shrink-0 ${statusToneClass[status.state]}`}
-      >
-        <StatusIcon
-          className={`size-3.5 shrink-0 ${busy ? "animate-spin motion-reduce:animate-none" : ""}`}
-        />
-        {statusLabel(status)}
-      </span>
-
       <div className="flex items-center gap-1 shrink-0">
-        <button
-          type="button"
-          onClick={onTest}
-          disabled={busy}
-          aria-label={t.mcp.test}
-          className="rounded-md p-1.5 text-muted-foreground hover:bg-foreground/5 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-to"
-        >
-          <RadioTower className="size-4" />
-        </button>
-        <button
-          type="button"
-          onClick={onRefresh}
-          disabled={busy}
-          aria-label={t.mcp.refreshTools}
-          className="rounded-md p-1.5 text-muted-foreground hover:bg-foreground/5 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-to"
-        >
-          <RefreshCw className="size-4" />
-        </button>
-        <button
-          type="button"
-          onClick={onEdit}
-          aria-label={t.mcp.edit}
-          className="rounded-md p-1.5 text-muted-foreground hover:bg-foreground/5 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-to"
-        >
-          <Wrench className="size-4" />
-        </button>
+        <div className="inline-flex items-center gap-1 rounded-md border border-border/50 p-0.5">
+          <button
+            type="button"
+            onClick={onTest}
+            disabled={busy}
+            aria-label={t.mcp.test}
+            className="rounded-md p-1.5 text-muted-foreground hover:bg-foreground/5 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-to"
+            title={t.mcp.test}
+          >
+            <RadioTower className="size-4" />
+          </button>
+          <button
+            type="button"
+            onClick={onRefresh}
+            disabled={busy}
+            aria-label={t.mcp.refreshTools}
+            className="rounded-md p-1.5 text-muted-foreground hover:bg-foreground/5 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-to"
+            title={t.mcp.refreshTools}
+          >
+            <RefreshCw className="size-4" />
+          </button>
+          <button
+            type="button"
+            onClick={onEdit}
+            aria-label={t.mcp.edit}
+            className="rounded-md p-1.5 text-muted-foreground hover:bg-foreground/5 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-to"
+            title={t.mcp.edit}
+          >
+            <Wrench className="size-4" />
+          </button>
+        </div>
         {!server.builtin && (
           <button
             type="button"
             aria-label={t.mcp.delete}
             onClick={onDelete}
             className="rounded-md p-1.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-destructive"
+            title={t.mcp.delete}
           >
             <Trash2 className="size-4" />
           </button>
@@ -144,6 +147,7 @@ export function McpServerCard({
         onClick={onBrowse}
         aria-label={`Parcourir les ${toolCount} outils disponibles`}
         className="rounded-md border border-border px-2 py-1 text-xs font-medium hover:border-brand-to hover:text-brand-to focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-to shrink-0"
+        title={`${t.mcp.browseTools} (${toolCount})`}
       >
         {t.mcp.browseTools} <span className="text-muted-foreground">({toolCount})</span>
       </button>

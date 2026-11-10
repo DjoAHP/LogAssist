@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { Plus } from "lucide-react"
+import { McpIcon } from "@/icons"
 
 import { t } from "@/i18n/fr"
 import { mcpUiError } from "@/lib/mcp/errorMessages"
@@ -252,12 +253,13 @@ export function McpDialog({ snapshot, onClose, onChanged }: Props) {
         onClick={(event) => event.stopPropagation()}
       >
         <header className="flex items-start justify-between border-b border-border px-5 py-4">
-          <div>
+          <div className="flex items-center gap-2">
             <h2 id="mcp-title" className="text-base font-semibold">
               {t.mcp.title}
             </h2>
-            <p className="mt-1 text-sm text-muted-foreground">{t.mcp.description}</p>
+            <McpIcon className="size-4 text-muted-foreground opacity-70" />
           </div>
+          <p className="mt-1 text-sm text-muted-foreground">{t.mcp.description}</p>
           <button aria-label={t.mcp.close} onClick={onClose} className="rounded-md p-1.5 hover:bg-foreground/5">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <line x1="18" y1="6" x2="6" y2="18" />
@@ -295,9 +297,9 @@ export function McpDialog({ snapshot, onClose, onChanged }: Props) {
               <button
                 type="button"
                 onClick={startCreate}
-                className="rounded-md bg-brand-from px-3 py-1.5 text-sm text-brand-foreground hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-to"
+                className="flex items-center gap-1.5 rounded-md bg-brand-from px-3 py-1.5 text-sm text-brand-foreground hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-to"
               >
-                <Plus className="size-3.5 mr-1.5" />
+                <Plus className="size-3.5 shrink-0" />
                 {t.mcp.addServer}
               </button>
             </div>
