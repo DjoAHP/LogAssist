@@ -55,7 +55,7 @@ const runtimeWithWeb = (): McpRuntimeSnapshot => snapshot({
 })
 
 const assistantResult = (text: string): AssistantTurnResult => ({
-  text, sources: [], firstTokenMs: 5, totalMs: 20,
+  text, sources: [], media: [], firstTokenMs: 5, totalMs: 20,
 })
 
 function actSend(current: ReturnType<typeof useChat>): Promise<boolean> {
