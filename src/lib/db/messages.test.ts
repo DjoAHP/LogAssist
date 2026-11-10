@@ -28,6 +28,7 @@ describe("messages.listByConversation", () => {
     expect(bind).toEqual(["c1"])
     expect(rows[0].id).toBe("m1")
     expect(rows[0].sources).toBe("[]")
+    expect(rows[0].media).toBe("[]")
   })
 
   it("normalise les colonnes absentes d'un message historique", async () => {
@@ -141,5 +142,17 @@ describe("messages.updateError / removeByConversation", () => {
     const [deleteSql, deleteBind] = mockExecute.mock.calls[1]
     expect(deleteSql).toContain("DELETE FROM messages WHERE conversation_id = ?")
     expect(deleteBind).toEqual(["c1"])
+  })
+})
+
+describe("messages.setMediaRefs", () => {
+  it("écrit les refs médiam en SQL paramétré ciblé", async () => {
+    mockExecute.mockResolvedValueOnce({ rowsAffected: 1 })
+
+    await messages.setMediaRefs("assistant-1", '["media-1","media-2"]')
+
+    const [sql, bind] = mockExecute.mock.calls[0]
+    expect(sql).toBe("UPDATE messages SET media = ? WHERE id = ?")
+    expect(bind).toEqual(['["media-1","media-2"]', "assistant-1"])
   })
 })
