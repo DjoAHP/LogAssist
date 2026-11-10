@@ -103,3 +103,51 @@ describe("InputBar — forçage Web ponctuel", () => {
     expect((screen.getByRole("button", { name: "Forcer la recherche Web" }) as HTMLButtonElement).disabled).toBe(true)
   })
 })
+
+describe("InputBar — détection d'URLs", () => {
+  it("affiche les URLs détectées comme puces cliquables", async () => {
+    renderBar()
+    const textarea = screen.getByPlaceholderText(/Écrivez/)
+    fireEvent.change(textarea, { target: { value: "Regarde https://example.com/page" } })
+    await waitFor(() => expect(screen.getByText("https://example.com/page")).toBeTruthy())
+    // Le lien est un listitem dans une liste, on le trouve via son texte
+    const link = screen.getByText("https://example.com/page").closest("a") as HTMLAnchorElement
+    expect(link).toBeTruthy()
+    expect(link!.getAttribute("href")).toBe("https://example.com/page")
+    expect(link!.getAttribute("target")).toBe("_blank")
+  })
+
+  it("affiche plusieurs URLs dédupliquées", async () => {
+    renderBar()
+    const textarea = screen.getByPlaceholderText(/Écrivez/)
+    fireEvent.change(textarea, { target: { value: "https://a.com et https://b.org et https://a.com" } })
+    await waitFor(() => {
+      const list = screen.getByRole("list", { name: /Liens détectés/ })
+      const links = list.querySelectorAll("a[role='listitem']")
+      expect(links).toHaveLength(2)
+      expect(links[0].getAttribute("href")).toMatch(/^https:\/\/a\.com\/?$/)
+      expect(links[1].getAttribute("href")).toMatch(/^https:\/\/b\.org\/?$/)
+    })
+  })
+
+  it("n'affiche rien sans URL", () => {
+    renderBar()
+    const textarea = screen.getByPlaceholderText(/Écrivez/)
+    fireEvent.change(textarea, { target: { value: "Juste du texte sans lien" } })
+    expect(screen.queryByRole("list", { name: /Liens détectés/ })).toBeNull()
+  })
+
+  it("les puces URLs ont les classes visuelles attendues", async () => {
+    renderBar()
+    const textarea = screen.getByPlaceholderText(/Écrivez/)
+    fireEvent.change(textarea, { target: { value: "Voir https://test.com" } })
+    await waitFor(() => {
+      const list = screen.getByRole("list", { name: /Liens détectés/ })
+      const link = list.querySelector("a[role='listitem']") as HTMLAnchorElement
+      expect(link).toBeTruthy()
+      expect(link!.classList.contains("text-[var(--brand-to)]")).toBe(true)
+      expect(link!.classList.contains("border-[var(--brand-to)]/30")).toBe(true)
+      expect(link!.classList.contains("bg-[var(--brand-to)]/10")).toBe(true)
+    })
+  })
+})

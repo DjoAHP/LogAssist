@@ -1,7 +1,8 @@
-import { useCallback, useRef, useState } from "react"
-import { Send, Square, Image, X, FileText, Globe2 } from "lucide-react"
+import { useCallback, useMemo, useRef, useState } from "react"
+import { Send, Square, Image, X, FileText, Globe2, Link2 } from "lucide-react"
 import { t } from "@/i18n/fr"
 import type { Attachment, SendOptions } from "@/hooks/useChat"
+import { TauriLink } from "./TauriLink"
 
 interface Props {
   disabled?: boolean
@@ -63,6 +64,15 @@ function fileToBase64(file: File): Promise<Attachment> {
   })
 }
 
+// Regex pour détecter les URLs (http/https)
+const URL_REGEX = /\b(https?:\/\/[^\s<>"{}|\\^`\[\]]+)/gi
+
+/** Extrait les URLs uniques (http/https) d'un texte. Exportée pour les tests. */
+export function extractUrls(text: string): string[] {
+  const matches = text.match(URL_REGEX)
+  return matches ? [...new Set(matches)] : []
+}
+
 export function InputBar({
   disabled = false,
   busy = false,
@@ -77,6 +87,9 @@ export function InputBar({
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const textInputRef = useRef<HTMLInputElement>(null)
+
+  // Détection d'URLs en temps réel pour l'affichage visuel
+  const detectedUrls = useMemo(() => extractUrls(text), [text])
 
   const autoGrow = () => {
     const el = textareaRef.current
@@ -207,6 +220,24 @@ export function InputBar({
             ))}
           </div>
         )}
+
+        {/* URLs détectées : affichage visuel style chatbot */}
+        {detectedUrls.length > 0 && (
+          <div className="flex flex-wrap gap-1.5 text-xs" role="list" aria-label="Liens détectés">
+            {detectedUrls.map((url) => (
+              <TauriLink
+                key={url}
+                href={url}
+                className="inline-flex items-center gap-1 rounded-md border border-[var(--brand-to)]/30 bg-[var(--brand-to)]/10 px-2 py-1 text-[var(--brand-to)] hover:bg-[var(--brand-to)]/20"
+                role="listitem"
+              >
+                <Link2 className="size-3 shrink-0" aria-hidden="true" />
+                <span className="truncate max-w-[200px]">{url}</span>
+              </TauriLink>
+            ))}
+          </div>
+        )}
+
         <div className="flex items-end gap-2">
           <textarea
             ref={textareaRef}

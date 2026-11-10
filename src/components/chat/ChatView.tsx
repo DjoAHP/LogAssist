@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
-import { AlertTriangle, Check, Copy, ExternalLink, FileText, Maximize2, RefreshCw, RotateCcw, Search, X } from "lucide-react"
+import { AlertTriangle, Check, Copy, FileText, Maximize2, RefreshCw, RotateCcw, Search, X } from "lucide-react"
 import { t } from "@/i18n/fr"
 import { logger } from "@/lib/logger"
 import { KIND_TO_KEY } from "@/lib/ai/errors"
@@ -8,6 +8,7 @@ import { formatCostMicrousd, formatTokens } from "@/lib/token"
 import { isNearChatBottom } from "@/lib/chat/scrollPolicy"
 import { MarkdownMessage } from "./MarkdownMessage"
 import { ToolApprovalCard } from "./ToolApprovalCard"
+import { TauriLink } from "./TauriLink"
 
 // Latence en secondes (format français : virgule décimale) — les ms
 // brutes sont peu lisibles au-dessus de la seconde.
@@ -529,16 +530,13 @@ function MessageBubble({
             <p className="mb-1.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">{t.chat.sources}</p>
             <div className="flex flex-wrap gap-1.5">
               {sources.map((source) => (
-                <a
+                <TauriLink
                   key={source.url}
                   href={source.url}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="inline-flex max-w-full items-center gap-1 rounded-md border border-border bg-background/60 px-2 py-1 text-xs text-[var(--brand-to)] hover:bg-foreground/5"
+                  className="inline-flex max-w-full items-center gap-1 rounded-md border border-border bg-background/60 px-2 py-1 text-xs hover:bg-foreground/5"
                 >
                   <span className="truncate">{source.title || source.url}</span>
-                  <ExternalLink className="size-3 shrink-0" />
-                </a>
+                </TauriLink>
               ))}
             </div>
           </div>

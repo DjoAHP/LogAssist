@@ -4,12 +4,14 @@
 //    (invariant sécurité n°3 — aucun innerHTML/dangerouslySetInnerHTML).
 //  - memo(content) : pendant le streaming, seule la bulle en cours est
 //    re-parsée à chaque token ; les bulles antérieures gardent leur référence.
+//  - Liens externes : ouverts via Tauri Opener (navigateur par défaut).
 import { memo, useRef, useState, useEffect, type ReactNode } from "react"
 import ReactMarkdown from "react-markdown"
 import remarkGfm from "remark-gfm"
 import rehypeHighlight from "rehype-highlight"
 import { t } from "@/i18n/fr"
 import { logger } from "@/lib/logger"
+import { TauriLink } from "./TauriLink"
 
 // Bloc de code : fond distinct + bouton Copier (feedback « Copié » 1,5 s).
 // Le texte copié vient du textContent du <pre> — robuste quelle que soit
@@ -59,7 +61,11 @@ function MarkdownMessageInner({ content }: { content: string }) {
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         rehypePlugins={[rehypeHighlight]}
-        components={{ pre: CodeBlock }}
+        components={{
+          pre: CodeBlock,
+          // Liens externes : ouverture dans le navigateur par défaut via Tauri
+          a: TauriLink,
+        }}
       >
         {content}
       </ReactMarkdown>
