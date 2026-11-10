@@ -199,7 +199,7 @@ pub fn validate_media_block(
         return Err(MediaRefusal::DisallowedMime);
     }
     if base64.is_empty()
-        || base64.len() % 4 != 0
+        || !base64.len().is_multiple_of(4)
         || !base64
             .bytes()
             .all(|b| b.is_ascii_alphanumeric() || b == b'+' || b == b'/' || b == b'=')
