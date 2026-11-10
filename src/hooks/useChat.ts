@@ -134,6 +134,7 @@ async function persistMediaRows(
   media: ToolMedia[],
 ): Promise<MessageMedia[] | null> {
   const entries: MessageMedia[] = media.map((item) => ({ ...item, id: crypto.randomUUID() }))
+  console.debug("[useChat] persistMediaRows: entries=", entries)
   try {
     const rows: MessageMediaInsert[] = entries.map((entry) => ({
       id: entry.id,
@@ -145,8 +146,10 @@ async function persistMediaRows(
     }))
     await messageMediaDb.insertRows(rows)
     await messagesDb.setMediaRefs(messageId, JSON.stringify(entries.map((entry) => entry.id)))
+    console.debug("[useChat] persistMediaRows: success")
     return entries
   } catch (error) {
+    console.error("[useChat] persistMediaRows: FAILED", error)
     logger.error({
       kind: "assistant_media_persistence",
       message: safeErrorMessage(error),
@@ -389,11 +392,13 @@ export function useChat(
               usage_source: metrics?.usageSource ?? null,
               cost_microusd: metrics?.costMicrousd ?? null,
             })
+            console.debug("[useChat] persistDone: message inserted, id=", id, "result.media=", result.media)
             // Les médias sont optionnels : leur échec ne requalifie jamais la
             // réponse en erreur (note via webWarning, bulle conservée).
             const persistedMedia = mediaOf(result).length > 0
               ? await persistMediaRows(id, mediaOf(result))
               : []
+            console.debug("[useChat] persistDone: persistedMedia=", persistedMedia)
             // NE PAS changer l'id : l'ID optimiste (assistantId) est déjà stable.
             // Le changer ferait varier la clé React → remount → flash média.
             upsertLast({
@@ -416,6 +421,7 @@ export function useChat(
         }
 
         const persistError = async (e: unknown): Promise<void> => {
+          console.debug("[useChat] persistError called with:", e)
           const acc = accRef.current
           try {
             if (isAbort(e)) {
@@ -582,8 +588,11 @@ export function useChat(
             })
           }
           try {
+            console.debug("[useChat] calling persistDone...")
             await persistDone(result, metrics)
+            console.debug("[useChat] persistDone completed")
           } catch (persistenceError) {
+            console.error("[useChat] persistDone THREW:", persistenceError)
             // La cause SQLite reste réservée au log reconstruit. La VM et la
             // seconde tentative ne reçoivent qu'un payload public stable.
             logger.error({
