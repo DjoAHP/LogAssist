@@ -71,6 +71,28 @@ it("enregistre les métadonnées puis teste le secret séparément", async () =>
   expect(onSave).not.toHaveBeenCalled()
 })
 
+it("trimme le nom et l'endpoint à l'enregistrement", async () => {
+  const onSave = vi.fn().mockResolvedValue(undefined)
+  render(
+    <McpServerForm
+      initial={server({ name: "", endpoint: "" })}
+      authStatus="missing"
+      onSave={onSave}
+      onConfigureSecret={vi.fn()}
+      onDeleteSecret={vi.fn()}
+      onCancel={vi.fn()}
+    />
+  )
+  fireEvent.change(screen.getByLabelText("Nom du serveur"), { target: { value: "  Docs  " } })
+  fireEvent.change(screen.getByLabelText("Endpoint MCP"), { target: { value: "https://docs.example/mcp " } })
+  fireEvent.click(screen.getByRole("button", { name: "Enregistrer les paramètres" }))
+  await waitFor(() =>
+    expect(onSave).toHaveBeenCalledWith(
+      expect.objectContaining({ name: "Docs", endpoint: "https://docs.example/mcp" })
+    )
+  )
+})
+
 it("passe l'id du serveur à onDeleteSecret", async () => {
   const onDeleteSecret = vi.fn().mockResolvedValue(undefined)
   render(

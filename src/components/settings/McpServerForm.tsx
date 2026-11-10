@@ -44,7 +44,14 @@ export function McpServerForm({
   }
 
   return (
-    <form className="space-y-3" onSubmit={(event) => { event.preventDefault(); void run(() => onSave(server)) }}>
+    <form className="space-y-3" onSubmit={(event) => {
+      event.preventDefault()
+      void run(() => onSave({
+        ...server,
+        name: server.name.trim(),
+        endpoint: server.endpoint.trim(),
+      }))
+    }}>
       <label className="block text-xs">
         {t.mcp.serverName}
         <input

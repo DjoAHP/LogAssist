@@ -57,11 +57,32 @@ Les cartes utilisent le format compact de référence :
 
 ## Galerie MCP
 
-La galerie MCP reprend la grille des fournisseurs : quatre colonnes dans le
-gabarit desktop, puis trois, deux et une selon la largeur. Une carte utilise
-`min-h-56`, trois actions centrales de même largeur et un bouton inférieur
-`Parcourir les outils`. Les états réseau associent toujours texte, icône et
-couleur. TinyFish porte le badge `Intégré` et ne propose pas de suppression.
+La galerie MCP affiche les serveurs en **lignes empilées** (une ligne par serveur) au lieu d'une grille de cartes.
+
+### Barre d'actions (header de la galerie)
+
+- Recherche à gauche, occupant l'espace disponible.
+- À droite, deux boutons dans l'ordre : **« Importer JSON »** (secondaire : `border border-border`, `hover:bg-foreground/5`) puis **« Ajouter un serveur »** (primaire : `bg-brand-from`, `text-brand-foreground`, icône `Plus` à gauche). Hauteur standard des boutons LogAssist (`px-3 py-1.5`, `text-sm`).
+
+### Ligne de serveur (remplace l'ancienne carte `min-h-56`)
+
+Chaque ligne est un `<li role="listitem">` avec `data-testid="mcp-server-card"`, affichage horizontal compact :
+
+| Zone | Contenu | Style |
+|------|---------|-------|
+| 1. Identité | Nom (gras) + badge « Intégré » si `builtin` + URL en dessous (gris, tronquée) | `flex-1`, `text-sm` / `text-xs` |
+| 2. État | Icône (3,5) + libellé, largeur fixe `min-w-[120px]` pour aligner les boutons | Tonalité par état : connecté → `text-green-600 dark:text-green-400`, échecs → `text-destructive`, neutres → `text-muted-foreground` |
+| 3. Actions (icônes) | Tester 📡, Actualiser ⟳, Modifier 🔧, **Supprimer** 🗑️ (non-builtin seulement) | `rounded-md p-1.5`, `hover:bg-foreground/5`, focus visible `ring-brand-to` |
+| 4. Parcourir | Bouton texte « Parcourir les outils (N) » | Contour `border-border`, `hover:border-brand-to` |
+| 5. Toggle | « Activer/Désactiver le serveur » + checkbox | `size-4 accent-brand-from`, désactivé si pas `canEnable` |
+
+- TinyFish (`builtin: true`) : badge « Intégré », **pas de bouton Supprimer**, même structure sinon.
+- États réseau : texte + icône + **couleur** respectée (voir `statusToneClass` dans `McpServerCard.tsx`).
+- Espacement vertical entre lignes : `gap-2` ; pas de hauteur minimale imposée.
+
+### Mise à jour de la galerie des fournisseurs (inchangée)
+
+La galerie des fournisseurs conserve sa grille 4→3→2→1 colonnes et ses cartes `min-h-56`.
 
 ## Messages du chat
 

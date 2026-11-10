@@ -232,6 +232,35 @@ describe("McpDialog", () => {
     expect(onClose).not.toHaveBeenCalled()
   })
 
+  it("affiche la barre d'actions : recherche + boutons Ajouter et Importer", async () => {
+    renderDialog()
+
+    const search = screen.getByRole("searchbox", { name: "Rechercher un serveur MCP" })
+    const addButton = screen.getByRole("button", { name: "Ajouter un serveur" })
+    const importButton = screen.getByRole("button", { name: "Importer une configuration JSON" })
+    // Les trois éléments vivent dans la même barre d'actions (recherche à gauche, boutons à droite)
+    const toolbar = search.closest("div")
+    expect(toolbar?.contains(addButton)).toBe(true)
+    expect(toolbar?.contains(importButton)).toBe(true)
+    // Style standard LogAssist : primaire pour Ajouter, secondaire pour Importer
+    expect(hasClass(addButton, "bg-brand-from")).toBe(true)
+    expect(hasClass(addButton, "text-brand-foreground")).toBe(true)
+    expect(hasClass(importButton, "border-border")).toBe(true)
+  })
+
+  it("affiche les serveurs en lignes empilées, pas en grille de cartes", async () => {
+    listServers.mockResolvedValue([remoteRow("docs"), tinyfishRow()])
+    listTools.mockResolvedValue([])
+    renderDialog()
+
+    const list = await screen.findByRole("list", { name: "Serveurs MCP" })
+    expect(hasClass(list, "flex-col")).toBe(true)
+    const rows = await screen.findAllByTestId("mcp-server-card")
+    expect(rows).toHaveLength(2)
+    // Chaque ligne est un item de liste, sans hauteur de tuile héritée
+    expect(hasClass(rows[0], "min-h-56")).toBe(false)
+  })
+
   it("affiche la galerie, TinyFish en premier et filtre par URL", async () => {
     listServers.mockResolvedValue([remoteRow("docs"), tinyfishRow()])
     listTools.mockImplementation(async (id) => (id === "tinyfish" ? [tinyfishToolRow("search")] : []))
@@ -264,23 +293,6 @@ describe("McpDialog", () => {
     fireEvent.click(deleteButton)
     await waitFor(() => expect(dialogConfirm).toHaveBeenCalled())
     expect(remove).toHaveBeenCalledWith("docs")
-  })
-
-  it("affiche le bouton d'import et la grille responsive", async () => {
-    listServers.mockResolvedValue([remoteRow("server1"), remoteRow("server2"), remoteRow("server3"), remoteRow("server4")])
-    listTools.mockResolvedValue([])
-    renderDialog()
-
-    // Check import button exists
-    const importButton = screen.getByRole("button", { name: "Importer une configuration JSON" })
-    expect(importButton).not.toBeNull()
-
-    // Check grid layout classes on the grid container
-    const grid = importButton.closest(".grid") as HTMLElement
-    expect(grid.classList.contains("grid-cols-1")).toBe(true)
-    expect(grid.classList.contains("sm:grid-cols-2")).toBe(true)
-    expect(grid.classList.contains("md:grid-cols-3")).toBe(true)
-    expect(grid.classList.contains("lg:grid-cols-4")).toBe(true)
   })
 
   it("ferme les sous-modales avec Échap avant de fermer le dialogue principal", async () => {

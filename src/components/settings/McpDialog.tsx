@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react"
-import { Plus, Upload } from "lucide-react"
+import { Plus } from "lucide-react"
 
 import { t } from "@/i18n/fr"
 import { mcpUiError } from "@/lib/mcp/errorMessages"
@@ -275,31 +275,38 @@ export function McpDialog({ snapshot, onClose, onChanged }: Props) {
           <p className="mb-2 text-xs text-muted-foreground">
             {snapshot.activeTools.length} {t.mcp.activeTools}
           </p>
-          <input
-            ref={searchRef}
-            type="search"
-            aria-label={t.mcp.searchServers}
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            className="mb-3 w-full rounded-md border border-border bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-to"
-          />
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
-            <button
-              type="button"
-              onClick={startCreate}
-              className="flex min-h-56 flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed border-border p-4 hover:border-brand-to focus-visible:ring-2 focus-visible:ring-brand-to"
-            >
-              <Plus className="size-6 text-muted-foreground" />
-              <span className="text-xs font-medium text-muted-foreground">{t.mcp.addServer}</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => setImporting(true)}
-              className="flex min-h-56 flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed border-border p-4 hover:border-brand-to focus-visible:ring-2 focus-visible:ring-brand-to"
-            >
-              <Upload className="size-6 text-muted-foreground" />
-              <span className="text-xs font-medium text-muted-foreground">{t.mcp.importConfig}</span>
-            </button>
+          <div className="flex items-center justify-between gap-2 mb-3">
+            <input
+              ref={searchRef}
+              type="search"
+              aria-label={t.mcp.searchServers}
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              className="flex-1 min-w-0 rounded-md border border-border bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-to"
+            />
+            <div className="flex items-center gap-2 flex-shrink-0">
+              <button
+                type="button"
+                onClick={() => setImporting(true)}
+                className="rounded-md border border-border px-3 py-1.5 text-sm hover:bg-foreground/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-to"
+              >
+                {t.mcp.importConfig}
+              </button>
+              <button
+                type="button"
+                onClick={startCreate}
+                className="rounded-md bg-brand-from px-3 py-1.5 text-sm text-brand-foreground hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-to"
+              >
+                <Plus className="size-3.5 mr-1.5" />
+                {t.mcp.addServer}
+              </button>
+            </div>
+          </div>
+          <ul
+            role="list"
+            aria-label="Serveurs MCP"
+            className="flex flex-col gap-2 min-h-0 overflow-y-auto"
+          >
             {filteredServers.map((server) => (
               <McpServerCard
                 key={server.id}
@@ -317,7 +324,7 @@ export function McpDialog({ snapshot, onClose, onChanged }: Props) {
                 onToggle={(enabled) => void toggleServer(server, enabled)}
               />
             ))}
-          </div>
+          </ul>
         </div>
 
         {importing && (
