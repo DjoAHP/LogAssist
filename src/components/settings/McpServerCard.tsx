@@ -104,7 +104,7 @@ export function McpServerCard({
             onClick={onTest}
             disabled={busy}
             aria-label={t.mcp.test}
-            className="rounded-md p-1.5 text-muted-foreground hover:bg-foreground/5 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-to"
+            className="rounded-md p-1.5 text-muted-foreground hover:text-brand-to hover:bg-brand-from/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-to"
             title={t.mcp.test}
           >
             <RadioTower className="size-4" />
@@ -114,7 +114,7 @@ export function McpServerCard({
             onClick={onRefresh}
             disabled={busy}
             aria-label={t.mcp.refreshTools}
-            className="rounded-md p-1.5 text-muted-foreground hover:bg-foreground/5 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-to"
+            className="rounded-md p-1.5 text-muted-foreground hover:text-brand-to hover:bg-brand-from/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-to"
             title={t.mcp.refreshTools}
           >
             <RefreshCw className="size-4" />
@@ -123,7 +123,7 @@ export function McpServerCard({
             type="button"
             onClick={onEdit}
             aria-label={t.mcp.edit}
-            className="rounded-md p-1.5 text-muted-foreground hover:bg-foreground/5 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-to"
+            className="rounded-md p-1.5 text-muted-foreground hover:text-brand-to hover:bg-brand-from/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-to"
             title={t.mcp.edit}
           >
             <Wrench className="size-4" />
