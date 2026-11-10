@@ -1828,7 +1828,9 @@ mod media_validation_tests {
 
     #[test]
     fn refuses_a_base64_beyond_the_size_bound() {
-        let oversized = "A".repeat(MAX_MEDIA_BASE64_CHARS + 1);
+        // Longueur multiple de 4 (sinon InvalidBase64 coupe avant la borne) :
+        // la borne est dépassée d'un multiple pour viser TooLarge seul.
+        let oversized = "A".repeat(MAX_MEDIA_BASE64_CHARS + 4);
         assert_eq!(
             validate_media_block("image", "image/png", &oversized),
             Err(MediaRefusal::TooLarge)
