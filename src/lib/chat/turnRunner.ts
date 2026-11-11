@@ -1,16 +1,9 @@
 import type { IProvider } from "@/lib/ai/openai-compat"
-import type { ChatRequest, TokenUsage, TurnCallbacks } from "@/lib/ai/types"
+import type { ChatRequest, TurnCallbacks } from "@/lib/ai/types"
 import { runToolAgent, type ToolAgentInput, type ToolAgentResult } from "@/lib/mcp/toolAgent"
-import type { WebSource } from "@/lib/mcp/types"
 
-export interface AssistantTurnResult {
-  text: string
-  firstTokenMs: number
-  totalMs: number
-  sources: WebSource[]
-  warning?: string
-  usage?: TokenUsage
-}
+/** Le contrat du tour assistant hérite des médias validés remontés par ToolAgent. */
+export interface AssistantTurnResult extends ToolAgentResult {}
 
 type ToolTurnOptions = Omit<
   ToolAgentInput,
@@ -60,6 +53,7 @@ export async function runAssistantTurn(
     firstTokenMs: result.firstTokenMs,
     totalMs: result.totalMs,
     sources: [],
+    media: [],
     ...(result.usage ? { usage: result.usage } : {}),
   }
 }

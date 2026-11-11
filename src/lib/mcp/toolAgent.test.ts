@@ -226,6 +226,7 @@ function result(content: string, sources: WebSource[] = [], structuredContent?: 
   return {
     content,
     structuredContent,
+    media: [],
     resourceLinks: [],
     sources,
     isError,
@@ -364,6 +365,7 @@ describe("runToolAgent", () => {
     harness.callTool.mockResolvedValue({
       content: "Résultat",
       structuredContent: { ok: true },
+      media: [],
       resourceLinks: [],
       isError: false,
       sources: [
@@ -383,6 +385,7 @@ describe("runToolAgent", () => {
     harness.callTool.mockResolvedValue({
       content: "Résultat",
       structuredContent: { data: "raw" },
+      media: [],
       resourceLinks: [],
       sources: [],
       isError: false,
@@ -398,5 +401,52 @@ describe("runToolAgent", () => {
     const toolContent = toolMessages[0].content
     expect(toolContent).toContain("external_mcp_result")
     expect(toolContent).toContain('{"data":"raw"}') // structuredContent enveloppé dans le bloc externe
+  })
+
+  it("remonte les médias validés séparément du texte injecté au LLM", async () => {
+    const harness = createHarness({
+      tools: [genericTool("flux", "generate_image", "flux__generate_image")],
+      turns: [turn("", [call("c1", "flux__generate_image", { prompt: "un chat" })]), turn("Voici votre image.")],
+    })
+    harness.callTool.mockResolvedValue({
+      content: "Image générée.",
+      media: [{ type: "image", mimeType: "image/png", base64: "AAEB" }],
+      resourceLinks: [],
+      sources: [],
+      isError: false,
+    })
+
+    const output = await runToolAgent(harness.input)
+
+    // Le média remonte augmenté du libellé d'outil (alt/aria) mais sans id :
+    // la persistance posera l'identifiant.
+    expect(output.media).toEqual([
+      { type: "image", mimeType: "image/png", base64: "AAEB", toolLabel: "flux · generate_image" },
+    ])
+    // Le texte injecté au modèle porte la note courte, jamais le base64.
+    const injected = harness.runTurn.mock.calls[1][0].messages.at(-1)!.content as string
+    expect(injected).toContain("[Média retourné côté interface, non transmis au modèle : image image/png.]")
+    expect(injected).not.toContain("AAEB")
+    expect(output.text).toBe("Voici votre image.")
+  })
+
+  it("n'injecte aucune note média quand aucun média n'est renvoyé", async () => {
+    const harness = createHarness({
+      tools: [genericTool("flux", "generate_image", "flux__generate_image")],
+      turns: [turn("", [call("c1", "flux__generate_image", { prompt: "un chat" })]), turn("Voici votre image.")],
+    })
+    harness.callTool.mockResolvedValue({
+      content: "Image générée.",
+      media: [],
+      resourceLinks: [],
+      sources: [],
+      isError: false,
+    })
+
+    const output = await runToolAgent(harness.input)
+
+    expect(output.media).toEqual([])
+    const injected = harness.runTurn.mock.calls[1][0].messages.at(-1)!.content as string
+    expect(injected).not.toContain("[Média retourné")
   })
 })

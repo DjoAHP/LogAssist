@@ -22,7 +22,7 @@ function providerWithRunTurn(runTurn: ReturnType<typeof vi.fn>): IProvider {
 function createToolOptions(): ToolTurnOptions {
   return {
     toolClient: {
-      call: vi.fn().mockResolvedValue({ content: "Résultat", sources: [], isError: false, structuredContent: undefined, resourceLinks: [] }),
+      call: vi.fn().mockResolvedValue({ content: "Résultat", media: [], sources: [], isError: false, structuredContent: undefined, resourceLinks: [] }),
     },
     tools: [],
     webIntent: "auto",

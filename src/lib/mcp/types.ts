@@ -118,9 +118,26 @@ export interface WebToolResult {
   sources: WebSource[]
 }
 
+/** Média normalisé renvoyé par un outil MCP — miroir exact du contrat Rust
+ * (src-tauri/src/mcp/types.rs, enum McpMedia, serde tag "type"). */
+export interface McpMedia {
+  type: "image" | "audio"
+  mimeType: string
+  base64: string
+}
+
+/** Média de conversation : média MCP augmenté du libellé d'outil (alt/aria)
+ * et de l'identifiant de persistance (table message_media). */
+export interface MessageMedia extends McpMedia {
+  id: string
+  toolLabel: string
+}
+
 export interface McpToolResult {
   content: string
   structuredContent?: unknown
+  /** Médias validés côté Rust (liste toujours sérialisée, [] si aucun). */
+  media: McpMedia[]
   resourceLinks: McpResourceLink[]
   sources: WebSource[]
   isError: boolean

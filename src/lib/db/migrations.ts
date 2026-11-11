@@ -1,4 +1,4 @@
-export const SCHEMA_VERSION = 9
+export const SCHEMA_VERSION = 10
 
 // Chaque statement est un item distinct : audit-able, et exécution séquentielle
 // garantie (sqlx rejette le multi-statement dans un seul execute).
@@ -220,6 +220,23 @@ export const SCHEMA_V9_STATEMENTS: string[] = [
      '{"type":"object","additionalProperties":false,"properties":{"urls":{"type":"array","items":{"type":"string"},"minItems":1,"maxItems":3},"purpose":{"type":"string"}},"required":["urls"]}',
      NULL, '{"readOnlyHint":true,"destructiveHint":false}', 1, 'auto', 'builtin-v1', datetime('now')
    )`,
+]
+
+// Migration V10 : médias (image/audio) renvoyés par les outils MCP. Les octets
+// sont validés et bornés côté Rust ; seule la ref (id) vit dans messages.media,
+// même pattern que sources. Aucun payload non validé n'est persisté.
+export const SCHEMA_V10_STATEMENTS: string[] = [
+  `CREATE TABLE IF NOT EXISTS message_media (
+  id TEXT PRIMARY KEY,
+  message_id TEXT NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+  kind TEXT NOT NULL CHECK (kind IN ('image','audio')),
+  mime_type TEXT NOT NULL,
+  tool_label TEXT NOT NULL DEFAULT '',
+  base64 TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+)`,
+  `CREATE INDEX IF NOT EXISTS idx_message_media_message ON message_media(message_id)`,
+  `ALTER TABLE messages ADD COLUMN media TEXT NOT NULL DEFAULT '[]'`,
 ]
 
 export const SCHEMA_V1 = SCHEMA_V1_STATEMENTS.join(";\n")

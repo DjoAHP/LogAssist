@@ -7,6 +7,7 @@ import type { ChatMessageVM } from "@/hooks/useChat"
 import { formatCostMicrousd, formatTokens } from "@/lib/token"
 import { isNearChatBottom } from "@/lib/chat/scrollPolicy"
 import { MarkdownMessage } from "./MarkdownMessage"
+import { MediaContent } from "./MediaContent"
 import { ToolApprovalCard } from "./ToolApprovalCard"
 import { TauriLink } from "./TauriLink"
 
@@ -49,6 +50,12 @@ function createRenderSignature(vm: ChatMessageVM[]): string {
       url: source.url,
       title: source.title,
       origin: source.origin,
+    })),
+    media: (message.media ?? []).map((m) => ({
+      id: m.id,
+      type: m.type,
+      mimeType: m.mimeType,
+      toolLabel: m.toolLabel,
     })),
     attachments: (message.attachments ?? []).map((attachment) => ({
       kind: attachment.kind,
@@ -469,6 +476,9 @@ function MessageBubble({
           </span>
         ) : (
           <pre className="whitespace-pre-wrap font-sans text-sm">{m.content}</pre>
+        )}
+        {!isUser && m.media && m.media.length > 0 && (
+          <MediaContent media={m.media} onImageClick={onImageClick} />
         )}
         {!isUser && m.toolApproval && onAllowTool && onDenyTool && (
           <ToolApprovalCard request={m.toolApproval} onAllow={onAllowTool} onDeny={onDenyTool} />

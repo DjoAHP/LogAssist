@@ -11,6 +11,7 @@ import type {
 import { ApiError } from "@/lib/ai/errors"
 import type {
   McpAgentTool,
+  McpMedia,
   McpToolApprovalRequest,
   McpToolResult,
   WebSource,
@@ -51,11 +52,16 @@ export interface ToolAgentInput {
   onWebStatus?(status: WebStatus | undefined): void
 }
 
+/** Média du tour : payload validé augmenté du libellé d'outil (alt/aria). */
+export type ToolMedia = McpMedia & { toolLabel: string }
+
 export interface ToolAgentResult {
   text: string
   firstTokenMs: number
   totalMs: number
   sources: WebSource[]
+  /** Médias validés renvoyés par les outils MCP du tour (base64 jamais injecté au LLM). */
+  media: ToolMedia[]
   warning?: string
   usage?: TokenUsage
 }
@@ -136,8 +142,18 @@ function toolMessage(toolCallId: string, content: string): ChatMessage {
   return { role: "tool", toolCallId, content }
 }
 
+/** Note textuelle injectée au LLM à la place du payload binaire. */
+function formatMediaNote(media: McpMedia[]): string {
+  if (media.length === 0) return ""
+  const details = media
+    .map((m) => `${m.type === "image" ? "image" : "audio"} ${m.mimeType}`)
+    .join(", ")
+  return `[Média retourné côté interface, non transmis au modèle : ${details}.]\n`
+}
+
 function externalResult(tool: McpAgentTool, result: McpToolResult, remaining: number): string {
   const payload = [
+    formatMediaNote(result.media),
     result.content,
     result.structuredContent === undefined ? "" : JSON.stringify(result.structuredContent),
     result.resourceLinks.length === 0 ? "" : JSON.stringify({ resourceLinks: result.resourceLinks }),
@@ -165,6 +181,7 @@ export async function runToolAgent(input: ToolAgentInput): Promise<ToolAgentResu
   const started = performance.now()
   const usage = new UsageAccumulator()
   const sources = new Map<string, WebSource>()
+  const media: ToolMedia[] = []
   const byAlias = new Map(input.tools.map((tool) => [tool.llmName, tool]))
   const messages = [...input.request.messages]
   let callCount = 0
@@ -180,6 +197,7 @@ export async function runToolAgent(input: ToolAgentInput): Promise<ToolAgentResu
     firstTokenMs: (turnStarted - started) + result.firstTokenMs,
     totalMs: performance.now() - started,
     sources: [...sources.values()],
+    media: [...media],
     ...(warning ? { warning } : {}),
     ...(usage.value() ? { usage: usage.value()! } : {}),
   })
@@ -244,6 +262,12 @@ export async function runToolAgent(input: ToolAgentInput): Promise<ToolAgentResu
         try {
           const toolResult = await input.toolClient.call(tool.serverId, input.turnId, call.id, tool.nativeName, call.arguments)
           for (const source of toolResult.sources) if (!sources.has(source.url)) sources.set(source.url, source)
+          media.push(
+            ...toolResult.media.map((item) => ({
+              ...item,
+              toolLabel: `${tool.serverName} · ${tool.nativeName}`,
+            })),
+          )
           const wrapped = externalResult(tool, toolResult, Math.max(0, MAX_INJECTED_CHARS - injectedChars))
           injectedChars += Array.from(wrapped).length
           if (toolResult.isError) warning = "Un outil MCP a signalé un échec."

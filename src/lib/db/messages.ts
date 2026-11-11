@@ -12,6 +12,8 @@ export interface MessageRow {
   latency_ms: number | null
   error: string | null
   sources: string
+  /** Réfs JSON ordonnées des médias du message (table message_media). */
+  media: string
   first_token_ms: number | null
   input_tokens: number | null
   output_tokens: number | null
@@ -24,7 +26,7 @@ type MetricColumns = Pick<
   "first_token_ms" | "input_tokens" | "output_tokens" | "usage_source" | "cost_microusd"
 >
 
-type MessageInsert = Omit<MessageRow, "id" | "sources" | keyof MetricColumns> &
+type MessageInsert = Omit<MessageRow, "id" | "sources" | "media" | keyof MetricColumns> &
   Partial<MetricColumns> & { sources?: string }
 
 export type AssistantUpdate = Pick<
@@ -51,6 +53,7 @@ export const messages = {
     return rows.map((row) => ({
       ...row,
       sources: row.sources ?? "[]",
+      media: row.media ?? "[]",
       first_token_ms: row.first_token_ms ?? null,
       input_tokens: row.input_tokens ?? null,
       output_tokens: row.output_tokens ?? null,
@@ -101,6 +104,12 @@ export const messages = {
   },
   async updateError(id: string, error: string | null): Promise<void> {
     await execute("UPDATE messages SET error = ? WHERE id = ?", [error, id])
+  },
+  // Écrite dans un statement séparé, APRÈS l'insert des médias : un message
+  // persisté sans médias reste propre et consultable si cette UPDATE échoue,
+  // jamais l'inverse (des refs pointant vers du vide).
+  async setMediaRefs(id: string, mediaJson: string): Promise<void> {
+    await execute("UPDATE messages SET media = ? WHERE id = ?", [mediaJson, id])
   },
   async removeByConversation(conversationId: string): Promise<void> {
     await execute("DELETE FROM messages WHERE conversation_id = ?", [conversationId])

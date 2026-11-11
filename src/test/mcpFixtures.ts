@@ -124,6 +124,7 @@ export const approval = (): McpToolApprovalRequest => ({
 
 export const result = (content: string): McpToolResult => ({
   content,
+  media: [],
   resourceLinks: [],
   sources: [],
   isError: false,

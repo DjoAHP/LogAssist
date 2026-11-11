@@ -57,7 +57,7 @@ it("active explicitement un outil et interdit auto si risqué", () => {
 })
 
 it("valide les arguments JSON avant la console", async () => {
-  const onRun = vi.fn().mockResolvedValue({ content: "ok", resourceLinks: [], sources: [], isError: false })
+  const onRun = vi.fn().mockResolvedValue({ content: "ok", media: [], resourceLinks: [], sources: [], isError: false })
   render(
     <McpToolsDialog
       server={server()}

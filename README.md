@@ -5,12 +5,11 @@
 <h1 align="center">LogAssist</h1>
 
 <p align="center">
+  <img alt="LogAssist" src="https://img.shields.io/badge/LogAssist-v3.2.1-A5BFD6?style=plastic">
   <img src="https://img.shields.io/github/package-json/v/DjoAHP/LogAssist?label=version&logo=github" alt="package version" />
 </p>
 
-<p align="center">
-LogAssist est un assistant IA de bureau pour Windows conçu pour apprendre des logiciels. Il combine conversations persistées, fournisseurs LLM configurables et accès Web contrôlé via MCP (galerie de serveurs importables, TinyFish intégré).
-</p>
+> LogAssist est un assistant IA de bureau pour Windows conçu pour apprendre des logiciels. Il combine conversations persistées, fournisseurs LLM configurables et accès Web contrôlé via MCP (galerie de serveurs importables, TinyFish intégré).
 
 ## Fonctionnalités
 

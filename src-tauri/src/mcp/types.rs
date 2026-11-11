@@ -91,12 +91,26 @@ pub struct McpResourceLink {
     pub mime_type: Option<String>,
 }
 
+/// Média normalisé : MIME validé, taille bornée, prêt pour le pont JSON-React.
+/// Le tag `type` et les champs camelCase reproduisent le contrat TS de
+/// `src/lib/mcp/types.ts` (miroir exact).
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case", tag = "type", rename_all_fields = "camelCase")]
+pub enum McpMedia {
+    Image { mime_type: String, base64: String },
+    Audio { mime_type: String, base64: String },
+}
+
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct McpToolResult {
     pub content: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub structured_content: Option<Value>,
+    /// Médias acceptés (MIME + base64 + taille validés) ; le repli
+    /// « binaire omis » reste actif pour tout bloc refusé. Sérialisé même
+    /// vide : le contrat `media: []` doit être stable côté TS.
+    pub media: Vec<McpMedia>,
     pub resource_links: Vec<McpResourceLink>,
     pub sources: Vec<WebSource>,
     pub is_error: bool,
@@ -312,10 +326,42 @@ mod tests {
     }
 
     #[test]
+    fn media_round_trips_with_type_tag_and_camel_case_fields() {
+        let image = McpMedia::Image {
+            mime_type: "image/png".to_owned(),
+            base64: "AAEB".to_owned(),
+        };
+        let serialized = serde_json::to_value(&image).expect("média sérialisable");
+        assert_eq!(
+            serialized,
+            json!({
+                "type": "image",
+                "mimeType": "image/png",
+                "base64": "AAEB"
+            })
+        );
+
+        let audio = serde_json::from_value::<McpMedia>(json!({
+            "type": "audio",
+            "mimeType": "audio/mpeg",
+            "base64": "AQID"
+        }))
+        .expect("média désérialisable");
+        assert_eq!(
+            audio,
+            McpMedia::Audio {
+                mime_type: "audio/mpeg".to_owned(),
+                base64: "AQID".to_owned(),
+            }
+        );
+    }
+
+    #[test]
     fn resource_and_result_serialize_with_camel_case_fields() {
         let result = McpToolResult {
             content: "Résultat".to_owned(),
             structured_content: Some(json!({ "matches": 1 })),
+            media: Vec::new(),
             resource_links: vec![McpResourceLink {
                 uri: "https://example.com/doc".to_owned(),
                 name: Some("Documentation".to_owned()),
@@ -336,6 +382,7 @@ mod tests {
             json!({
                 "content": "Résultat",
                 "structuredContent": { "matches": 1 },
+                "media": [],
                 "resourceLinks": [{
                     "uri": "https://example.com/doc",
                     "name": "Documentation",
@@ -378,6 +425,7 @@ mod tests {
         let result = McpToolResult {
             content: "Résultat".to_owned(),
             structured_content: None,
+            media: Vec::new(),
             resource_links: Vec::new(),
             sources: Vec::new(),
             is_error: false,

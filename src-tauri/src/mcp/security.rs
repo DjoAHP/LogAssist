@@ -14,6 +14,20 @@ pub const MAX_RESULT_CHARS: usize = 100_000;
 pub const MAX_SSE_EVENT_BYTES: usize = 1024 * 1024;
 pub const MAX_TOOLS_PER_SERVER: usize = 256;
 pub const MAX_CATALOG_BYTES: usize = 1024 * 1024;
+/// Base64 max par média : ≈ 6,7 Mo de texte = 5 Mo binaire décodé.
+pub const MAX_MEDIA_BASE64_CHARS: usize = 6_700_000;
+/// Médias max normalisés par résultat d'outil ; au-delà, marqueur texte.
+pub const MAX_MEDIA_PER_RESULT: usize = 8;
+/// MIME autorisés : liste fermée, tout le reste est réduit au marqueur texte.
+pub const ALLOWED_MEDIA_MIME_TYPES: [&str; 7] = [
+    "image/jpeg",
+    "image/png",
+    "image/webp",
+    "image/gif",
+    "audio/mpeg",
+    "audio/wav",
+    "audio/ogg",
+];
 const MAX_QUERY_CHARS: usize = 2_000;
 const MAX_PURPOSE_CHARS: usize = 500;
 const MAX_ENDPOINT_CHARS: usize = 2_048;
@@ -155,6 +169,47 @@ pub fn validate_api_key_header(value: &str) -> Result<HeaderName, McpErrorPayloa
         return Err(invalid_config("En-tête API Key réservé"));
     }
     Ok(header)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MediaRefusal {
+    /// MIME vide, hors liste fermée, ou incompatible avec le bloc d'origine
+    /// (un bloc Image portant un MIME audio n'est jamais reclassé).
+    DisallowedMime,
+    /// Base64 vide, longueur non multiple de 4, ou hors alphabet RFC 4648.
+    InvalidBase64,
+    /// Base64 syntaxiquement valide mais au-delà de la borne de taille.
+    TooLarge,
+}
+
+/// Valide un bloc média selon la politique bornée. `expected_kind` provient du
+/// bloc MCP d'origine ("image" ou "audio") : un serveur mentant sur son aspect
+/// est refusé plutôt que reclassé. La validation du base64 est volontairement
+/// sans dépendance (alphabet standard + longueur multiple de 4) : la sécurité
+/// repose sur la liste fermée de MIME et la borne de taille, pas sur le décodage.
+pub fn validate_media_block(
+    expected_kind: &str,
+    mime_type: &str,
+    base64: &str,
+) -> Result<(), MediaRefusal> {
+    let kind_prefix_ok = mime_type.len() > expected_kind.len()
+        && mime_type.as_bytes()[expected_kind.len()] == b'/'
+        && mime_type.starts_with(expected_kind);
+    if !kind_prefix_ok || !ALLOWED_MEDIA_MIME_TYPES.contains(&mime_type) {
+        return Err(MediaRefusal::DisallowedMime);
+    }
+    if base64.is_empty()
+        || !base64.len().is_multiple_of(4)
+        || !base64
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'+' || b == b'/' || b == b'=')
+    {
+        return Err(MediaRefusal::InvalidBase64);
+    }
+    if base64.len() > MAX_MEDIA_BASE64_CHARS {
+        return Err(MediaRefusal::TooLarge);
+    }
+    Ok(())
 }
 
 #[derive(Default)]
@@ -1711,6 +1766,74 @@ mod tests {
                 .unwrap_err()
                 .kind,
             McpErrorKind::ToolDenied
+        );
+    }
+}
+
+#[cfg(test)]
+mod media_validation_tests {
+    use super::*;
+
+    #[test]
+    fn accepts_canonical_image_and_audio_blocks() {
+        assert_eq!(validate_media_block("image", "image/png", "AAEB"), Ok(()));
+        assert_eq!(validate_media_block("audio", "audio/mpeg", "AQID"), Ok(()));
+    }
+
+    #[test]
+    fn refuses_a_mime_outside_the_closed_list() {
+        assert_eq!(
+            validate_media_block("image", "image/heic", "AAEB"),
+            Err(MediaRefusal::DisallowedMime)
+        );
+        assert_eq!(
+            validate_media_block("audio", "video/mp4", "AAEB"),
+            Err(MediaRefusal::DisallowedMime)
+        );
+        assert_eq!(
+            validate_media_block("image", "", "AAEB"),
+            Err(MediaRefusal::DisallowedMime)
+        );
+    }
+
+    #[test]
+    fn refuses_a_server_lying_about_its_block_kind() {
+        assert_eq!(
+            validate_media_block("image", "audio/mpeg", "AAEB"),
+            Err(MediaRefusal::DisallowedMime)
+        );
+        assert_eq!(
+            validate_media_block("audio", "image/png", "AAEB"),
+            Err(MediaRefusal::DisallowedMime)
+        );
+    }
+
+    #[test]
+    fn refuses_an_empty_or_malformed_base64() {
+        assert_eq!(
+            validate_media_block("image", "image/png", ""),
+            Err(MediaRefusal::InvalidBase64)
+        );
+        // La longueur doit être un multiple de 4.
+        assert_eq!(
+            validate_media_block("image", "image/png", "AAA"),
+            Err(MediaRefusal::InvalidBase64)
+        );
+        // Caractère hors alphabet RFC 4648.
+        assert_eq!(
+            validate_media_block("image", "image/png", "AAEB!"),
+            Err(MediaRefusal::InvalidBase64)
+        );
+    }
+
+    #[test]
+    fn refuses_a_base64_beyond_the_size_bound() {
+        // Longueur multiple de 4 (sinon InvalidBase64 coupe avant la borne) :
+        // la borne est dépassée d'un multiple pour viser TooLarge seul.
+        let oversized = "A".repeat(MAX_MEDIA_BASE64_CHARS + 4);
+        assert_eq!(
+            validate_media_block("image", "image/png", &oversized),
+            Err(MediaRefusal::TooLarge)
         );
     }
 }

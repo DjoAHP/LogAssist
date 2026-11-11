@@ -55,7 +55,7 @@ const runtimeWithWeb = (): McpRuntimeSnapshot => snapshot({
 })
 
 const assistantResult = (text: string): AssistantTurnResult => ({
-  text, sources: [], firstTokenMs: 5, totalMs: 20,
+  text, sources: [], media: [], firstTokenMs: 5, totalMs: 20,
 })
 
 function actSend(current: ReturnType<typeof useChat>): Promise<boolean> {
@@ -71,7 +71,11 @@ vi.mock("@/lib/db/messages", () => ({
     listByConversation: vi.fn(),
     updateError: vi.fn(),
     removeByConversation: vi.fn(),
+    setMediaRefs: vi.fn(),
   },
+}))
+vi.mock("@/lib/db/messageMedia", () => ({
+  messageMedia: { insertRows: vi.fn(), listByMessageIds: vi.fn(), listByIds: vi.fn(), removeByMessageIds: vi.fn() },
 }))
 vi.mock("@/lib/db/images", () => ({ images: { create: vi.fn(), get: vi.fn(), remove: vi.fn() } }))
 vi.mock("@/lib/db/conversations", () => ({ conversations: { touch: vi.fn(), create: vi.fn(), rename: vi.fn(), remove: vi.fn() } }))
@@ -106,6 +110,7 @@ vi.mock("@/lib/logger", () => ({
 vi.mock("@/lib/chat/turnRunner", () => ({ runAssistantTurn: runAssistantTurnMock }))
 
 import { messages as messagesDb } from "@/lib/db/messages"
+import { messageMedia as messageMediaDb } from "@/lib/db/messageMedia"
 import { conversations } from "@/lib/db/conversations"
 import { secrets } from "@/lib/secrets/service"
 import { knowledge } from "@/lib/db/knowledge"
@@ -132,6 +137,7 @@ function messageRow(overrides: Partial<MessageRow>): MessageRow {
     latency_ms: null,
     error: null,
     sources: "[]",
+    media: "[]",
     first_token_ms: null,
     input_tokens: null,
     output_tokens: null,
@@ -194,6 +200,11 @@ beforeEach(() => {
   })
   tinyfishCancelMock.mockResolvedValue(undefined)
   mcpCancelTurnMock.mockResolvedValue(undefined)
+  // messageMedia mocks (added for multimodal media persistence)
+  vi.mocked(messageMediaDb.insertRows).mockReset().mockResolvedValue(undefined)
+  vi.mocked(messageMediaDb.listByMessageIds).mockReset().mockResolvedValue([])
+  vi.mocked(messageMediaDb.listByIds).mockReset().mockResolvedValue([])
+  vi.mocked(messageMediaDb.removeByMessageIds).mockReset().mockResolvedValue(undefined)
 })
 
 afterEach(cleanup)
@@ -655,6 +666,7 @@ describe("useChat.send — contract anti-perte", () => {
         id: "a1", conversation_id: "conv-1", role: "assistant", content: "A",
         attachments: "[]", model_label: null, latency_ms: null, error: null,
         sources: JSON.stringify([{ url: "https://example.com", origin: "search" }]),
+        media: "[]",
         first_token_ms: 18, input_tokens: 22, output_tokens: 9,
         usage_source: "provider", cost_microusd: 4,
       },
@@ -662,6 +674,7 @@ describe("useChat.send — contract anti-perte", () => {
         id: "a2", conversation_id: "conv-1", role: "assistant", content: "B",
         attachments: "[]", model_label: null, latency_ms: null, error: null,
         sources: "{cassé",
+        media: "[]",
         first_token_ms: null, input_tokens: null, output_tokens: null,
         usage_source: null, cost_microusd: null,
       },

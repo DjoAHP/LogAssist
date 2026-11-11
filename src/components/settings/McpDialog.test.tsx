@@ -196,7 +196,7 @@ beforeEach(() => {
   validateConfigs.mockResolvedValue(undefined)
   configureAuth.mockResolvedValue([])
   connectAndListTools.mockResolvedValue([])
-  testTool.mockResolvedValue({ content: "", structuredContent: undefined, resourceLinks: [], sources: [], isError: false })
+  testTool.mockResolvedValue({ content: "", structuredContent: undefined, media: [], resourceLinks: [], sources: [], isError: false })
   authStatus.mockResolvedValue("not_required")
   dialogConfirm.mockResolvedValue(true)
 })
