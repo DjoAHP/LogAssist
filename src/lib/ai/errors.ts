@@ -2,7 +2,7 @@ import { API_ERROR_KINDS, type ApiErrorKind } from "./types"
 import { t } from "@/i18n/fr"
 
 // Mapping kind -> clé i18n (fr.ts utilise du camelCase), source unique partagée
-// par ChatView et SettingsDialog. Le garde-fou errors.i18n.test.ts garantit
+// par ChatView et ProvidersDialog. Le garde-fou errors.i18n.test.ts garantit
 // la complétude avec API_ERROR_KINDS.
 export const KIND_TO_KEY: Record<ApiErrorKind, keyof typeof t.errors> = {
   auth: "auth",

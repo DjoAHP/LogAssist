@@ -14,7 +14,7 @@ import { useMcpRuntime } from "@/hooks/useMcpRuntime"
 import { Sidebar } from "@/components/sidebar/Sidebar"
 import { ChatView } from "@/components/chat/ChatView"
 import { InputBar } from "@/components/chat/InputBar"
-import { SettingsDialog } from "@/components/settings/SettingsDialog"
+import { ProvidersDialog } from "@/components/settings/ProvidersDialog"
 import { AssistantDialog } from "@/components/settings/AssistantDialog"
 import { McpDialog } from "@/components/settings/McpDialog"
 
@@ -25,7 +25,7 @@ function App() {
   const [activeId, setActiveId] = useState<string | null>(null)
   const [activeModel, setActiveModel] = useState<ActiveModel | null>(null)
   const [modelOptions, setModelOptions] = useState<{ rowId: string; label: string; isDefault: boolean; supportsImages: boolean }[]>([])
-  const [settingsOpen, setSettingsOpen] = useState(false)
+  const [providersOpen, setProvidersOpen] = useState(false)
   const [assistantOpen, setAssistantOpen] = useState(false)
   const [mcpOpen, setMcpOpen] = useState(false)
   const [sidebarWidth, setSidebarWidth] = useState(DEFAULT_SIDEBAR_WIDTH)
@@ -263,9 +263,9 @@ function App() {
             <BookIcon className="size-[22px]" />
           </button>
           <button
-            aria-label={t.settings.modelsSettings}
-            title={t.settings.modelsSettings}
-            onClick={() => setSettingsOpen(true)}
+            aria-label={t.providers.modelsSettings}
+            title={t.providers.modelsSettings}
+            onClick={() => setProvidersOpen(true)}
             className="rounded-md p-1.5 hover:bg-foreground/5"
           >
             <ReglageIcon className="size-[22px]" />
@@ -296,8 +296,8 @@ function App() {
           webUnavailableReason={webToolsUnsupported ? t.chat.webModelUnsupported : t.chat.webUnavailable}
         />
       </section>
-      {settingsOpen && (
-        <SettingsDialog onClose={() => setSettingsOpen(false)} onChanged={onSettingsChanged} />
+      {providersOpen && (
+        <ProvidersDialog onClose={() => setProvidersOpen(false)} onChanged={onSettingsChanged} />
       )}
       {assistantOpen && <AssistantDialog onClose={() => setAssistantOpen(false)} conversationId={activeId} />}
       {mcpOpen && (

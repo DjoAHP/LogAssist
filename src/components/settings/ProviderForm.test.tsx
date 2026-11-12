@@ -35,14 +35,14 @@ beforeEach(() => {
 afterEach(cleanup)
 
 function submitForm() {
-  fireEvent.click(screen.getByText(t.settings.save))
+  fireEvent.click(screen.getByText(t.providers.save))
 }
 
 describe("ProviderForm — validation boucle locale", () => {
   it("accepte une URL locale http://localhost:1234/v1", async () => {
     render(<ProviderForm onSaved={() => {}} onCancel={() => {}} />)
-    type(t.settings.name, "LM Studio")
-    type(t.settings.baseUrl, "http://localhost:1234/v1")
+    type(t.providers.name, "LM Studio")
+    type(t.providers.baseUrl, "http://localhost:1234/v1")
     submitForm()
     await waitFor(() => {
       expect(mockCreate).toHaveBeenCalledWith("LM Studio", "openai", "http://localhost:1234/v1", undefined)
@@ -51,8 +51,8 @@ describe("ProviderForm — validation boucle locale", () => {
 
   it("accepte une URL locale avec suffixe /v1/models après nettoyage", async () => {
     render(<ProviderForm onSaved={() => {}} onCancel={() => {}} />)
-    type(t.settings.name, "LM Studio")
-    type(t.settings.baseUrl, "http://localhost:1234/v1/models")
+    type(t.providers.name, "LM Studio")
+    type(t.providers.baseUrl, "http://localhost:1234/v1/models")
     submitForm()
     await waitFor(() => {
       expect(mockCreate).toHaveBeenCalledWith("LM Studio", "openai", "http://localhost:1234/v1", undefined)
@@ -61,19 +61,19 @@ describe("ProviderForm — validation boucle locale", () => {
 
   it("refuse http://example.com:1234/v1 avec le message invalidUrl, sans create", async () => {
     render(<ProviderForm onSaved={() => {}} onCancel={() => {}} />)
-    type(t.settings.name, "Externe")
-    type(t.settings.baseUrl, "http://example.com:1234/v1")
+    type(t.providers.name, "Externe")
+    type(t.providers.baseUrl, "http://example.com:1234/v1")
     submitForm()
-    await screen.findByText(t.settings.invalidUrl)
+    await screen.findByText(t.providers.invalidUrl)
     expect(mockCreate).not.toHaveBeenCalled()
   })
 
   it("refuse une URL sans scheme http(s)", async () => {
     render(<ProviderForm onSaved={() => {}} onCancel={() => {}} />)
-    type(t.settings.name, "Neant")
-    type(t.settings.baseUrl, "ftp://x")
+    type(t.providers.name, "Neant")
+    type(t.providers.baseUrl, "ftp://x")
     submitForm()
-    await screen.findByText(t.settings.invalidUrl)
+    await screen.findByText(t.providers.invalidUrl)
     expect(mockCreate).not.toHaveBeenCalled()
   })
 })
@@ -83,15 +83,15 @@ describe("ProviderForm — erreur d'enregistrement", () => {
     const secret = "CUSTOM.key+42/="
     mockCreate.mockRejectedValueOnce(new Error(`Credential ${secret} rejected`))
     render(<ProviderForm onSaved={() => {}} onCancel={() => {}} />)
-    type(t.settings.name, "Fournisseur distant")
-    type(t.settings.baseUrl, "https://api.example.test/v1")
+    type(t.providers.name, "Fournisseur distant")
+    type(t.providers.baseUrl, "https://api.example.test/v1")
     fireEvent.change(document.querySelector('input[type="password"]') as HTMLInputElement, {
       target: { value: secret },
     })
 
     submitForm()
 
-    await screen.findByText(t.settings.saveFailed)
+    await screen.findByText(t.providers.saveFailed)
     expect(document.body.textContent).not.toContain(secret)
     expect(document.body.textContent).not.toContain("Credential")
     expect(mockLoggerError).toHaveBeenCalledWith({

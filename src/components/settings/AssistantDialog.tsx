@@ -22,7 +22,7 @@ interface KnowledgeFormState {
 
 const EMPTY_FORM: KnowledgeFormState = { editingId: null, name: "", content: "" }
 
-// Overlay plein écran, même motif que SettingsDialog (pas de shadcn avant V1.1).
+// Overlay plein écran, même motif que ProvidersDialog (pas de shadcn avant V1.1).
 // Trois sections : 1) instructions générales, 2) profil (stockées dans la table
 // settings), 3) bibliothèque de connaissances .md activables (table knowledge).
 // Leak-on-top : le contenu des connaissances n'est JAMAIS loggué.

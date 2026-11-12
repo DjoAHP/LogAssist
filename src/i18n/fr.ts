@@ -63,7 +63,7 @@ export const fr = {
     allowToolOnce: "Autoriser une fois",
     denyTool: "Refuser",
   },
-  settings: {
+  providers: {
     title: "Fournisseur",
     addProvider: "Ajouter un fournisseur",
     editProvider: "Modifier le fournisseur",

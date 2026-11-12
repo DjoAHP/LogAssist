@@ -50,7 +50,7 @@ function logSettingsError(
 
 // Overlay plein écran simple M1 (pas de shadcn Dialog avant V1.1) :
 // liste des fournisseurs + CRUD inline, test connexion, gestion des modèles.
-export function SettingsDialog({ onClose, onChanged }: Props) {
+export function ProvidersDialog({ onClose, onChanged }: Props) {
   const [rows, setRows] = useState<ProviderRow[]>([])
   const [models, setModels] = useState<Record<string, ModelRow[]>>({})
   const [editing, setEditing] = useState<ProviderRow | "new" | null>(null)
@@ -102,7 +102,7 @@ export function SettingsDialog({ onClose, onChanged }: Props) {
       })
       activeKey = (await secrets.get(secretRefFor(p.id))) ?? ""
       if (!activeKey) {
-        setTestStatus((s) => ({ ...s, [p.id]: { state: "fail", message: t.settings.noKey } }))
+        setTestStatus((s) => ({ ...s, [p.id]: { state: "fail", message: t.providers.noKey } }))
         return
       }
       // Signature exacte (Task 5) : { ok: boolean; error?: ApiError } — pas de latence.
@@ -111,13 +111,13 @@ export function SettingsDialog({ onClose, onChanged }: Props) {
         ...s,
         [p.id]: res.ok
           ? { state: "ok" }
-          : { state: "fail", message: errorMessageForKind(res.error) ?? t.settings.fail },
+          : { state: "fail", message: errorMessageForKind(res.error) ?? t.providers.fail },
       }))
     } catch (e) {
       logSettingsError("settings.testConnection", e, [activeKey])
       setTestStatus((s) => ({
         ...s,
-        [p.id]: { state: "fail", message: errorMessageForKind(e) ?? t.settings.fail },
+        [p.id]: { state: "fail", message: errorMessageForKind(e) ?? t.providers.fail },
       }))
     }
   }
@@ -132,7 +132,7 @@ export function SettingsDialog({ onClose, onChanged }: Props) {
   const removeProvider = async (p: ProviderRow) => {
     // Dialogue natif du plugin (pas window.confirm) : la webview Tauri
     // n'affiche pas les dialogues JS synchrones de façon fiable.
-    const ok = await dialogConfirm(t.settings.deleteConfirm, {
+    const ok = await dialogConfirm(t.providers.deleteConfirm, {
       title: p.name,
       kind: "warning",
     })
@@ -149,14 +149,14 @@ export function SettingsDialog({ onClose, onChanged }: Props) {
     try {
       activeKey = (await secrets.get(secretRefFor(p.id))) ?? ""
       if (!activeKey) {
-        setFetchStatus((s) => ({ ...s, [p.id]: { state: "fail", message: t.settings.noKey } }))
+        setFetchStatus((s) => ({ ...s, [p.id]: { state: "fail", message: t.providers.noKey } }))
         return
       }
       const ids = await createProvider({
         id: p.id, name: p.name, apiFamily: p.api_family, baseUrl: p.base_url, secretRef: secretRefFor(p.id),
       }).listRemoteModels(activeKey)
       if (ids.length === 0) {
-        setFetchStatus((s) => ({ ...s, [p.id]: { state: "fail", message: t.settings.fetchFail } }))
+        setFetchStatus((s) => ({ ...s, [p.id]: { state: "fail", message: t.providers.fetchFail } }))
         return
       }
       const existing = new Set((await providers.listModels(p.id)).map((m) => m.model_id))
@@ -164,7 +164,7 @@ export function SettingsDialog({ onClose, onChanged }: Props) {
       const seen = new Set<string>()
       const newModels = ids.filter((id) => !existing.has(id) && !seen.has(id) && (seen.add(id), true))
       if (newModels.length === 0) {
-        setFetchStatus((s) => ({ ...s, [p.id]: { state: "fail", message: t.settings.fetchFail } }))
+        setFetchStatus((s) => ({ ...s, [p.id]: { state: "fail", message: t.providers.fetchFail } }))
         return
       }
       // Auto-ajout en base
@@ -180,7 +180,7 @@ export function SettingsDialog({ onClose, onChanged }: Props) {
       logSettingsError("settings.fetchModels", e, [activeKey])
       setFetchStatus((s) => ({
         ...s,
-        [p.id]: { state: "fail", message: errorMessageForKind(e) ?? t.settings.fetchFail },
+        [p.id]: { state: "fail", message: errorMessageForKind(e) ?? t.providers.fetchFail },
       }))
     }
   }
@@ -196,24 +196,24 @@ export function SettingsDialog({ onClose, onChanged }: Props) {
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
       onClick={onClose}
-      data-testid="settings-dialog"
+      data-testid="providers-dialog"
     >
       <div
         role="dialog"
         aria-modal="true"
-        aria-label={t.settings.title}
+        aria-label={t.providers.title}
         className={`${HEADER_TOOL_DIALOG_SIZE_CLASS} overflow-y-auto rounded-lg border border-border bg-background p-4`}
         onClick={(e) => e.stopPropagation()}
       >
         <header className="mb-3 flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <h2 className="text-base font-semibold">{t.settings.title}</h2>
+            <h2 className="text-base font-semibold">{t.providers.title}</h2>
             <ReglageIcon
               data-testid="settings-dialog-icon"
               className="size-4 text-muted-foreground opacity-70"
             />
           </div>
-          <button aria-label={t.settings.close} onClick={onClose} className="rounded-md p-1 hover:bg-foreground/5">
+          <button aria-label={t.providers.close} onClick={onClose} className="rounded-md p-1 hover:bg-foreground/5">
             <X className="size-4" />
           </button>
         </header>
@@ -242,8 +242,8 @@ export function SettingsDialog({ onClose, onChanged }: Props) {
                 type="search"
                 value={providerQuery}
                 onChange={(event) => setProviderQuery(event.target.value)}
-                aria-label={t.settings.searchProviders}
-                placeholder={t.settings.searchProvidersPlaceholder}
+                aria-label={t.providers.searchProviders}
+                placeholder={t.providers.searchProvidersPlaceholder}
                 className="w-full rounded-md border border-border bg-background py-2 pl-9 pr-3 text-sm outline-none placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-brand-to"
               />
             </div>
@@ -258,19 +258,19 @@ export function SettingsDialog({ onClose, onChanged }: Props) {
               >
                 <Plus aria-hidden="true" className="size-6 text-muted-foreground" />
                 <span className="text-center text-xs font-medium text-muted-foreground">
-                  {t.settings.addProvider}
+                  {t.providers.addProvider}
                 </span>
               </button>
 
               {rows.length === 0 && (
                 <p className="col-span-full text-center text-sm text-muted-foreground">
-                  {t.settings.noProviders}
+                  {t.providers.noProviders}
                 </p>
               )}
 
               {rows.length > 0 && filteredRows.length === 0 && (
                 <p className="col-span-full text-center text-sm text-muted-foreground">
-                  {t.settings.noProviderResults}
+                  {t.providers.noProviderResults}
                 </p>
               )}
 
@@ -323,8 +323,8 @@ export function SettingsDialog({ onClose, onChanged }: Props) {
 // listes de cartes (border-border, hint muted) pour rester cohérent.
 function TabBar({ tab, setTab }: { tab: "providers" | "local"; setTab: (t: "providers" | "local") => void }) {
   const tabs = [
-    { id: "providers" as const, label: t.settings.tabProviders },
-    { id: "local" as const, label: t.settings.tabLocal },
+    { id: "providers" as const, label: t.providers.tabProviders },
+    { id: "local" as const, label: t.providers.tabLocal },
   ]
   return (
     <div className="mb-3 flex gap-1 rounded-md border border-border p-1">

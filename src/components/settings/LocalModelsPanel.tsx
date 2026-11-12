@@ -25,7 +25,7 @@ export function LocalModelsPanel({ rows, onChanged }: Props) {
       await providers.create(presetName, "openai", url, LOCAL_DUMMY_SECRET)
       await onChanged()
     } catch (e) {
-      setError(`${t.settings.saveFailed} : ${e instanceof Error ? e.message : String(e)}`)
+      setError(`${t.providers.saveFailed} : ${e instanceof Error ? e.message : String(e)}`)
     } finally {
       setBusy(null)
     }
@@ -33,7 +33,7 @@ export function LocalModelsPanel({ rows, onChanged }: Props) {
 
   return (
     <div className="space-y-3">
-      <p className="text-xs text-muted-foreground">{t.settings.localHint}</p>
+      <p className="text-xs text-muted-foreground">{t.providers.localHint}</p>
       {LOCAL_LLM_PRESETS.map((preset) => {
         const isConfigured = configuredUrls.has(preset.url)
         return (
@@ -44,14 +44,14 @@ export function LocalModelsPanel({ rows, onChanged }: Props) {
                 <p className="truncate text-xs text-muted-foreground">{preset.url}</p>
               </div>
               {isConfigured ? (
-                <span className="flex-shrink-0 text-xs text-green-600">{t.settings.localConfigured}</span>
+                <span className="flex-shrink-0 text-xs text-green-600">{t.providers.localConfigured}</span>
               ) : (
                 <button
                   disabled={busy !== null}
                   onClick={() => void add(preset.name, preset.url).catch(console.error)}
                   className="flex-shrink-0 rounded-md border border-border bg-foreground/10 px-3 py-1.5 text-xs hover:bg-foreground/20 disabled:opacity-50"
                 >
-                  {busy === preset.url ? t.settings.saveInProgress : t.settings.localAdd}
+                  {busy === preset.url ? t.providers.saveInProgress : t.providers.localAdd}
                 </button>
               )}
             </div>

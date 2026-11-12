@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 import { render, screen, fireEvent, waitFor, cleanup, within } from "@testing-library/react"
-import { SettingsDialog } from "./SettingsDialog"
+import { ProvidersDialog } from "./ProvidersDialog"
 
 function hasClass(element: HTMLElement | SVGElement | null, className: string): boolean {
   return element?.classList.contains(className) ?? false
@@ -93,7 +93,7 @@ beforeEach(() => {
 afterEach(cleanup)
 
 function renderDialog() {
-  return render(<SettingsDialog onClose={() => {}} onChanged={() => {}} />)
+  return render(<ProvidersDialog onClose={() => {}} onChanged={() => {}} />)
 }
 
 async function fetchButton(): Promise<HTMLElement> {
@@ -108,14 +108,14 @@ async function testButton(): Promise<HTMLElement> {
   const providerName = await screen.findByText("OpenRouter")
   const card = providerName.closest('[data-testid="provider-card"]')
   expect(card).not.toBeNull()
-  return within(card as HTMLElement).getByRole("button", { name: t.settings.test })
+  return within(card as HTMLElement).getByRole("button", { name: t.providers.test })
 }
 
-describe("SettingsDialog — recherche des fournisseurs", () => {
+describe("ProvidersDialog — recherche des fournisseurs", () => {
   it("filtre par nom sans tenir compte de la casse", async () => {
     renderDialog()
     const search = await screen.findByRole("searchbox", {
-      name: t.settings.searchProviders,
+      name: t.providers.searchProviders,
     })
 
     fireEvent.change(search, { target: { value: "lm STUDIO" } })
@@ -127,7 +127,7 @@ describe("SettingsDialog — recherche des fournisseurs", () => {
   it("filtre par URL partielle", async () => {
     renderDialog()
     const search = await screen.findByRole("searchbox", {
-      name: t.settings.searchProviders,
+      name: t.providers.searchProviders,
     })
 
     fireEvent.change(search, { target: { value: "openrouter.ai" } })
@@ -139,21 +139,21 @@ describe("SettingsDialog — recherche des fournisseurs", () => {
   it("affiche un état sans résultat tout en conservant la carte d’ajout", async () => {
     renderDialog()
     const search = await screen.findByRole("searchbox", {
-      name: t.settings.searchProviders,
+      name: t.providers.searchProviders,
     })
 
     fireEvent.change(search, { target: { value: "fournisseur-inconnu" } })
 
-    expect(screen.getByText(t.settings.noProviderResults)).not.toBeNull()
-    expect(screen.getByRole("button", { name: t.settings.addProvider })).not.toBeNull()
+    expect(screen.getByText(t.providers.noProviderResults)).not.toBeNull()
+    expect(screen.getByRole("button", { name: t.providers.addProvider })).not.toBeNull()
   })
 })
 
-describe("SettingsDialog — cartes fournisseur", () => {
+describe("ProvidersDialog — cartes fournisseur", () => {
   it("utilise le gabarit standard des outils du header", () => {
     renderDialog()
 
-    const dialog = screen.getByRole("dialog", { name: t.settings.title })
+    const dialog = screen.getByRole("dialog", { name: t.providers.title })
     expect(hasClass(dialog, "h-[75vh]")).toBe(true)
     expect(hasClass(dialog, "w-[1100px]")).toBe(true)
     expect(hasClass(dialog, "max-w-[96vw]")).toBe(true)
@@ -167,11 +167,11 @@ describe("SettingsDialog — cartes fournisseur", () => {
     const providerName = await screen.findByText("OpenRouter")
     const card = providerName.closest('[data-testid="provider-card"]') as HTMLElement
 
-    expect(within(card).getByRole("button", { name: t.settings.test })).not.toBeNull()
-    expect(within(card).getByRole("button", { name: t.settings.fetchModels })).not.toBeNull()
-    expect(within(card).getByRole("button", { name: t.settings.edit })).not.toBeNull()
+    expect(within(card).getByRole("button", { name: t.providers.test })).not.toBeNull()
+    expect(within(card).getByRole("button", { name: t.providers.fetchModels })).not.toBeNull()
+    expect(within(card).getByRole("button", { name: t.providers.edit })).not.toBeNull()
     expect(within(card).getByRole("button", {
-      name: `${t.settings.browseModels} (1)`,
+      name: `${t.providers.browseModels} (1)`,
     })).not.toBeNull()
     expect(within(card).queryByText("existing/model")).toBeNull()
 
@@ -184,7 +184,7 @@ describe("SettingsDialog — cartes fournisseur", () => {
   it("aligne la hauteur de la carte d'ajout sur le format compact", async () => {
     renderDialog()
 
-    const addButton = screen.getByRole("button", { name: t.settings.addProvider })
+    const addButton = screen.getByRole("button", { name: t.providers.addProvider })
     expect(hasClass(addButton, "min-h-56")).toBe(true)
     expect(hasClass(addButton, "min-h-64")).toBe(false)
     expect(hasClass(addButton, "gap-2")).toBe(true)
@@ -192,7 +192,7 @@ describe("SettingsDialog — cartes fournisseur", () => {
   })
 })
 
-describe("SettingsDialog — récupération des modèles", () => {
+describe("ProvidersDialog — récupération des modèles", () => {
   it("sans clé API : statut fail noKey, aucun appel réseau", async () => {
     mockSecretsGet.mockResolvedValue(null)
     renderDialog()
@@ -239,7 +239,7 @@ describe("SettingsDialog — récupération des modèles", () => {
 
     await waitFor(() => {
       const row = screen.getByText("OpenRouter").closest('[data-testid="provider-card"]')!
-      expect(row.querySelector('[data-testid="fetch-models-status"]')?.textContent).toContain(t.settings.fetchFail)
+      expect(row.querySelector('[data-testid="fetch-models-status"]')?.textContent).toContain(t.providers.fetchFail)
     })
     const sinks = JSON.stringify({ ui: document.body.textContent, logs: mockLoggerError.mock.calls })
     expect(sinks).not.toContain(opaqueKey)
@@ -297,7 +297,7 @@ describe("SettingsDialog — récupération des modèles", () => {
   })
 })
 
-describe("SettingsDialog — test de connexion", () => {
+describe("ProvidersDialog — test de connexion", () => {
   it("masque la clé exacte d'une exception inconnue dans l'UI et les logs", async () => {
     const opaqueKey = "CUSTOM.key+42/="
     mockSecretsGet.mockResolvedValue(opaqueKey)
@@ -308,20 +308,20 @@ describe("SettingsDialog — test de connexion", () => {
 
     fireEvent.click(await testButton())
 
-    await waitFor(() => expect(screen.getByText(t.settings.fail, { exact: false })).not.toBeNull())
+    await waitFor(() => expect(screen.getByText(t.providers.fail, { exact: false })).not.toBeNull())
     const sinks = JSON.stringify({ ui: document.body.textContent, logs: mockLoggerError.mock.calls })
     expect(sinks).not.toContain(opaqueKey)
     expect(JSON.stringify(mockLoggerError.mock.calls)).toContain("[REDACTED]")
   })
 })
 
-describe("SettingsDialog — suppression fournisseur", () => {
+describe("ProvidersDialog — suppression fournisseur", () => {
   afterEach(cleanup)
 
   async function trashButton(): Promise<HTMLElement> {
     await screen.findByText("OpenRouter")
     const row = screen.getByText("OpenRouter").closest('[data-testid="provider-card"]')!
-    const btn = row.querySelector(`[aria-label="${t.settings.delete}"]`)
+    const btn = row.querySelector(`[aria-label="${t.providers.delete}"]`)
     expect(btn).not.toBeNull()
     return btn as HTMLElement
   }

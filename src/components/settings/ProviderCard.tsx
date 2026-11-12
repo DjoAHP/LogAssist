@@ -124,11 +124,11 @@ function ProviderAction({
 function connectionFeedback(status: ProviderConnectionStatus): ActionFeedback {
   switch (status.state) {
     case "testing":
-      return { text: t.settings.testing, tone: "loading" }
+      return { text: t.providers.testing, tone: "loading" }
     case "ok":
-      return { text: t.settings.ok, tone: "success" }
+      return { text: t.providers.ok, tone: "success" }
     case "fail":
-      return { text: `${t.settings.fail} — ${status.message}`, tone: "error" }
+      return { text: `${t.providers.fail} — ${status.message}`, tone: "error" }
     case "idle":
       return { text: "", tone: "idle" }
   }
@@ -138,11 +138,11 @@ function fetchFeedback(status: ProviderFetchStatus | undefined): ActionFeedback 
   if (!status) return { text: "", tone: "idle" }
   switch (status.state) {
     case "fetching":
-      return { text: t.settings.fetchingModels, tone: "loading" }
+      return { text: t.providers.fetchingModels, tone: "loading" }
     case "ok":
-      return { text: `${status.added} ${t.settings.fetchOkAdded}`, tone: "success" }
+      return { text: `${status.added} ${t.providers.fetchOkAdded}`, tone: "success" }
     case "fail":
-      return { text: `${t.settings.fetchFail} — ${status.message}`, tone: "error" }
+      return { text: `${t.providers.fetchFail} — ${status.message}`, tone: "error" }
   }
 }
 
@@ -188,8 +188,8 @@ export function ProviderCard({
           type="button"
           onClick={onDelete}
           data-action="delete"
-          aria-label={t.settings.delete}
-          title={t.settings.delete}
+          aria-label={t.providers.delete}
+          title={t.providers.delete}
           className="
             flex-shrink-0 rounded-md p-1 text-muted-foreground
             hover:bg-destructive/10 hover:text-destructive
@@ -215,7 +215,7 @@ export function ProviderCard({
         <ProviderAction
           action="test-connection"
           statusId={testStatusId}
-          label={t.settings.test}
+          label={t.providers.test}
           Icon={RadioTower}
           feedback={connection}
           disabled={connectionStatus.state === "testing"}
@@ -224,7 +224,7 @@ export function ProviderCard({
         <ProviderAction
           action="fetch-models"
           statusId={fetchStatusId}
-          label={t.settings.fetchModels}
+          label={t.providers.fetchModels}
           Icon={CloudDownload}
           feedback={fetch}
           disabled={fetchStatus?.state === "fetching"}
@@ -233,7 +233,7 @@ export function ProviderCard({
         <ProviderAction
           action="edit-provider"
           statusId={`${provider.id}-edit-status`}
-          label={t.settings.edit}
+          label={t.providers.edit}
           Icon={Wrench}
           feedback={{ text: "", tone: "idle" }}
           disabled={false}
@@ -246,7 +246,7 @@ export function ProviderCard({
         type="button"
         onClick={onBrowseModels}
         data-action="browse-models"
-        aria-label={`${t.settings.browseModels} (${modelCount})`}
+        aria-label={`${t.providers.browseModels} (${modelCount})`}
         className="
           w-full flex items-center justify-center gap-1 rounded-md border border-border px-2 py-1.5
           text-xs font-medium text-foreground
@@ -256,7 +256,7 @@ export function ProviderCard({
           motion-reduce:transition-none
         "
       >
-        {t.settings.browseModels}
+        {t.providers.browseModels}
         <span className="text-muted-foreground">({modelCount})</span>
       </button>
     </article>

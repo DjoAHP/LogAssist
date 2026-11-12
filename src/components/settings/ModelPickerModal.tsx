@@ -18,7 +18,7 @@ interface ModelPickerModalProps {
 
 // Modal de parcourt du modèle (remplace le menu déroulant) : recherche + ajout
 // textuel + liste complète. Clic sur un modèle = activation (rôle du parent via
-// onSelect). Composant muet : toute la persistance reste côté SettingsDialog.
+// onSelect). Composant muet : toute la persistance reste côté ProvidersDialog.
 export function ModelPickerModal({
   providerName,
   models,
@@ -47,15 +47,15 @@ export function ModelPickerModal({
       <div
         role="dialog"
         aria-modal="true"
-        aria-label={`${t.settings.browseModels} — ${providerName}`}
+        aria-label={`${t.providers.browseModels} — ${providerName}`}
         className="max-h-[80vh] w-[520px] max-w-[92vw] overflow-y-auto rounded-lg border border-border bg-background p-4"
         onClick={(e) => e.stopPropagation()}
       >
         <header className="mb-3 flex items-center justify-between">
           <h3 className="text-sm font-semibold">
-            {t.settings.browseModels} — {providerName} <span className="text-muted-foreground">({models.length})</span>
+            {t.providers.browseModels} — {providerName} <span className="text-muted-foreground">({models.length})</span>
           </h3>
-          <button aria-label={t.settings.close} onClick={onClose} className="rounded-md p-1 hover:bg-foreground/5">
+          <button aria-label={t.providers.close} onClick={onClose} className="rounded-md p-1 hover:bg-foreground/5">
             <X className="size-4" />
           </button>
         </header>
@@ -64,10 +64,10 @@ export function ModelPickerModal({
         <div className="relative mb-2">
           <input
             type="text"
-            aria-label={t.settings.searchModels}
+            aria-label={t.providers.searchModels}
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder={t.settings.searchModels}
+            placeholder={t.providers.searchModels}
             className="w-full rounded-md border border-border bg-transparent px-2 py-1.5 text-xs outline-none pr-8"
           />
           <Search className="absolute right-2 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground" />
@@ -84,13 +84,13 @@ export function ModelPickerModal({
                 void add().catch(console.error)
               }
             }}
-            aria-label={t.settings.addModel}
-            placeholder={t.settings.addModelPlaceholder}
+            aria-label={t.providers.addModel}
+            placeholder={t.providers.addModelPlaceholder}
             className="flex-1 min-w-0 rounded-md border border-border bg-transparent px-2 py-1 text-xs outline-none"
           />
           <button
             onClick={() => void add().catch(console.error)}
-            aria-label={t.settings.addModelSubmit}
+            aria-label={t.providers.addModelSubmit}
             className="flex-shrink-0 rounded-md border border-border px-2 py-1 text-xs hover:bg-foreground/5"
           >
             <Plus className="size-3" />
@@ -100,7 +100,7 @@ export function ModelPickerModal({
         {/* Liste complète */}
         <div className="max-h-60 overflow-y-auto rounded-md border border-border">
           {filtered.length === 0 ? (
-            <div className="px-2 py-2 text-xs text-muted-foreground">{t.settings.noModels}</div>
+            <div className="px-2 py-2 text-xs text-muted-foreground">{t.providers.noModels}</div>
           ) : (
             filtered.map((m) => (
               <button
@@ -112,7 +112,7 @@ export function ModelPickerModal({
                 <span className="truncate">{m.label}</span>
                 <div className="flex flex-shrink-0 items-center gap-1.5">
                   {m.isDefault && (
-                    <span aria-label={t.settings.activeModelBadge}>
+                    <span aria-label={t.providers.activeModelBadge}>
                       <Star className="size-3 text-amber-500" />
                     </span>
                   )}

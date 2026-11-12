@@ -22,14 +22,14 @@ describe("bouton MCP du header", () => {
     expect(t.mcp.open).toBe("MCP")
     expect(t.mcp.title).toBe("MCP")
     expect(t.assistant.title).toBe("Assistant")
-    expect(t.settings.modelsSettings).toBe("Fournisseurs")
-    expect(t.settings.title).toBe("Fournisseur")
+    expect(t.providers.modelsSettings).toBe("Fournisseurs")
+    expect(t.providers.title).toBe("Fournisseur")
 
     const source = readFileSync(new URL("./App.tsx", import.meta.url), "utf8")
     expect(source).toContain("title={t.mcp.title}")
     expect(source).toContain("title={t.assistant.title}")
-    expect(source).toContain("aria-label={t.settings.modelsSettings}")
-    expect(source).toContain("title={t.settings.modelsSettings}")
+    expect(source).toContain("aria-label={t.providers.modelsSettings}")
+    expect(source).toContain("title={t.providers.modelsSettings}")
   })
 })
 
