@@ -1,5 +1,14 @@
 export const fr = {
   app: { title: "LogAssist", subtitle: "Assistant IA" },
+  lock: {
+    title: "LogAssist verrouillé",
+    subtitle: "Entrez votre mot de passe pour accéder à l'application.",
+    passwordField: "Mot de passe",
+    unlock: "Déverrouiller",
+    verifying: "Vérification…",
+    wrongPassword: "Mot de passe incorrect.",
+    verifyFailed: "Échec de la vérification. Réessayez.",
+  },
   sidebar: {
     newConversation: "Nouveau chat",
     search: "Rechercher…",
