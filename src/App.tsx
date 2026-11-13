@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react"
 import { Sun, Moon } from "lucide-react"
-import { BookIcon, McpIcon, ReglageIcon } from "@/icons"
+import { BookIcon, McpIcon, ParaGenIcon, ReglageIcon } from "@/icons"
 import logoSrc from "@/assets/logo.png"
 import bgDark from "@/assets/background_dark_logassist.png"
 import bgLight from "@/assets/background_light_logassist.png"
@@ -15,6 +15,9 @@ import { Sidebar } from "@/components/sidebar/Sidebar"
 import { ChatView } from "@/components/chat/ChatView"
 import { InputBar } from "@/components/chat/InputBar"
 import { ProvidersDialog } from "@/components/settings/ProvidersDialog"
+import { GeneralSettingsDialog } from "@/components/settings/GeneralSettingsDialog"
+import { LockGate } from "@/components/settings/LockGate"
+import { isLockActive } from "@/lib/applock/service"
 import { AssistantDialog } from "@/components/settings/AssistantDialog"
 import { McpDialog } from "@/components/settings/McpDialog"
 
@@ -26,6 +29,11 @@ function App() {
   const [activeModel, setActiveModel] = useState<ActiveModel | null>(null)
   const [modelOptions, setModelOptions] = useState<{ rowId: string; label: string; isDefault: boolean; supportsImages: boolean }[]>([])
   const [providersOpen, setProvidersOpen] = useState(false)
+  const [generalSettingsOpen, setGeneralSettingsOpen] = useState(false)
+  // Verrou de confort : null = état inconnu (lecture du flag en cours),
+  // true = LockGate, false = app déverrouillée. Le fail-open (hash absent)
+  // est déjà géré dans isLockActive.
+  const [locked, setLocked] = useState<boolean | null>(null)
   const [assistantOpen, setAssistantOpen] = useState(false)
   const [mcpOpen, setMcpOpen] = useState(false)
   const [sidebarWidth, setSidebarWidth] = useState(DEFAULT_SIDEBAR_WIDTH)
@@ -49,6 +57,17 @@ function App() {
     else root.classList.remove("dark")
     localStorage.setItem("logassist:dark", JSON.stringify(isDark))
   }, [isDark])
+
+  // Lecture de l'état du verrou au démarrage ; une erreur du pont (invoke
+  // indisponible) laisse l'app ouverte plutôt que bloquée.
+  useEffect(() => {
+    void isLockActive()
+      .then(setLocked)
+      .catch((e) => {
+        console.error(e)
+        setLocked(false)
+      })
+  }, [])
 
   const toggleDark = useCallback(() => setIsDark((d: boolean) => !d), [])
 
@@ -205,6 +224,12 @@ function App() {
     setSidebarCollapsed((prev) => !prev)
   }, [])
 
+  // Tant que l'état du verrou est inconnu : écran nu (la fenêtre est déjà
+  // sombre, pas de flash de contenu). Verrou actif : LockGate seul — rien du
+  // <main> dans le DOM (les conversations ne doivent pas y être lisibles).
+  if (locked === null) return <div className="h-screen bg-background" aria-hidden="true" />
+  if (locked) return <LockGate onUnlock={() => setLocked(false)} />
+
   return (
     <main className="flex h-screen overflow-hidden">
       <Sidebar
@@ -270,6 +295,16 @@ function App() {
           >
             <ReglageIcon className="size-[22px]" />
           </button>
+          {/* Séparateur discret */}
+          <div className="w-px h-5 bg-border mx-1" aria-hidden="true" />
+          <button
+            aria-label={t.generalSettings.open}
+            title={t.generalSettings.open}
+            onClick={() => setGeneralSettingsOpen(true)}
+            className="rounded-md p-1.5 hover:bg-foreground/5"
+          >
+            <ParaGenIcon className="size-[22px]" />
+          </button>
         </div>
         </header>
         <ChatView
@@ -298,6 +333,9 @@ function App() {
       </section>
       {providersOpen && (
         <ProvidersDialog onClose={() => setProvidersOpen(false)} onChanged={onSettingsChanged} />
+      )}
+      {generalSettingsOpen && (
+        <GeneralSettingsDialog onClose={() => setGeneralSettingsOpen(false)} />
       )}
       {assistantOpen && <AssistantDialog onClose={() => setAssistantOpen(false)} conversationId={activeId} />}
       {mcpOpen && (

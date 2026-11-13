@@ -31,6 +31,18 @@ describe("bouton MCP du header", () => {
     expect(source).toContain("aria-label={t.providers.modelsSettings}")
     expect(source).toContain("title={t.providers.modelsSettings}")
   })
+
+  it("place Paramètres généraux après le bouton fournisseurs, avec séparateur", () => {
+    const source = readFileSync(new URL("./App.tsx", import.meta.url), "utf8")
+    const providersButton = source.indexOf("aria-label={t.providers.modelsSettings}")
+    const generalButton = source.indexOf("aria-label={t.generalSettings.open}")
+    expect(providersButton).toBeGreaterThan(-1)
+    expect(generalButton).toBeGreaterThan(providersButton)
+    expect(source.slice(providersButton, generalButton)).toContain("bg-border")
+    expect(source.slice(generalButton, generalButton + 400)).toContain("<ParaGenIcon")
+    expect(source).toContain("import { LockGate }")
+    expect(source).toContain("isLockActive()")
+  })
 })
 
 describe("App — runtime MCP et galerie", () => {
