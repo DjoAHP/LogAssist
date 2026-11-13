@@ -21,6 +21,11 @@ export interface TokenUsage {
   cachedInputTokens?: number
 }
 
+export interface ProviderModelContext {
+  contextWindowTokens: number
+  source: "loaded" | "metadata"
+}
+
 export interface CompletionStats {
   text: string
   firstTokenMs: number

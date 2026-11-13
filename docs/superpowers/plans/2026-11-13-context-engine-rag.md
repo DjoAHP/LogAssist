@@ -403,7 +403,7 @@ git commit -m "feat: ajoute les limites de contexte par modèle"
 - Create: `src/lib/context/modelCapabilities.test.ts`
 - Create: `src/lib/context/index.ts`
 
-- [ ] **Step 1: Écrire les tests rouges du détecteur loopback**
+- [x] **Step 1: Écrire les tests rouges du détecteur loopback**
 
 Dans `src/lib/ai/url.test.ts` :
 
@@ -425,7 +425,7 @@ it.each([
 })
 ```
 
-- [ ] **Step 2: Écrire les tests rouges de l’inspection LM Studio**
+- [x] **Step 2: Écrire les tests rouges de l’inspection LM Studio**
 
 Dans `src/lib/ai/openai-compat.test.ts`, utiliser une configuration locale et deux réponses fetch :
 
@@ -483,7 +483,7 @@ Ajouter un test générique où `/api/v1/models` retourne 404 puis `/v1/models` 
 
 Attendre `{ contextWindowTokens: 128000, source: "metadata" }`.
 
-- [ ] **Step 3: Écrire les tests rouges du résolveur de profil**
+- [x] **Step 3: Écrire les tests rouges du résolveur de profil**
 
 Créer `src/lib/context/modelCapabilities.test.ts` :
 
@@ -552,7 +552,7 @@ describe("resolveModelContextProfile", () => {
 })
 ```
 
-- [ ] **Step 4: Exécuter les tests et confirmer l’échec**
+- [x] **Step 4: Exécuter les tests et confirmer l’échec**
 
 ```bash
 powershell.exe -NoProfile -Command "Set-Location 'C:\dev\LogAssist'; npx vitest run src/lib/ai/url.test.ts src/lib/ai/openai-compat.test.ts src/lib/context/modelCapabilities.test.ts"
@@ -560,7 +560,7 @@ powershell.exe -NoProfile -Command "Set-Location 'C:\dev\LogAssist'; npx vitest 
 
 Expected: fonctions et méthode d’inspection absentes.
 
-- [ ] **Step 5: Ajouter les contrats de capacité**
+- [x] **Step 5: Ajouter les contrats de capacité**
 
 Dans `src/lib/ai/types.ts` :
 
@@ -597,7 +597,7 @@ export interface ModelContextProfile {
 }
 ```
 
-- [ ] **Step 6: Implémenter l’inspection fournisseur**
+- [x] **Step 6: Implémenter l’inspection fournisseur**
 
 Dans `src/lib/ai/url.ts` :
 
@@ -632,7 +632,7 @@ interne et un timer de 2 000 ms nettoyé dans `finally`. Un timeout, un statut
 non-OK ou un JSON malformé retourne `null` pour cette capacité optionnelle ; il ne
 bloque jamais le chat et ne journalise ni clé ni corps de réponse.
 
-- [ ] **Step 7: Implémenter le résolveur et son cache**
+- [x] **Step 7: Implémenter le résolveur et son cache**
 
 Dans `src/lib/context/modelCapabilities.ts` :
 
@@ -713,7 +713,7 @@ export function invalidateModelContextProfile(cacheKey: string): void {
 }
 ```
 
-- [ ] **Step 8: Relancer les tests ciblés**
+- [x] **Step 8: Relancer les tests ciblés**
 
 ```bash
 powershell.exe -NoProfile -Command "Set-Location 'C:\dev\LogAssist'; npx vitest run src/lib/ai/url.test.ts src/lib/ai/openai-compat.test.ts src/lib/context/modelCapabilities.test.ts"
@@ -721,7 +721,7 @@ powershell.exe -NoProfile -Command "Set-Location 'C:\dev\LogAssist'; npx vitest 
 
 Expected: PASS.
 
-- [ ] **Step 9: Committer la découverte fournisseur**
+- [x] **Step 9: Committer la découverte fournisseur**
 
 ```bash
 git add src/lib/ai/types.ts src/lib/ai/openai-compat.ts src/lib/ai/openai-compat.test.ts src/lib/ai/url.ts src/lib/ai/url.test.ts src/lib/context/types.ts src/lib/context/modelCapabilities.ts src/lib/context/modelCapabilities.test.ts src/lib/context/index.ts

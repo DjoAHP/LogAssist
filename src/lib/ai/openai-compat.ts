@@ -6,13 +6,14 @@ import {
   normalizeNetworkError,
   redactSensitiveDetail,
 } from "./errors"
-import { cleanApiBaseUrl, isOfficialOpenAiBaseUrl } from "./url"
+import { cleanApiBaseUrl, isLoopbackApiBaseUrl, isOfficialOpenAiBaseUrl } from "./url"
 import { logger } from "../logger"
 import { parseSseStream } from "./sse"
 import type {
   ChatMessage,
   ChatRequest,
   ProviderConfig,
+  ProviderModelContext,
   StreamCallbacks,
   TokenUsage,
   ToolCall,
@@ -45,6 +46,7 @@ export interface IProvider {
   testConnection(apiKey: string): Promise<{ ok: boolean; error?: ApiError }>
   // Récupération des modèles annoncés par le fournisseur (GET /models)
   listRemoteModels(apiKey: string): Promise<string[]>
+  inspectModelContext(apiKey: string, modelId: string): Promise<ProviderModelContext | null>
 }
 
 function retryAfterMs(headers: Headers): number | undefined {
@@ -143,10 +145,76 @@ function normalizeSanitizedHttpStatus(
   )
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+}
+
+function validContextWindow(value: unknown): number | null {
+  return Number.isSafeInteger(value) && (value as number) >= 512 && (value as number) <= 2_000_000
+    ? value as number
+    : null
+}
+
+function contextFromLmStudio(value: unknown, modelId: string): ProviderModelContext | null {
+  if (!isRecord(value) || !Array.isArray(value.models)) return null
+  const loaded: number[] = []
+  const metadata: number[] = []
+
+  for (const candidate of value.models) {
+    if (!isRecord(candidate)) continue
+    const instances = Array.isArray(candidate.loaded_instances)
+      ? candidate.loaded_instances.filter(isRecord)
+      : []
+    const modelMatches = candidate.key === modelId || instances.some((instance) => instance.id === modelId)
+    if (!modelMatches) continue
+
+    for (const instance of instances) {
+      if (candidate.key !== modelId && instance.id !== modelId) continue
+      const config = isRecord(instance.config) ? instance.config : null
+      const contextWindow = validContextWindow(config?.context_length)
+      if (contextWindow !== null) loaded.push(contextWindow)
+    }
+    const maxContextWindow = validContextWindow(candidate.max_context_length)
+    if (maxContextWindow !== null) metadata.push(maxContextWindow)
+  }
+
+  if (loaded.length > 0) return { contextWindowTokens: Math.min(...loaded), source: "loaded" }
+  if (metadata.length > 0) return { contextWindowTokens: Math.min(...metadata), source: "metadata" }
+  return null
+}
+
+function contextFromOpenAiModels(value: unknown, modelId: string): ProviderModelContext | null {
+  if (!isRecord(value) || !Array.isArray(value.data)) return null
+  const candidate = value.data.find((entry) => isRecord(entry) && entry.id === modelId)
+  if (!isRecord(candidate)) return null
+  const contextWindow = validContextWindow(candidate.context_length) ??
+    validContextWindow(candidate.max_context_length)
+  return contextWindow === null
+    ? null
+    : { contextWindowTokens: contextWindow, source: "metadata" }
+}
+
 export function createOpenAICompatible(cfg: ProviderConfig): IProvider {
   // Nettoie l'URL via le helper partagé avec le formulaire — invariant unique.
   const base = cleanApiBaseUrl(cfg.baseUrl)
   const isOfficialOpenAi = isOfficialOpenAiBaseUrl(base)
+
+  async function optionalJson(url: string, apiKey: string): Promise<unknown | null> {
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), 2_000)
+    try {
+      const response = await getFetch()(url, {
+        headers: { Authorization: `Bearer ${apiKey}` },
+        signal: controller.signal,
+      })
+      if (!response.ok) return null
+      return await response.json()
+    } catch {
+      return null
+    } finally {
+      clearTimeout(timeout)
+    }
+  }
 
   function toOpenAiMessage(message: ChatMessage): Record<string, unknown> {
     const content = message.images?.length
@@ -415,6 +483,18 @@ export function createOpenAICompatible(cfg: ProviderConfig): IProvider {
       } catch (e) {
         throw sanitizeAdapterError(e, apiKey)
       }
+    },
+
+    async inspectModelContext(apiKey, modelId) {
+      if (isLoopbackApiBaseUrl(base)) {
+        const origin = new URL(base).origin
+        const native = await optionalJson(`${origin}/api/v1/models`, apiKey)
+        const nativeContext = contextFromLmStudio(native, modelId)
+        if (nativeContext) return nativeContext
+      }
+
+      const compatible = await optionalJson(`${base}/models`, apiKey)
+      return contextFromOpenAiModels(compatible, modelId)
     },
   }
 }

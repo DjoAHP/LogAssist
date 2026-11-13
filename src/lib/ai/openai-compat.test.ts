@@ -26,6 +26,14 @@ const OFFICIAL_OPENAI_CFG: ProviderConfig = {
   secretRef: "openai.key",
 }
 
+const LM_STUDIO_CFG: ProviderConfig = {
+  id: "lm-studio",
+  name: "LM Studio",
+  apiFamily: "openai",
+  baseUrl: "http://localhost:1234/v1",
+  secretRef: "logassist/provider/lm-studio",
+}
+
 const BOUNDARY_API_KEY = "CUSTOM.alpha+42/=OMEGA.beta-99"
 const BOUNDARY_API_KEY_MIDDLE = Math.floor(BOUNDARY_API_KEY.length / 2)
 const BOUNDARY_API_KEY_FIRST_HALF = BOUNDARY_API_KEY.slice(0, BOUNDARY_API_KEY_MIDDLE)
@@ -141,6 +149,84 @@ describe("createOpenAICompatible — listRemoteModels", () => {
     const adapter = createOpenAICompatible({ ...CFG, baseUrl: "https://exemple.ai/api/v1/models" })
     await adapter.listRemoteModels("KEY-123")
     expect(String(fetchMock.mock.calls[0][0]).includes("/api/v1/models")).toBe(true)
+  })
+})
+
+describe("createOpenAICompatible — inspectModelContext", () => {
+  type ContextInspector = {
+    inspectModelContext(
+      apiKey: string,
+      modelId: string,
+    ): Promise<{ contextWindowTokens: number; source: "loaded" | "metadata" } | null>
+  }
+
+  it("retient la fenêtre chargée LM Studio plutôt que le maximum théorique", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(makeRes({
+      json: {
+        models: [{
+          key: "qwen/qwen3.5-9b",
+          max_context_length: 131072,
+          loaded_instances: [
+            { id: "qwen/qwen3.5-9b", config: { context_length: 8192 } },
+          ],
+        }],
+      },
+    }))
+    vi.stubGlobal("fetch", fetchMock)
+    const adapter = createOpenAICompatible(LM_STUDIO_CFG) as ReturnType<typeof createOpenAICompatible> & ContextInspector
+
+    expect(adapter).toHaveProperty("inspectModelContext")
+    await expect(adapter.inspectModelContext("not-needed", "qwen/qwen3.5-9b"))
+      .resolves.toEqual({ contextWindowTokens: 8192, source: "loaded" })
+    expect(fetchMock.mock.calls[0][0]).toBe("http://localhost:1234/api/v1/models")
+  })
+
+  it("retient la plus petite fenêtre quand plusieurs instances correspondent", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(makeRes({
+      json: {
+        models: [{
+          key: "qwen",
+          max_context_length: 131072,
+          loaded_instances: [
+            { id: "qwen", config: { context_length: 32768 } },
+            { id: "qwen", config: { context_length: 8192 } },
+          ],
+        }],
+      },
+    })))
+    const adapter = createOpenAICompatible(LM_STUDIO_CFG) as ReturnType<typeof createOpenAICompatible> & ContextInspector
+
+    expect(adapter).toHaveProperty("inspectModelContext")
+    await expect(adapter.inspectModelContext("not-needed", "qwen"))
+      .resolves.toEqual({ contextWindowTokens: 8192, source: "loaded" })
+  })
+
+  it("retombe sur les métadonnées OpenAI compatibles si l’API native est absente", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(makeRes({ ok: false, status: 404, text: "not found" }))
+      .mockResolvedValueOnce(makeRes({
+        json: { data: [{ id: "openai/gpt-4o", context_length: 128000 }] },
+      }))
+    vi.stubGlobal("fetch", fetchMock)
+    const adapter = createOpenAICompatible(LM_STUDIO_CFG) as ReturnType<typeof createOpenAICompatible> & ContextInspector
+
+    expect(adapter).toHaveProperty("inspectModelContext")
+    await expect(adapter.inspectModelContext("not-needed", "openai/gpt-4o"))
+      .resolves.toEqual({ contextWindowTokens: 128000, source: "metadata" })
+    expect(fetchMock.mock.calls.map(([url]) => String(url))).toEqual([
+      "http://localhost:1234/api/v1/models",
+      "http://localhost:1234/v1/models",
+    ])
+  })
+
+  it("ignore des fenêtres invalides sans bloquer le chat", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(makeRes({
+      json: { data: [{ id: "m", context_length: -1, max_context_length: "8192" }] },
+    })))
+    const adapter = createOpenAICompatible(CFG) as ReturnType<typeof createOpenAICompatible> & ContextInspector
+
+    expect(adapter).toHaveProperty("inspectModelContext")
+    await expect(adapter.inspectModelContext("KEY", "m")).resolves.toBeNull()
   })
 })
 
