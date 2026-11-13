@@ -7,6 +7,7 @@ const mockVerify = vi.hoisted(() => vi.fn())
 const mockLoggerError = vi.hoisted(() => vi.fn())
 vi.mock("@/lib/applock/service", () => ({ applock: { verify: mockVerify } }))
 vi.mock("@/lib/logger", () => ({ logger: { debug: vi.fn(), error: mockLoggerError } }))
+vi.mock("@/assets/logo.png", () => ({ default: "logo.png" }))
 
 import { t } from "@/i18n/fr"
 
@@ -17,6 +18,13 @@ beforeEach(() => {
 afterEach(cleanup)
 
 describe("LockGate — déverrouillage", () => {
+  it("n'affiche que le logo, le champ et le bouton (pas de titre ni de texte)", () => {
+    render(<LockGate onUnlock={vi.fn()} />)
+    expect(screen.getByTestId("lock-logo")).not.toBeNull()
+    expect(screen.queryByText(t.lock.title)).toBeNull()
+    expect(screen.queryByText(t.lock.subtitle)).toBeNull()
+  })
+
   it("affiche une erreur sans déverrouiller si le mot de passe est faux", async () => {
     const onUnlock = vi.fn()
     render(<LockGate onUnlock={onUnlock} />)

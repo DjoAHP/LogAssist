@@ -1,13 +1,14 @@
-// Écran de verrouillage au démarrage (verrou de confort) : rendu en lieu et
-// place du <main> tant que le mot de passe n'est pas validé. Rien de la
-// conversation n'existe dans le DOM tant que la gate est présente. Le mot de
-// passe n'est jamais persisté ni loggé ; la vérification passe par la
-// commande Rust verify_applock_secret.
+// Écran de verrouillage au démarrage (verrou de confort) : calque assombri
+// au-dessus de l'interface qui reste visible en arrière-plan (compromis
+// assumé du verrou de confort — l'interface n'est ni cliquable ni lisible).
+// Carte minimale : logo au-dessus du champ, puis le bouton. Le mot de passe
+// n'est jamais persisté ni loggé ; la vérification passe par la commande
+// Rust verify_applock_secret.
 import { useCallback, useEffect, useRef, useState } from "react"
-import { Lock } from "lucide-react"
 import { t } from "@/i18n/fr"
 import { applock } from "@/lib/applock/service"
 import { logger } from "@/lib/logger"
+import logoSrc from "@/assets/logo.png"
 
 interface Props {
   onUnlock: () => void
@@ -47,20 +48,21 @@ export function LockGate({ onUnlock }: Props) {
 
   return (
     <div
-      className="fixed inset-0 z-[60] flex items-center justify-center bg-background/95"
+      className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80"
       data-testid="lock-gate"
     >
       <div
         role="dialog"
         aria-modal="true"
         aria-label={t.lock.title}
-        className="w-[320px] rounded-xl border border-border bg-background p-6 shadow-lg"
+        className="w-[300px] rounded-xl border border-border bg-background/95 p-6 shadow-lg"
       >
-        <div className="mb-4 flex flex-col items-center gap-1">
-          <Lock className="size-8 text-muted-foreground" aria-hidden="true" />
-          <h1 className="text-base font-semibold">{t.lock.title}</h1>
-          <p className="text-center text-xs text-muted-foreground">{t.lock.subtitle}</p>
-        </div>
+        <img
+          src={logoSrc}
+          alt=""
+          data-testid="lock-logo"
+          className="mx-auto mb-5 h-12 object-contain"
+        />
         <input
           ref={inputRef}
           type="password"

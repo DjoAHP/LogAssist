@@ -224,11 +224,11 @@ function App() {
     setSidebarCollapsed((prev) => !prev)
   }, [])
 
-  // Tant que l'état du verrou est inconnu : écran nu (la fenêtre est déjà
-  // sombre, pas de flash de contenu). Verrou actif : LockGate seul — rien du
-  // <main> dans le DOM (les conversations ne doivent pas y être lisibles).
-  if (locked === null) return <div className="h-screen bg-background" aria-hidden="true" />
-  if (locked) return <LockGate onUnlock={() => setLocked(false)} />
+  // Tant que l'état du verrou est inconnu : calque opaque (pas de flash de
+  // contenu). Verrou actif : LockGate en calque assombri au-dessus de
+  // l'interface (compromis assumé du verrou de confort — l'interface n'est
+  // ni cliquable ni lisible derrière le calque).
+  if (locked === null) return <div className="fixed inset-0 z-[60] bg-background" aria-hidden="true" />
 
   return (
     <main className="flex h-screen overflow-hidden">
@@ -338,6 +338,7 @@ function App() {
         <GeneralSettingsDialog onClose={() => setGeneralSettingsOpen(false)} />
       )}
       {assistantOpen && <AssistantDialog onClose={() => setAssistantOpen(false)} conversationId={activeId} />}
+      {locked && <LockGate onUnlock={() => setLocked(false)} />}
       {mcpOpen && (
         <McpDialog
           snapshot={mcpRuntime}
