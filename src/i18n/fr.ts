@@ -1,5 +1,21 @@
 export const fr = {
   app: { title: "LogAssist", subtitle: "Assistant IA" },
+  lockSettings: {
+    sectionTitle: "Verrouillage",
+    description: "Demande un mot de passe à l'ouverture de LogAssist.",
+    enabled: "Verrou activé",
+    disabled: "Verrou désactivé",
+    change: "Changer le mot de passe",
+    currentPassword: "Mot de passe actuel",
+    newPassword: "Nouveau mot de passe",
+    confirmPassword: "Confirmer le mot de passe",
+    validate: "Valider",
+    cancel: "Annuler",
+    mismatch: "Les mots de passe ne correspondent pas.",
+    tooShort: "Le mot de passe doit contenir au moins 4 caractères.",
+    verifyCurrentFailed: "Mot de passe actuel incorrect.",
+    saveFailed: "Échec de l'enregistrement. Réessayez.",
+  },
   generalSettings: {
     open: "Paramètres généraux",
     title: "Paramètres généraux",
