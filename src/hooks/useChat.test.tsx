@@ -15,6 +15,10 @@ import type { PrepareConversationContextInput } from "@/lib/chat/prepareConversa
 import { ApiError } from "@/lib/ai/errors"
 import { snapshot, genericTool, tinyfishTool } from "@/test/mcpFixtures"
 
+type RunAssistantTurnInput = Parameters<
+  typeof import("@/lib/chat/turnRunner").runAssistantTurn
+>[0]
+
 const runTurnMock = vi.hoisted(() => vi.fn())
 const systemPromptMock = vi.hoisted(() => vi.fn())
 const tinyfishCallMock = vi.hoisted(() => vi.fn())
@@ -41,13 +45,14 @@ const metricsFromProviderUsageMock = vi.hoisted(() => vi.fn<
   usageSource: "provider",
   costMicrousd: 12,
 })))
-const runAssistantTurnMock = vi.hoisted(() => vi.fn(async (input: any) => {
+const runAssistantTurnMock = vi.hoisted(() => vi.fn(async (input: RunAssistantTurnInput) => {
+  const prepared = input.context.prepareRound({ additionalMessages: [], tools: [] })
   if (input.tools) {
     // Tool agent path
-    return runTurnMock(input.request, input.apiKey, input.modelId, { tools: [], toolChoice: "auto" }, input.callbacks, input.signal)
+    return runTurnMock(prepared.request, input.apiKey, input.modelId, { tools: [], toolChoice: "auto" }, input.callbacks, input.signal)
   }
   // Direct provider path
-  return runTurnMock(input.request, input.apiKey, input.modelId, {}, input.callbacks, input.signal)
+  return runTurnMock(prepared.request, input.apiKey, input.modelId, {}, input.callbacks, input.signal)
 }))
 const mcpCallToolMock = vi.hoisted(() => vi.fn())
 const mcpCancelTurnMock = vi.hoisted(() => vi.fn())
@@ -246,15 +251,14 @@ beforeEach(() => {
     totalMs: 100,
     usage: { inputTokens: 40, outputTokens: 10 },
   })
-  runAssistantTurnMock.mockImplementation(async (input: any) => {
-    const prepared = input.context?.prepareRound({ additionalMessages: [], tools: [] })
-    const request = prepared?.request ?? input.request
+  runAssistantTurnMock.mockImplementation(async (input: RunAssistantTurnInput) => {
+    const prepared = input.context.prepareRound({ additionalMessages: [], tools: [] })
     if (input.tools) {
       // Tool agent path - use runTurnMock with tools config
-      const result = await runTurnMock(request, input.apiKey, input.modelId, { tools: [], toolChoice: "auto" }, input.callbacks, input.signal)
+      const result = await runTurnMock(prepared.request, input.apiKey, input.modelId, { tools: [], toolChoice: "auto" }, input.callbacks, input.signal)
       return { ...result, sources: [], media: [], estimatedUsage: { inputTokens: 7, outputTokens: 3 } }
     }
-    const result = await runTurnMock(request, input.apiKey, input.modelId, {}, input.callbacks, input.signal)
+    const result = await runTurnMock(prepared.request, input.apiKey, input.modelId, {}, input.callbacks, input.signal)
     return { ...result, sources: [], media: [], estimatedUsage: { inputTokens: 7, outputTokens: 3 } }
   })
   estimateTurnMetricsMock.mockReturnValue({
@@ -1872,6 +1876,7 @@ describe("useChat — récupération de la dernière réponse", () => {
 describe("useChat — outils MCP, approbation et annulation", () => {
   it("route un outil actif et expose l'approbation dans la bulle assistant", async () => {
     runAssistantTurnMock.mockImplementation(async (input) => {
+      if (!input.tools) throw new Error("Ce scénario exige un catalogue d'outils.")
       const decision = await input.tools.approve({ id: "c1", serverId: "db", serverName: "Database", toolName: "delete", arguments: { id: 7 } })
       expect(decision).toBe("allow")
       return assistantResult("Terminé")
@@ -1887,6 +1892,7 @@ describe("useChat — outils MCP, approbation et annulation", () => {
 
   it("un refus poursuit le tour sans casser le contrat anti-perte", async () => {
     runAssistantTurnMock.mockImplementation(async (input) => {
+      if (!input.tools) throw new Error("Ce scénario exige un catalogue d'outils.")
       expect(await input.tools.approve({ id: "c1", serverId: "db", serverName: "Database", toolName: "delete", arguments: { id: 7 } })).toBe("deny")
       return assistantResult("Action refusée")
     })
@@ -1898,7 +1904,11 @@ describe("useChat — outils MCP, approbation et annulation", () => {
   })
 
   it("interrupt résout l'attente et annule tout le turnId", async () => {
-    runAssistantTurnMock.mockImplementation(async (input) => { await input.tools.approve({ id: "c1", serverId: "db", serverName: "Database", toolName: "delete", arguments: { id: 7 } }); throw new DOMException("aborted", "AbortError") })
+    runAssistantTurnMock.mockImplementation(async (input) => {
+      if (!input.tools) throw new Error("Ce scénario exige un catalogue d'outils.")
+      await input.tools.approve({ id: "c1", serverId: "db", serverName: "Database", toolName: "delete", arguments: { id: 7 } })
+      throw new DOMException("aborted", "AbortError")
+    })
     const { result } = renderHook(() => useChat(modelSelection, runtimeWithTools()))
     const sending = actSend(result.current)
     await waitFor(() => expect(result.current.pendingToolApproval).toBeTruthy())
@@ -1918,6 +1928,7 @@ describe("useChat — outils MCP, approbation et annulation", () => {
       answeredRow,
     ])
     runAssistantTurnMock.mockImplementation(async (input) => {
+      if (!input.tools) throw new Error("Ce scénario exige un catalogue d'outils.")
       expect(await input.tools.approve({ id: "c1", serverId: "db", serverName: "Database", toolName: "delete", arguments: { id: 7 } })).toBe("allow")
       return assistantResult("Régénérée")
     })

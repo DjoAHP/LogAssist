@@ -553,7 +553,6 @@ export function useChat(
             tools
               ? {
                   provider: apiProvider,
-                  request: { messages: [] },
                   context: turnContext,
                   apiKey: activeApiKey,
                   modelId,
@@ -563,7 +562,6 @@ export function useChat(
                 }
               : {
                   provider: apiProvider,
-                  request: { messages: [] },
                   context: turnContext,
                   apiKey: activeApiKey,
                   modelId,
@@ -715,7 +713,6 @@ export function useChat(
           recoveryTools
             ? {
                 provider: apiProvider,
-                request: { messages: [] },
                 context: recoveryContext,
                 apiKey: activeApiKey,
                 modelId,
@@ -725,7 +722,6 @@ export function useChat(
               }
             : {
                 provider: apiProvider,
-                request: { messages: [] },
                 context: recoveryContext,
                 apiKey: activeApiKey,
                 modelId,

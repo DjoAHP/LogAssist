@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { getModelPricing, getTiktokenModel, resolvePricingProvider } from "./pricing"
+import { getModelPricing, resolvePricingProvider } from "./pricing"
 import * as pricingTools from "./pricing"
 
 describe("pricing", () => {
@@ -46,21 +46,12 @@ describe("pricing", () => {
     expect(getModelPricing("Serveur privé", "modele-inconnu")).toBeNull()
   })
 
-  it("conserve un encodeur générique pour un modèle inconnu", () => {
-    expect(getTiktokenModel("Serveur privé", "modele-inconnu")).toBe("cl100k_base")
-  })
-
-  it("résout le tokenizer indépendamment du tarif fournisseur", () => {
-    expect(getTiktokenModel("Serveur privé", "gpt-4o-mini")).toBe("gpt-4o-mini")
-  })
-
   it.each([
     ["gpt-4o-2024-11-20", "gpt-4o"],
     ["gpt-4o-2024-08-06", "gpt-4o"],
     ["gpt-4o-mini-2024-07-18", "gpt-4o-mini"],
-  ] as const)("normalise le snapshot officiel %s pour pricing et tokenizer", (snapshot, alias) => {
+  ] as const)("normalise le snapshot officiel %s pour le pricing", (snapshot, alias) => {
     expect(getModelPricing("openai", snapshot)).toEqual(getModelPricing("openai", alias))
-    expect(getTiktokenModel("Serveur privé", snapshot)).toBe(alias)
   })
 
   it.each([
@@ -72,7 +63,6 @@ describe("pricing", () => {
     "gpt-4o-2024-05-13",
   ])("ne normalise pas un snapshot non répertorié : %s", (modelId) => {
     expect(getModelPricing("openai", modelId)).toBeNull()
-    expect(getTiktokenModel("Serveur privé", modelId)).toBe("cl100k_base")
   })
 
   it.each([

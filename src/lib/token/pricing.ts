@@ -111,19 +111,3 @@ export function getExactTiktokenModel(baseUrl: string, modelId: string): Tiktoke
   if (!isOfficialOpenAiBaseUrl(baseUrl)) return null
   return MODEL_PRICING.openai[normalizeModelId(modelId)]?.tiktokenModel ?? null
 }
-
-/**
- * Retourne le modèle tiktoken à utiliser pour l'encodage.
- */
-export function getTiktokenModel(provider: string, modelId: string): TiktokenModel {
-  const normalizedModelId = normalizeModelId(modelId)
-  const providerPricing = MODEL_PRICING[normalizeProvider(provider)]?.[normalizedModelId]
-  if (providerPricing?.tiktokenModel) return providerPricing.tiktokenModel
-
-  for (const pricing of Object.values(MODEL_PRICING)) {
-    const knownModel = pricing[normalizedModelId]
-    if (knownModel?.tiktokenModel) return knownModel.tiktokenModel
-  }
-
-  return "cl100k_base" as TiktokenModel
-}

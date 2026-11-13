@@ -2774,7 +2774,7 @@ git commit -m "test: couvre les contextes volumineux et privés"
 - Inspect: `src/lib/token/estimate.ts`
 - Inspect: `src/lib/token/pricing.ts`
 
-- [ ] **Step 1: Rechercher les anciens chemins non bornés**
+- [x] **Step 1: Rechercher les anciens chemins non bornés**
 
 Run:
 
@@ -2789,13 +2789,13 @@ Expected final :
 - aucun consommateur actif de `buildChatMessages` ;
 - aucun fallback tiktoken universel dans le préflight.
 
-- [ ] **Step 2: Retirer `request` de compatibilité du contrat TurnRunner**
+- [x] **Step 2: Retirer `request` de compatibilité du contrat TurnRunner**
 
 Quand tous les appels `runAssistantTurn` transmettent `context`, rendre `context`
 obligatoire et supprimer la session passthrough. Mettre à jour les tests pour
 prouver qu’aucun appel direct non préparé n’est possible par le type public.
 
-- [ ] **Step 3: Supprimer le code mort confirmé**
+- [x] **Step 3: Supprimer le code mort confirmé**
 
 Supprimer `contextBuilder.ts` et son test s’ils n’ont plus aucun import. Supprimer
 `getTiktokenModel()` si `rg` confirme qu’il n’a plus de consommateur. Ne supprimer
@@ -2806,7 +2806,7 @@ Après migration de `useChat`, retirer aussi le paramètre `knowledge` et
 attendaient l’injection intégrale. Conserver et tester `buildKnowledgePrompt`, qui
 est désormais l’unique chemin d’injection des passages sélectionnés.
 
-- [ ] **Step 4: Exécuter TypeScript avant commit**
+- [x] **Step 4: Exécuter TypeScript avant commit**
 
 ```bash
 powershell.exe -NoProfile -Command "Set-Location 'C:\dev\LogAssist'; npx tsc --noEmit"
@@ -2814,7 +2814,7 @@ powershell.exe -NoProfile -Command "Set-Location 'C:\dev\LogAssist'; npx tsc --n
 
 Expected: PASS.
 
-- [ ] **Step 5: Exécuter les tests des frontières**
+- [x] **Step 5: Exécuter les tests des frontières**
 
 ```bash
 powershell.exe -NoProfile -Command "Set-Location 'C:\dev\LogAssist'; npx vitest run src/lib/chat/turnRunner.test.ts src/lib/mcp/toolAgent.test.ts src/hooks/useChat.test.tsx"
@@ -2822,7 +2822,7 @@ powershell.exe -NoProfile -Command "Set-Location 'C:\dev\LogAssist'; npx vitest 
 
 Expected: PASS.
 
-- [ ] **Step 6: Committer le nettoyage**
+- [x] **Step 6: Committer le nettoyage**
 
 ```bash
 git add -u src/lib/chat src/lib/token src/hooks/useChat.ts src/lib/prompts
