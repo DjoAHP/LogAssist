@@ -1,5 +1,11 @@
 export const fr = {
   app: { title: "LogAssist", subtitle: "Assistant IA" },
+  generalSettings: {
+    open: "Paramètres généraux",
+    title: "Paramètres généraux",
+    close: "Fermer",
+    categories: { lock: "Mot de passe" },
+  },
   lock: {
     title: "LogAssist verrouillé",
     subtitle: "Entrez votre mot de passe pour accéder à l'application.",
