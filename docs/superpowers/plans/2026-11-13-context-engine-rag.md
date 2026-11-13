@@ -1274,7 +1274,7 @@ git commit -m "feat: recherche les passages de connaissance pertinents"
 - Modify: `src/lib/context/types.ts`
 - Modify: `src/lib/context/index.ts`
 
-- [ ] **Step 1: Écrire les tests rouges de regroupement et sélection**
+- [x] **Step 1: Écrire les tests rouges de regroupement et sélection**
 
 Créer `src/lib/context/historySelector.test.ts` :
 
@@ -1320,7 +1320,7 @@ describe("selectHistory", () => {
 })
 ```
 
-- [ ] **Step 2: Exécuter le test et confirmer l’échec**
+- [x] **Step 2: Exécuter le test et confirmer l’échec**
 
 ```bash
 powershell.exe -NoProfile -Command "Set-Location 'C:\dev\LogAssist'; npx vitest run src/lib/context/historySelector.test.ts"
@@ -1328,7 +1328,7 @@ powershell.exe -NoProfile -Command "Set-Location 'C:\dev\LogAssist'; npx vitest 
 
 Expected: module absent.
 
-- [ ] **Step 3: Implémenter le regroupement en tours**
+- [x] **Step 3: Implémenter le regroupement en tours**
 
 Définir :
 
@@ -1352,7 +1352,7 @@ jusqu’au prochain utilisateur. Un assistant orphelin forme un candidat autonom
 de priorité minimale afin de rester tolérant aux anciennes données, sans être
 fusionné à une question incorrecte.
 
-- [ ] **Step 4: Implémenter récence et pertinence**
+- [x] **Step 4: Implémenter récence et pertinence**
 
 Réutiliser la tokenisation lexicale exportée par `knowledgeRetriever.ts`.
 
@@ -1380,7 +1380,7 @@ export function selectHistory(input: {
 
 Valeur par défaut : `recentTurns = 2`.
 
-- [ ] **Step 5: Relancer le test ciblé**
+- [x] **Step 5: Relancer le test ciblé**
 
 ```bash
 powershell.exe -NoProfile -Command "Set-Location 'C:\dev\LogAssist'; npx vitest run src/lib/context/historySelector.test.ts"
@@ -1388,7 +1388,7 @@ powershell.exe -NoProfile -Command "Set-Location 'C:\dev\LogAssist'; npx vitest 
 
 Expected: PASS.
 
-- [ ] **Step 6: Committer le sélecteur d’historique**
+- [x] **Step 6: Committer le sélecteur d’historique**
 
 ```bash
 git add src/lib/context/historySelector.ts src/lib/context/historySelector.test.ts src/lib/context/types.ts src/lib/context/index.ts

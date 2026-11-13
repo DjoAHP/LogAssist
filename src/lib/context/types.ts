@@ -46,3 +46,16 @@ export interface KnowledgeChunk {
 export interface RankedKnowledgeChunk extends KnowledgeChunk {
   score: number
 }
+
+export interface ContextHistoryMessage {
+  id: string
+  role: "user" | "assistant"
+  content: string
+}
+
+export interface HistorySelection {
+  messages: ContextHistoryMessage[]
+  selectedTurns: number
+  omittedTurns: number
+  tokens: number
+}
