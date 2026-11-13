@@ -1092,7 +1092,7 @@ git commit -m "feat: découpe les connaissances par sections Markdown"
 - Modify: `src/lib/context/types.ts`
 - Modify: `src/lib/context/index.ts`
 
-- [ ] **Step 1: Écrire les tests rouges du classement lexical**
+- [x] **Step 1: Écrire les tests rouges du classement lexical**
 
 Créer `src/lib/context/knowledgeRetriever.test.ts` :
 
@@ -1136,7 +1136,7 @@ describe("knowledgeRetriever", () => {
 })
 ```
 
-- [ ] **Step 2: Écrire les tests rouges de la sélection globale/par conversation**
+- [x] **Step 2: Écrire les tests rouges de la sélection globale/par conversation**
 
 Créer `src/lib/chat/knowledgeSelection.test.ts` avec repositories injectés :
 
@@ -1165,7 +1165,7 @@ it("remplace la globale par l’override non vide et exclut un document désacti
 })
 ```
 
-- [ ] **Step 3: Exécuter les tests et confirmer l’échec**
+- [x] **Step 3: Exécuter les tests et confirmer l’échec**
 
 ```bash
 powershell.exe -NoProfile -Command "Set-Location 'C:\dev\LogAssist'; npx vitest run src/lib/context/knowledgeRetriever.test.ts src/lib/chat/knowledgeSelection.test.ts"
@@ -1173,7 +1173,7 @@ powershell.exe -NoProfile -Command "Set-Location 'C:\dev\LogAssist'; npx vitest 
 
 Expected: modules absents.
 
-- [ ] **Step 4: Implémenter la tokenisation lexicale et BM25**
+- [x] **Step 4: Implémenter la tokenisation lexicale et BM25**
 
 Normaliser avec `value.normalize("NFKC").toLocaleLowerCase("fr")`, remplacer les
 séparateurs `_`, `-`, `/` par des espaces, puis extraire
@@ -1215,7 +1215,7 @@ contient jamais de document non fourni à l’appel courant dans les résultats.
 de prouver la réutilisation du cache dans les tests volumineux sans exposer de
 compteur dans le code de production.
 
-- [ ] **Step 5: Implémenter la sélection éligible unique**
+- [x] **Step 5: Implémenter la sélection éligible unique**
 
 Dans `src/lib/chat/knowledgeSelection.ts` :
 
@@ -1249,7 +1249,7 @@ export async function loadEligibleKnowledge(
 }
 ```
 
-- [ ] **Step 6: Relancer les tests ciblés**
+- [x] **Step 6: Relancer les tests ciblés**
 
 ```bash
 powershell.exe -NoProfile -Command "Set-Location 'C:\dev\LogAssist'; npx vitest run src/lib/context/knowledgeRetriever.test.ts src/lib/chat/knowledgeSelection.test.ts"
@@ -1257,7 +1257,7 @@ powershell.exe -NoProfile -Command "Set-Location 'C:\dev\LogAssist'; npx vitest 
 
 Expected: PASS.
 
-- [ ] **Step 7: Committer le RAG lexical**
+- [x] **Step 7: Committer le RAG lexical**
 
 ```bash
 git add src/lib/context/knowledgeRetriever.ts src/lib/context/knowledgeRetriever.test.ts src/lib/chat/knowledgeSelection.ts src/lib/chat/knowledgeSelection.test.ts src/lib/context/types.ts src/lib/context/index.ts

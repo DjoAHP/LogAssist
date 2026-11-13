@@ -42,3 +42,7 @@ export interface KnowledgeChunk {
   content: string
   tokenEstimate: number
 }
+
+export interface RankedKnowledgeChunk extends KnowledgeChunk {
+  score: number
+}
