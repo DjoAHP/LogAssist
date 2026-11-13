@@ -2070,7 +2070,7 @@ git commit -m "feat: contrôle chaque tour direct et MCP"
 - Modify: `src/lib/context/modelCapabilities.ts`
 - Modify: `src/lib/context/tokenEstimator.ts`
 
-- [ ] **Step 1: Écrire les tests rouges du pont de préparation**
+- [x] **Step 1: Écrire les tests rouges du pont de préparation**
 
 Créer `prepareConversationContext.test.ts` avec dépendances injectées. Cas global :
 
@@ -2135,7 +2135,7 @@ it("prépare une session avec la dernière ligne user comme message courant", as
 Ajouter un cas où la dernière ligne n’est pas `user` et attendre une erreur
 interne avant création de session.
 
-- [ ] **Step 2: Exécuter le test et confirmer l’échec**
+- [x] **Step 2: Exécuter le test et confirmer l’échec**
 
 ```bash
 powershell.exe -NoProfile -Command "Set-Location 'C:\dev\LogAssist'; npx vitest run src/lib/chat/prepareConversationContext.test.ts"
@@ -2143,7 +2143,7 @@ powershell.exe -NoProfile -Command "Set-Location 'C:\dev\LogAssist'; npx vitest 
 
 Expected: module absent.
 
-- [ ] **Step 3: Implémenter le pont**
+- [x] **Step 3: Implémenter le pont**
 
 Signature publique :
 
@@ -2176,7 +2176,7 @@ Séquence :
 Si la création de session échoue après création de l’estimateur, appeler
 `estimator.dispose()` avant de propager l’erreur.
 
-- [ ] **Step 4: Relancer le test ciblé**
+- [x] **Step 4: Relancer le test ciblé**
 
 ```bash
 powershell.exe -NoProfile -Command "Set-Location 'C:\dev\LogAssist'; npx vitest run src/lib/chat/prepareConversationContext.test.ts"
@@ -2184,7 +2184,7 @@ powershell.exe -NoProfile -Command "Set-Location 'C:\dev\LogAssist'; npx vitest 
 
 Expected: PASS.
 
-- [ ] **Step 5: Committer le pont de préparation**
+- [x] **Step 5: Committer le pont de préparation**
 
 ```bash
 git add src/lib/chat/prepareConversationContext.ts src/lib/chat/prepareConversationContext.test.ts src/lib/prompts/compose.ts src/lib/context/modelCapabilities.ts src/lib/context/tokenEstimator.ts
