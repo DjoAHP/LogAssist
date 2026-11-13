@@ -2703,7 +2703,7 @@ git commit -m "feat: permet de corriger la fenêtre d un modèle"
 - Modify: `src/hooks/useChat.test.tsx`
 - Modify: `src/console-log.guard.test.ts`
 
-- [ ] **Step 1: Ajouter une bibliothèque synthétique volumineuse**
+- [x] **Step 1: Ajouter une bibliothèque synthétique volumineuse**
 
 Construire 100 documents de 40 sections chacun, avec un seul passage contenant la
 sentinelle `oscillateur_polyphonique`. Attendre :
@@ -2718,7 +2718,7 @@ Ne pas imposer un seuil temporel fragile dans Vitest. Vérifier plutôt que le
 deuxième appel avec les mêmes documents réutilise le cache au moyen d’un compteur
 de chunking injecté dans le retriever.
 
-- [ ] **Step 2: Ajouter une conversation de 500 messages**
+- [x] **Step 2: Ajouter une conversation de 500 messages**
 
 Préparer 250 tours, placer une ancienne erreur `CUDA out of memory` et poser une
 question finale sur CUDA. Attendre :
@@ -2730,7 +2730,7 @@ expect(round.stats.omitted.historyTurns).toBeGreaterThan(0)
 expect(round.stats.totalWithReserve).toBeLessThanOrEqual(profile.contextWindowTokens)
 ```
 
-- [ ] **Step 3: Ajouter images, outils et résultats MCP dans le même budget**
+- [x] **Step 3: Ajouter images, outils et résultats MCP dans le même budget**
 
 Créer une fenêtre 8 192, deux images 1920×1080, quatre outils aux schémas longs et
 un résultat MCP de 100 000 caractères. Attendre soit un plan inférieur ou égal à
@@ -2738,14 +2738,14 @@ un résultat MCP de 100 000 caractères. Attendre soit un plan inférieur ou ég
 `provider.runTurn` ne doit jamais recevoir une requête estimée au-dessus de la
 fenêtre.
 
-- [ ] **Step 4: Ajouter les sentinelles de confidentialité**
+- [x] **Step 4: Ajouter les sentinelles de confidentialité**
 
 Utiliser quatre valeurs distinctes : clé LLM, Base64, contenu Markdown privé et
 résultat MCP privé. Sérialiser tous les appels à `logger.debug` et attendre
 l’absence des quatre valeurs, tout en vérifiant la présence des IDs, compteurs et
 raisons d’omission.
 
-- [ ] **Step 5: Exécuter les tests de contexte et chat**
+- [x] **Step 5: Exécuter les tests de contexte et chat**
 
 ```bash
 powershell.exe -NoProfile -Command "Set-Location 'C:\dev\LogAssist'; npx vitest run src/lib/context src/lib/mcp/toolAgent.test.ts src/hooks/useChat.test.tsx src/console-log.guard.test.ts"
@@ -2753,7 +2753,7 @@ powershell.exe -NoProfile -Command "Set-Location 'C:\dev\LogAssist'; npx vitest 
 
 Expected: PASS.
 
-- [ ] **Step 6: Committer les régressions**
+- [x] **Step 6: Committer les régressions**
 
 ```bash
 git add src/lib/context src/lib/mcp/toolAgent.test.ts src/hooks/useChat.test.tsx src/console-log.guard.test.ts

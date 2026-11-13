@@ -103,6 +103,76 @@ describe("createContextSession", () => {
     expect(JSON.stringify({ documents, history })).toBe(original)
   })
 
+  it("retrouve une ancienne erreur pertinente dans une conversation de 500 messages", () => {
+    const profile = fallbackProfile
+    const cudaUser = "TOUR_CUDA_USER_ASSOCIE : analyse l’incident historique numéro dix-sept."
+    const cudaAssistant = "TOUR_CUDA_ASSISTANT : CUDA out of memory pendant le rendu."
+    const penultimateUser = "TOUR_RECENT_248_USER : avant-dernière question distincte."
+    const penultimateAssistant = "TOUR_RECENT_248_ASSISTANT : avant-dernière réponse distincte."
+    const latestUser = "TOUR_RECENT_249_USER : dernière question historique distincte."
+    const latestAssistant = "TOUR_RECENT_249_ASSISTANT : dernière réponse historique distincte."
+    const distinctiveTurns = new Map<number, { user: string; assistant: string }>([
+      [17, { user: cudaUser, assistant: cudaAssistant }],
+      [248, { user: penultimateUser, assistant: penultimateAssistant }],
+      [249, { user: latestUser, assistant: latestAssistant }],
+    ])
+    const history = Array.from({ length: 250 }, (_, turnIndex) => {
+      const distinctive = distinctiveTurns.get(turnIndex)
+      return [
+        {
+          id: `user-${turnIndex}`,
+          role: "user" as const,
+          content: distinctive?.user ??
+            `Question historique ${turnIndex} sur un calcul graphique sans rapport.`,
+        },
+        {
+          id: `assistant-${turnIndex}`,
+          role: "assistant" as const,
+          content: distinctive?.assistant ??
+            `Réponse historique ${turnIndex} avec plusieurs détails de diagnostic.`,
+        },
+      ]
+    }).flat()
+    const session = createContextSession({
+      modelId: "qwen",
+      profile,
+      estimator: createEstimator(),
+      baseSystem: "SYSTEM",
+      documents: [],
+      history,
+      currentUser: {
+        content: "Pourquoi CUDA échoue-t-il encore sur ce rendu ?",
+        images: [],
+      },
+      retrievalQuery: "Pourquoi CUDA échoue-t-il encore sur ce rendu ?",
+    })
+
+    const round = session.prepareRound({ additionalMessages: [], tools: [] })
+    const lastMessage = round.request.messages[round.request.messages.length - 1]
+    const selectedMessages = round.request.messages.map((message) => ({
+      role: message.role,
+      content: message.content,
+    }))
+
+    expect(history).toHaveLength(500)
+    expect(lastMessage?.content).toContain("CUDA")
+    expect(selectedMessages).toEqual(expect.arrayContaining([
+      { role: "user", content: penultimateUser },
+      { role: "assistant", content: penultimateAssistant },
+      { role: "user", content: latestUser },
+      { role: "assistant", content: latestAssistant },
+    ]))
+    expect(selectedMessages).toEqual(expect.arrayContaining([
+      { role: "user", content: cudaUser },
+      { role: "assistant", content: cudaAssistant },
+    ]))
+    expect(round.request.messages.some((message) =>
+      message.content.includes("CUDA out of memory"),
+    )).toBe(true)
+    expect(round.stats.omitted.historyTurns).toBeGreaterThan(0)
+    expect(round.stats.totalWithReserve).toBeLessThanOrEqual(profile.contextWindowTokens)
+  })
+
   it("tronque un résultat MCP par segments et garde son enveloppe", () => {
     const session = createContextSession({
       modelId: "qwen",

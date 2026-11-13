@@ -3,8 +3,16 @@ import { describe, expect, it, vi } from "vitest"
 import { buildToolDefinitions, firstRoundChoice, firstRoundTools, runToolAgent } from "@/lib/mcp/toolAgent"
 import type { McpAgentTool, McpToolResult, WebSource } from "@/lib/mcp/types"
 import type { IProvider } from "@/lib/ai/openai-compat"
-import type { TokenUsage, TurnResult, ToolCall, ChatRequest, TurnCallbacks } from "@/lib/ai/types"
+import type {
+  TokenUsage,
+  TurnResult,
+  ToolCall,
+  ChatRequest,
+  TurnCallbacks,
+  ToolDefinition,
+} from "@/lib/ai/types"
 import type { ContextAdditionalMessage, ContextSession } from "@/lib/context"
+import { createContextSession, createTokenEstimator } from "@/lib/context"
 import { ApiError } from "@/lib/ai/errors"
 
 describe("buildToolDefinitions", () => {
@@ -292,6 +300,174 @@ function createHarness(options: {
 }
 
 describe("runToolAgent", () => {
+  it("ne transmet jamais au fournisseur images, outils et résultat MCP au-delà de la fenêtre", async () => {
+    const contextWindowTokens = 8_192
+    const profile = {
+      contextWindowTokens,
+      maxOutputTokens: 1_024,
+      source: "manual" as const,
+      tokenizer: "conservative" as const,
+    }
+    const estimator = createTokenEstimator({
+      baseUrl: "https://custom.example.test/v1",
+      modelId: "vision-model",
+    })
+    const tools = Array.from({ length: 4 }, (_, index): McpAgentTool => ({
+      ...genericTool(`server-${index}`, `search_${index}`, `server_${index}__search`, "auto"),
+      description: `Recherche avancée ${index}. ${"description longue ".repeat(20)}`,
+      inputSchema: {
+        type: "object",
+        properties: {
+          query: {
+            type: "string",
+            description: `Requête détaillée ${index}. ${"contrainte ".repeat(30)}`,
+          },
+          filters: {
+            type: "array",
+            items: { type: "string" },
+            description: `Filtres facultatifs ${index}. ${"précision ".repeat(20)}`,
+          },
+        },
+        required: ["query"],
+      },
+    }))
+    const context = createContextSession({
+      modelId: "vision-model",
+      profile,
+      estimator,
+      baseSystem: "SYSTEM",
+      documents: [],
+      history: [],
+      currentUser: {
+        content: "Analyse ces deux captures avec les outils disponibles.",
+        images: [
+          { base64: "IMAGE_ONE", mimeType: "image/png", width: 1920, height: 1080 },
+          { base64: "IMAGE_TWO", mimeType: "image/png", width: 1920, height: 1080 },
+        ],
+      },
+      retrievalQuery: "Analyse ces deux captures",
+    })
+    const safetyMargin = Math.max(128, Math.ceil(contextWindowTokens * 0.08))
+    const providerCallFacts: Array<{
+      imageCount: number
+      imageDimensions: Array<{ width: number | null; height: number | null }>
+      toolCount: number
+      hasMcpEnvelope: boolean
+      hasTruncationMarker: boolean
+      estimatedTotal: number
+    }> = []
+    const runTurn = vi.fn(async (
+      request: ChatRequest,
+      _apiKey: string,
+      _modelId: string,
+      options: { tools?: ToolDefinition[] },
+    ) => {
+      const images = request.messages.flatMap((message) => message.images ?? [])
+      const messageContents = request.messages.map((message) => message.content).join("\n")
+      const estimatedTotal = estimator.countMessages(request.messages) +
+        estimator.countTools(options.tools ?? []) +
+        (request.maxOutputTokens ?? 0) +
+        safetyMargin
+      providerCallFacts.push({
+        imageCount: images.length,
+        imageDimensions: images.map((image) => ({
+          width: image.width ?? null,
+          height: image.height ?? null,
+        })),
+        toolCount: options.tools?.length ?? 0,
+        hasMcpEnvelope: messageContents.includes("<external_mcp_result"),
+        hasTruncationMarker: messageContents.includes(
+          "Résultat tronqué pour respecter la fenêtre de contexte",
+        ),
+        estimatedTotal,
+      })
+      return providerCallFacts.length === 1
+        ? turn("", [call("large-result", tools[0].llmName, { query: "synthèse" })])
+        : turn("Réponse bornée")
+    })
+    const privateMcpResult = "MCP_RESULT".padEnd(100_000, "x")
+    let servedMcpCharacters = 0
+    const callTool = vi.fn(async () => {
+      servedMcpCharacters = privateMcpResult.length
+      return result(privateMcpResult)
+    })
+    let caught: unknown
+
+    try {
+      await runToolAgent({
+        provider: { runTurn } as unknown as IProvider,
+        toolClient: { call: callTool },
+        tools,
+        webIntent: "auto",
+        context,
+        apiKey: "LLM_KEY",
+        modelId: "vision-model",
+        callbacks: {},
+        signal: new AbortController().signal,
+        turnId: "turn-large",
+        compatibilityKey: "provider/vision-model",
+        unsupportedTools: new Set<string>(),
+        approve: vi.fn().mockResolvedValue("allow"),
+      })
+    } catch (error) {
+      caught = error
+    } finally {
+      context.dispose()
+    }
+
+    const firstCall = providerCallFacts[0]
+    const firstCallFacts = {
+      imageCount: firstCall?.imageCount,
+      imageDimensions: firstCall?.imageDimensions,
+      toolCount: firstCall?.toolCount,
+    }
+    const toolCallFacts = {
+      executionCount: callTool.mock.calls.length,
+      servedMcpCharacters,
+    }
+    const allProviderCallsWithinBudget = providerCallFacts.every(
+      (callFacts) => callFacts.estimatedTotal <= contextWindowTokens,
+    )
+
+    expect(firstCallFacts).toEqual({
+      imageCount: 2,
+      imageDimensions: [
+        { width: 1920, height: 1080 },
+        { width: 1920, height: 1080 },
+      ],
+      toolCount: 4,
+    })
+    expect(toolCallFacts).toEqual({
+      executionCount: 1,
+      servedMcpCharacters: 100_000,
+    })
+    if (caught !== undefined) {
+      const localRejectionFacts = {
+        isApiError: caught instanceof ApiError,
+        kind: caught instanceof ApiError ? caught.kind : "not_api_error",
+        providerCallCount: providerCallFacts.length,
+      }
+      expect(localRejectionFacts).toEqual({
+        isApiError: true,
+        kind: "context_length",
+        providerCallCount: 1,
+      })
+    } else {
+      const secondCall = providerCallFacts[1]
+      const successFacts = {
+        providerCallCount: providerCallFacts.length,
+        hasMcpEnvelope: secondCall?.hasMcpEnvelope,
+        hasTruncationMarker: secondCall?.hasTruncationMarker,
+      }
+      expect(successFacts).toEqual({
+        providerCallCount: 2,
+        hasMcpEnvelope: true,
+        hasTruncationMarker: true,
+      })
+    }
+    expect(allProviderCallsWithinBudget).toBe(true)
+  })
+
   it("route deux outils homonymes par alias sans ambiguïté", async () => {
     const harness = createHarness({
       tools: [genericTool("github", "search", "github__search"), genericTool("docs", "search", "docs__search")],

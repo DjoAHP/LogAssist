@@ -54,6 +54,35 @@ describe("createKnowledgeRetriever", () => {
     expect(chunkDocument).toHaveBeenCalledTimes(2)
   })
 
+  it("retrouve un passage unique dans 4 000 sections et réutilise leur cache", () => {
+    const chunkDocument = vi.fn(chunkMarkdown)
+    const retriever = createKnowledgeRetriever({
+      countTokens: (text) => Math.ceil(text.length / 4),
+      chunkDocument,
+    })
+    const largeLibrary = Array.from({ length: 100 }, (_, documentIndex) => ({
+      id: `doc-${documentIndex}`,
+      name: `Document ${documentIndex}`,
+      sortOrder: documentIndex,
+      content: Array.from({ length: 40 }, (_, sectionIndex) => [
+        `## Section ${sectionIndex}`,
+        documentIndex === 73 && sectionIndex === 19
+          ? "Le paramètre oscillateur_polyphonique active la synthèse recherchée."
+          : `Contenu synthétique du document ${documentIndex}, section ${sectionIndex}.`,
+      ].join("\n")).join("\n\n"),
+    }))
+
+    const ranked = retriever.search("oscillateur_polyphonique", largeLibrary)
+
+    expect(ranked[0].content).toContain("oscillateur_polyphonique")
+    expect(ranked[0].documentId).toBe("doc-73")
+    expect(chunkDocument).toHaveBeenCalledTimes(100)
+
+    const cached = retriever.search("oscillateur_polyphonique", largeLibrary)
+    expect(cached[0].documentId).toBe("doc-73")
+    expect(chunkDocument).toHaveBeenCalledTimes(100)
+  })
+
   it("reconstruit les chunks après un clear explicite", () => {
     const chunkDocument = vi.fn(chunkMarkdown)
     const retriever = createKnowledgeRetriever({

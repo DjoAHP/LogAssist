@@ -6,7 +6,12 @@ import type { MessageRow } from "@/lib/db/messages"
 import type { ProviderConfig } from "@/lib/ai/types"
 import type { McpRuntimeSnapshot } from "@/lib/mcp/runtime"
 import type { AssistantTurnResult } from "@/lib/chat/turnRunner"
-import type { ContextSession } from "@/lib/context"
+import {
+  createContextSession,
+  createTokenEstimator,
+  type ContextSession,
+} from "@/lib/context"
+import type { PrepareConversationContextInput } from "@/lib/chat/prepareConversationContext"
 import { ApiError } from "@/lib/ai/errors"
 import { snapshot, genericTool, tinyfishTool } from "@/test/mcpFixtures"
 
@@ -14,6 +19,7 @@ const runTurnMock = vi.hoisted(() => vi.fn())
 const systemPromptMock = vi.hoisted(() => vi.fn())
 const tinyfishCallMock = vi.hoisted(() => vi.fn())
 const tinyfishCancelMock = vi.hoisted(() => vi.fn())
+const loggerDebugMock = vi.hoisted(() => vi.fn())
 const loggerErrorMock = vi.hoisted(() => vi.fn())
 const resolvePricingProviderMock = vi.hoisted(() => vi.fn())
 const estimateTurnMetricsMock = vi.hoisted(() => vi.fn(() => ({
@@ -58,6 +64,10 @@ const runtimeWithWeb = (): McpRuntimeSnapshot => snapshot({
   webAccess: { enabled: true, configured: true },
 })
 
+const runtimeWithAutomaticTool = (): McpRuntimeSnapshot => snapshot({
+  activeTools: [genericTool("docs", "search", "docs__search", "auto")],
+})
+
 const assistantResult = (text: string): AssistantTurnResult => ({
   text, sources: [], media: [], firstTokenMs: 5, totalMs: 20,
 })
@@ -98,7 +108,10 @@ vi.mock("@/lib/db/messageMedia", () => ({
 vi.mock("@/lib/db/images", () => ({ images: { create: vi.fn(), get: vi.fn(), remove: vi.fn() } }))
 vi.mock("@/lib/db/conversations", () => ({ conversations: { touch: vi.fn(), create: vi.fn(), rename: vi.fn(), remove: vi.fn() } }))
 vi.mock("@/lib/secrets/service", () => ({ secrets: { set: vi.fn(), get: vi.fn(), remove: vi.fn() } }))
-vi.mock("@/lib/prompts/compose", () => ({ buildSystemPrompt: systemPromptMock }))
+vi.mock("@/lib/prompts/compose", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/lib/prompts/compose")>(),
+  buildSystemPrompt: systemPromptMock,
+}))
 vi.mock("@/lib/prompts/store", () => ({
   loadPromptSettings: vi.fn().mockResolvedValue({ general: "GEN", profile: "PROF" }),
 }))
@@ -123,7 +136,7 @@ vi.mock("@/lib/mcp/client", () => ({
   mcp: { callTool: mcpCallToolMock, cancelTurn: mcpCancelTurnMock },
 }))
 vi.mock("@/lib/logger", () => ({
-  logger: { debug: vi.fn(), error: loggerErrorMock },
+  logger: { debug: loggerDebugMock, error: loggerErrorMock },
 }))
 vi.mock("@/lib/chat/turnRunner", () => ({ runAssistantTurn: runAssistantTurnMock }))
 vi.mock("@/lib/chat/prepareConversationContext", () => ({
@@ -131,6 +144,8 @@ vi.mock("@/lib/chat/prepareConversationContext", () => ({
 }))
 vi.mock("@/lib/context/modelCapabilities", () => ({
   invalidateModelContextProfile: invalidateModelContextProfileMock,
+  getVerifiedContextWindow: vi.fn(() => null),
+  resolveModelContextProfile: vi.fn(),
 }))
 
 import { messages as messagesDb } from "@/lib/db/messages"
@@ -186,6 +201,7 @@ beforeEach(() => {
   metricsFromProviderUsageMock.mockReset()
   tinyfishCallMock.mockReset()
   tinyfishCancelMock.mockReset()
+  loggerDebugMock.mockReset()
   loggerErrorMock.mockReset()
   resolvePricingProviderMock.mockReset().mockReturnValue(null)
   runAssistantTurnMock.mockReset()
@@ -288,6 +304,156 @@ describe("useChat.send — contract anti-perte", () => {
     }))
     expect(runAssistantTurnMock).toHaveBeenCalledWith(expect.objectContaining({ context }))
     expect(context.dispose).toHaveBeenCalledTimes(1)
+  })
+
+  it("journalise seulement les identifiants et compteurs sûrs sur un tour privé avec MCP", async () => {
+    const privateValues = {
+      llmKey: "LLM_KEY_PRIVATE_71d4",
+      base64: "BASE64_PRIVATE_28af",
+      markdown: "MARKDOWN_PRIVATE_93ce",
+      mcpResult: "MCP_RESULT_PRIVATE_46b2",
+    }
+    const actualContext = await vi.importActual<
+      typeof import("@/lib/chat/prepareConversationContext")
+    >("@/lib/chat/prepareConversationContext")
+    const actualRunner = await vi.importActual<
+      typeof import("@/lib/chat/turnRunner")
+    >("@/lib/chat/turnRunner")
+    let persistedUserContent = ""
+    vi.mocked(messagesDb.insert).mockImplementation(async (row) => {
+      if (row.role === "user") {
+        persistedUserContent = row.content
+        return "user-private"
+      }
+      return "assistant-private"
+    })
+    vi.mocked(messagesDb.listByConversation).mockImplementation(async () =>
+      persistedUserContent
+        ? [messageRow({
+            id: "user-private",
+            role: "user",
+            content: persistedUserContent,
+          })]
+        : [],
+    )
+    vi.mocked(secrets.get).mockResolvedValueOnce(privateValues.llmKey)
+    prepareConversationContextMock.mockImplementationOnce(
+      (input: PrepareConversationContextInput) => actualContext.prepareConversationContext(input, {
+        loadPromptSettings: vi.fn().mockResolvedValue({ general: "SYSTEM", profile: "" }),
+        loadKnowledge: vi.fn().mockResolvedValue([{
+          id: "knowledge-safe-id",
+          name: "Document interne",
+          content: `# Référence\n${privateValues.markdown}`,
+          enabled: 1,
+          sort_order: 0,
+          created_at: "2026-11-13 00:00:00",
+        }]),
+        resolveProfile: vi.fn().mockResolvedValue({
+          contextWindowTokens: 8_192,
+          maxOutputTokens: 1_024,
+          source: "manual",
+          tokenizer: "conservative",
+        }),
+        createEstimator: ({ baseUrl, modelId }) => createTokenEstimator({ baseUrl, modelId }),
+        createSession: createContextSession,
+      }),
+    )
+    runAssistantTurnMock.mockImplementationOnce((input) => actualRunner.runAssistantTurn(input))
+    runTurnMock
+      .mockResolvedValueOnce({
+        text: "",
+        toolCalls: [{ id: "private-call", name: "docs__search", arguments: { query: "référence" } }],
+        firstTokenMs: 2,
+        totalMs: 5,
+      })
+      .mockResolvedValueOnce({
+        text: "Réponse privée traitée sans journaliser les données.",
+        toolCalls: [],
+        firstTokenMs: 3,
+        totalMs: 8,
+      })
+    mcpCallToolMock.mockResolvedValueOnce({
+      content: privateValues.mcpResult.padEnd(100_000, "x"),
+      media: [],
+      resourceLinks: [],
+      sources: [],
+      isError: false,
+    })
+    const attachments: Attachment[] = [
+      {
+        id: "private-markdown",
+        kind: "text",
+        base64: "",
+        mimeType: "text/markdown",
+        name: "interne.md",
+        text: privateValues.markdown,
+      },
+      {
+        id: "private-image",
+        kind: "image",
+        base64: privateValues.base64,
+        mimeType: "image/png",
+        name: "capture.png",
+        width: 1920,
+        height: 1080,
+      },
+    ]
+    const { result } = renderHook(() => useChat(modelSelection, runtimeWithAutomaticTool()))
+
+    await act(async () => {
+      expect(await result.current.send("conv-1", "Analyse la référence", attachments)).toBe(true)
+    })
+
+    const serializedProviderCalls = JSON.stringify(runTurnMock.mock.calls)
+    const serializedLogs = JSON.stringify(loggerDebugMock.mock.calls)
+    const observedProviderLabels = Object.entries(privateValues)
+      .filter(([, privateValue]) => serializedProviderCalls.includes(privateValue))
+      .map(([label]) => label)
+    const leakedLogLabels = Object.entries(privateValues)
+      .filter(([, privateValue]) => serializedLogs.includes(privateValue))
+      .map(([label]) => label)
+    type SafeDiagnosticProbe = {
+      context?: unknown
+      modelId?: unknown
+      selected?: { knowledge?: Array<Record<string, unknown>> }
+      tokens?: Record<string, unknown>
+      omitted?: { mcpSegments?: unknown; reasons?: unknown }
+    }
+    const diagnostics = loggerDebugMock.mock.calls
+      .map(([diagnostic]) => diagnostic as SafeDiagnosticProbe)
+    const diagnosticFacts = {
+      callCount: diagnostics.length,
+      allContextPlan: diagnostics.every((diagnostic) => diagnostic.context === "context.plan"),
+      hasExpectedModel: diagnostics.some((diagnostic) => diagnostic.modelId === "m1"),
+      hasKnowledgeMetadata: diagnostics.some((diagnostic) =>
+        diagnostic.selected?.knowledge?.some((chunk) =>
+          chunk.documentId === "knowledge-safe-id" &&
+          typeof chunk.fingerprint === "string" &&
+          typeof chunk.chunkIndex === "number",
+        ) === true,
+      ),
+      hasTokenCounters: diagnostics.some((diagnostic) =>
+        typeof diagnostic.tokens?.input === "number" &&
+        typeof diagnostic.tokens?.totalWithReserve === "number",
+      ),
+      hasMcpOmission: diagnostics.some((diagnostic) =>
+        typeof diagnostic.omitted?.mcpSegments === "number" &&
+        diagnostic.omitted.mcpSegments > 0 &&
+        Array.isArray(diagnostic.omitted.reasons) &&
+        diagnostic.omitted.reasons.includes("budget_mcp"),
+      ),
+    }
+
+    expect(observedProviderLabels).toEqual(["llmKey", "base64", "markdown", "mcpResult"])
+    expect(leakedLogLabels).toEqual([])
+    expect(diagnosticFacts).toEqual({
+      callCount: 2,
+      allContextPlan: true,
+      hasExpectedModel: true,
+      hasKnowledgeMetadata: true,
+      hasTokenCounters: true,
+      hasMcpOmission: true,
+    })
   })
 
   it("persiste une erreur de contexte et retourne true après l’insert user", async () => {
