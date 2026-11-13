@@ -7,10 +7,6 @@ import {
   type ApiError,
 } from "@/lib/ai/errors"
 import type { ApiErrorKind, ProviderConfig, ChatMessage } from "@/lib/ai/types"
-import { buildSystemPrompt } from "@/lib/prompts/compose"
-import { loadPromptSettings } from "@/lib/prompts/store"
-import { knowledge as knowledgeDb } from "@/lib/db/knowledge"
-import { conversationKnowledge } from "@/lib/db/conversationKnowledge"
 import { messages as messagesDb, type MessageRow } from "@/lib/db/messages"
 import { messageMedia as messageMediaDb, type MessageMediaInsert } from "@/lib/db/messageMedia"
 import { images as imagesDb } from "@/lib/db/images"
@@ -25,7 +21,6 @@ import type {
   WebSource,
   WebStatus,
 } from "@/lib/mcp/types"
-import { buildChatMessages } from "@/lib/chat/contextBuilder"
 import { prepareConversationContext } from "@/lib/chat/prepareConversationContext"
 import { createRecoveryPlan, type RecoveryMode } from "@/lib/chat/recoveryPolicy"
 import { runAssistantTurn, type AssistantTurnResult } from "@/lib/chat/turnRunner"
@@ -33,7 +28,6 @@ import { invalidateModelContextProfile } from "@/lib/context/modelCapabilities"
 import type { ContextSession } from "@/lib/context"
 import type { ToolMedia } from "@/lib/mcp/toolAgent"
 import {
-  estimateTurnMetrics,
   metricsFromProviderUsage,
   resolvePricingProvider,
   type TurnMetrics,
@@ -646,6 +640,7 @@ export function useChat(
       abortRef.current = controller
       let activeApiKey = ""
       let recoveryAcc = ""
+      let recoveryContext: ContextSession | null = null
       const safeRecoveryError = (error: unknown) =>
         safeErrorMessage(error, [activeApiKey])
       const upsertTarget = (patch: Partial<ChatMessageVM>) => {
@@ -672,40 +667,20 @@ export function useChat(
 
         const { provider, modelId } = modelSelection
         const label = buildPreview(provider.name, modelId)
-        const [promptSettings, enabledKnowledge] = await Promise.all([
-          loadPromptSettings(),
-          (async () => {
-            const overrideIds = await conversationKnowledge.listOn(conversationId)
-            if (overrideIds.length > 0) {
-              const knowledgeRows = await knowledgeDb.list()
-              const byId = new Map(knowledgeRows.map((knowledge) => [knowledge.id, knowledge]))
-              return overrideIds
-                .map((id) => byId.get(id))
-                .filter((knowledge): knowledge is typeof knowledgeRows[0] =>
-                  !!knowledge && knowledge.enabled === 1)
-            }
-            return knowledgeDb.listEnabled()
-          })(),
-        ])
-        const system = buildSystemPrompt({
-          general: promptSettings.general,
-          profile: promptSettings.profile,
-          knowledge: enabledKnowledge.map((knowledge) => ({
-            name: knowledge.name,
-            content: knowledge.content,
-          })),
-          webEnabled: mcpRuntime.webAccess.enabled && mcpRuntime.webAccess.configured,
-        })
-        const apiMessages = buildChatMessages({
-          system,
-          history: plan.history.map((message) => ({
-            role: message.role,
-            content: message.content,
-          })),
-          currentImages: [],
-        })
         const apiProvider = createProvider(provider)
         activeApiKey = (await secrets.get(provider.secretRef)) ?? ""
+        recoveryContext = await prepareConversationContext({
+          conversationId,
+          history: plan.history,
+          currentImages: [],
+          provider,
+          providerAdapter: apiProvider,
+          apiKey: activeApiKey,
+          modelId,
+          contextWindowOverride: modelSelection.contextWindowOverride,
+          maxOutputTokensOverride: modelSelection.maxOutputTokensOverride,
+          webEnabled: mcpRuntime.webAccess.enabled && mcpRuntime.webAccess.configured,
+        })
         const callbacks = {
           onFirstToken: () => { /* métrique remontée par le runner */ },
           onDelta: (delta: string) => {
@@ -733,7 +708,8 @@ export function useChat(
           recoveryTools
             ? {
                 provider: apiProvider,
-                request: { messages: apiMessages },
+                request: { messages: [] },
+                context: recoveryContext,
                 apiKey: activeApiKey,
                 modelId,
                 callbacks,
@@ -742,7 +718,8 @@ export function useChat(
               }
             : {
                 provider: apiProvider,
-                request: { messages: apiMessages },
+                request: { messages: [] },
+                context: recoveryContext,
                 apiKey: activeApiKey,
                 modelId,
                 callbacks,
@@ -759,9 +736,7 @@ export function useChat(
           const providerMetrics = result.usage
             ? metricsFromProviderUsage(result.usage, pricingProvider, modelId)
             : null
-          metrics = providerMetrics ?? (recoveryTools
-            ? null
-            : estimateTurnMetrics(apiMessages, finalContent, provider.baseUrl, modelId))
+          metrics = providerMetrics ?? metricsFromEstimatedUsage(result.estimatedUsage)
         } catch (metricsError) {
           logger.error({ kind: "chat_recovery_metrics", message: safeRecoveryError(metricsError) })
         }
@@ -812,6 +787,10 @@ export function useChat(
         })
         return true
       } catch (error) {
+        const kind = normalizeApiErrorKind((error as Partial<ApiError>).kind)
+        if (kind === "context_length") {
+          invalidateModelContextProfile(`${modelSelection.provider.id}/${modelSelection.modelId}`)
+        }
         logger.error({ kind: "chat_recovery", message: safeRecoveryError(error) })
         upsertTarget({
           recoveryMode: undefined,
@@ -820,6 +799,7 @@ export function useChat(
         })
         return false
       } finally {
+        recoveryContext?.dispose()
         approvalResolverRef.current?.("deny")
         approvalResolverRef.current = null
         setPendingToolApproval(null)

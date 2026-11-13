@@ -1380,6 +1380,87 @@ describe("useChat — récupération de la dernière réponse", () => {
     content: "Ancienne réponse",
   })
 
+  it.each(["retry", "regenerate"] as const)(
+    "%s prépare le même contexte centralisé que send",
+    async (mode) => {
+      const rows = mode === "retry" ? [userRow, failedRow] : [userRow, answeredRow]
+      vi.mocked(messagesDb.listByConversation).mockResolvedValue(rows)
+      const context = preparedContext()
+      prepareConversationContextMock.mockResolvedValueOnce(context)
+      const { result } = renderHook(() => useChat(modelSelection))
+      await act(async () => result.current.load("conv-1"))
+      const target = mode === "retry" ? failedRow.id : answeredRow.id
+
+      await act(async () => {
+        const ok = mode === "retry"
+          ? await result.current.retryLast("conv-1", target)
+          : await result.current.regenerateLast("conv-1", target)
+        expect(ok).toBe(true)
+      })
+
+      expect(prepareConversationContextMock).toHaveBeenCalledWith(expect.objectContaining({
+        conversationId: "conv-1",
+        history: [userRow],
+        currentImages: [],
+        provider,
+        apiKey: "sk-test",
+        modelId: "m1",
+        contextWindowOverride: null,
+        maxOutputTokensOverride: null,
+        webEnabled: false,
+      }))
+      expect(runAssistantTurnMock).toHaveBeenCalledWith(expect.objectContaining({ context }))
+      expect(context.dispose).toHaveBeenCalledTimes(1)
+    },
+  )
+
+  it("conserve l’ancienne réponse si le contexte de régénération ne tient pas", async () => {
+    vi.mocked(messagesDb.listByConversation).mockResolvedValue([userRow, answeredRow])
+    prepareConversationContextMock.mockRejectedValueOnce(
+      new ApiError("context_length", "Contexte trop grand"),
+    )
+    const { result } = renderHook(() => useChat(modelSelection))
+    await act(async () => result.current.load("conv-1"))
+
+    await act(async () => expect(
+      await result.current.regenerateLast("conv-1", answeredRow.id),
+    ).toBe(false))
+
+    expect(runAssistantTurnMock).not.toHaveBeenCalled()
+    expect(messagesDb.updateAssistant).not.toHaveBeenCalled()
+    expect(invalidateModelContextProfileMock).toHaveBeenCalledWith("p1/m1")
+    expect(result.current.vm.find((message) => message.id === answeredRow.id)).toMatchObject({
+      content: "Ancienne réponse",
+      recoveryFailed: true,
+    })
+  })
+
+  it("utilise l’estimation du runner lors d’un retry sans usage fournisseur", async () => {
+    vi.mocked(messagesDb.listByConversation).mockResolvedValue([userRow, failedRow])
+    runTurnMock.mockResolvedValueOnce({
+      text: "Réponse estimée",
+      toolCalls: [],
+      firstTokenMs: 4,
+      totalMs: 12,
+    })
+    const { result } = renderHook(() => useChat(modelSelection))
+
+    await act(async () => expect(
+      await result.current.retryLast("conv-1", failedRow.id),
+    ).toBe(true))
+
+    expect(estimateTurnMetricsMock).not.toHaveBeenCalled()
+    expect(messagesDb.updateAssistant).toHaveBeenCalledWith(
+      failedRow.id,
+      expect.objectContaining({
+        content: "Réponse estimée",
+        input_tokens: 7,
+        output_tokens: 3,
+        usage_source: "estimated",
+      }),
+    )
+  })
+
   it("retente la dernière erreur sans insérer un nouveau message utilisateur", async () => {
     vi.mocked(messagesDb.listByConversation).mockResolvedValue([userRow, failedRow])
     const { result } = renderHook(() => useChat(modelSelection))

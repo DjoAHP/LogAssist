@@ -2369,7 +2369,7 @@ suppression avant le commit.
 - Modify: `src/lib/chat/recoveryPolicy.ts`
 - Modify: `src/lib/chat/recoveryPolicy.test.ts`
 
-- [ ] **Step 1: Écrire le test rouge de récupération centralisée**
+- [x] **Step 1: Écrire le test rouge de récupération centralisée**
 
 ```ts
 it.each(["retry", "regenerate"] as const)(
@@ -2400,7 +2400,7 @@ it.each(["retry", "regenerate"] as const)(
 )
 ```
 
-- [ ] **Step 2: Écrire le test rouge d’une régénération bloquée localement**
+- [x] **Step 2: Écrire le test rouge d’une régénération bloquée localement**
 
 ```ts
 it("conserve l’ancienne réponse si le contexte de régénération ne tient pas", async () => {
@@ -2421,7 +2421,7 @@ it("conserve l’ancienne réponse si le contexte de régénération ne tient pa
 })
 ```
 
-- [ ] **Step 3: Exécuter les tests et confirmer l’échec**
+- [x] **Step 3: Exécuter les tests et confirmer l’échec**
 
 ```bash
 powershell.exe -NoProfile -Command "Set-Location 'C:\dev\LogAssist'; npx vitest run src/hooks/useChat.test.tsx src/lib/chat/recoveryPolicy.test.ts"
@@ -2429,7 +2429,7 @@ powershell.exe -NoProfile -Command "Set-Location 'C:\dev\LogAssist'; npx vitest 
 
 Expected: récupération utilise encore prompt et historique complets.
 
-- [ ] **Step 4: Remplacer la préparation dupliquée dans `recoverLast()`**
+- [x] **Step 4: Remplacer la préparation dupliquée dans `recoverLast()`**
 
 Après `createRecoveryPlan()`, passer `plan.history` à
 `prepareConversationContext()`. La dernière ligne de `plan.history` est la
@@ -2443,7 +2443,7 @@ false)`, les outils, approbations, sources et médias. Disposer la session dans 
 Retirer le second bloc dupliqué de chargement prompt/connaissances et
 `buildChatMessages`.
 
-- [ ] **Step 5: Relancer les tests ciblés**
+- [x] **Step 5: Relancer les tests ciblés**
 
 ```bash
 powershell.exe -NoProfile -Command "Set-Location 'C:\dev\LogAssist'; npx vitest run src/hooks/useChat.test.tsx src/lib/chat/recoveryPolicy.test.ts"
@@ -2451,7 +2451,7 @@ powershell.exe -NoProfile -Command "Set-Location 'C:\dev\LogAssist'; npx vitest 
 
 Expected: PASS ; aucun doublon user et ancienne réponse conservée en échec.
 
-- [ ] **Step 6: Committer la récupération bornée**
+- [x] **Step 6: Committer la récupération bornée**
 
 ```bash
 git add src/hooks/useChat.ts src/hooks/useChat.test.tsx src/lib/chat/recoveryPolicy.ts src/lib/chat/recoveryPolicy.test.ts
