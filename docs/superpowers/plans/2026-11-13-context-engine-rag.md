@@ -85,7 +85,7 @@ powershell.exe -NoProfile -Command "Set-Location 'C:\dev\LogAssist'; npx vitest 
 - Inspect: `src/hooks/useChat.test.tsx`
 - Inspect: `src/lib/mcp/toolAgent.test.ts`
 
-- [ ] **Step 1: Vérifier la branche et l’état Git**
+- [x] **Step 1: Vérifier la branche et l’état Git**
 
 Run:
 
@@ -95,7 +95,7 @@ git status --short --branch
 
 Expected: branche `feat/context-engine-rag`, sans modification fonctionnelle non suivie.
 
-- [ ] **Step 2: Exécuter la suite Vitest complète sous Windows**
+- [x] **Step 2: Exécuter la suite Vitest complète sous Windows**
 
 Run:
 
@@ -105,7 +105,7 @@ powershell.exe -NoProfile -Command "Set-Location 'C:\dev\LogAssist'; npm run tes
 
 Expected: tous les tests passent. Noter le nombre exact dans le rapport final.
 
-- [ ] **Step 3: Exécuter le build de référence sous Windows**
+- [x] **Step 3: Exécuter le build de référence sous Windows**
 
 Run:
 
@@ -134,7 +134,7 @@ Expected: `tsc`, Vitest et Vite passent. En cas d’échec de référence, arrê
 - Create: `src/lib/db/activeModel.test.ts`
 - Modify: `src/components/settings/ProvidersDialog.test.tsx`
 
-- [ ] **Step 1: Écrire les tests rouges de l’erreur `context_length`**
+- [x] **Step 1: Écrire les tests rouges de l’erreur `context_length`**
 
 Ajouter dans `src/lib/ai/errors.test.ts` :
 
@@ -158,7 +158,7 @@ it("déclare un libellé dédié au contexte trop volumineux", () => {
 })
 ```
 
-- [ ] **Step 2: Écrire les tests rouges de la migration V11**
+- [x] **Step 2: Écrire les tests rouges de la migration V11**
 
 Importer `SCHEMA_V11_STATEMENTS`, attendre `SCHEMA_VERSION === 11`, puis ajouter :
 
@@ -179,7 +179,7 @@ describe("SCHEMA_V11_STATEMENTS", () => {
 })
 ```
 
-- [ ] **Step 3: Écrire les tests rouges du repository modèle**
+- [x] **Step 3: Écrire les tests rouges du repository modèle**
 
 Ajouter à `src/lib/db/providers.test.ts` :
 
@@ -240,7 +240,7 @@ expect(await getActiveModel()).toMatchObject({
 })
 ```
 
-- [ ] **Step 4: Exécuter les tests et confirmer l’échec**
+- [x] **Step 4: Exécuter les tests et confirmer l’échec**
 
 Run:
 
@@ -250,7 +250,7 @@ powershell.exe -NoProfile -Command "Set-Location 'C:\dev\LogAssist'; npx vitest 
 
 Expected: échecs sur `context_length`, V11, `updateModelContext` et les nouveaux champs de `ActiveModel`.
 
-- [ ] **Step 5: Implémenter l’erreur et sa traduction**
+- [x] **Step 5: Implémenter l’erreur et sa traduction**
 
 Dans `src/lib/ai/types.ts`, ajouter `"context_length"` à `ApiErrorKind` et `API_ERROR_KINDS`.
 
@@ -285,7 +285,7 @@ Dans `src/i18n/fr.ts`, ajouter :
 contextLength: "Le contexte obligatoire dépasse la fenêtre disponible du modèle",
 ```
 
-- [ ] **Step 6: Implémenter V11 et les overrides**
+- [x] **Step 6: Implémenter V11 et les overrides**
 
 Dans `src/lib/db/migrations.ts` :
 
@@ -373,7 +373,7 @@ export interface ActiveModel {
 
 Le `SELECT` doit aliaser `m.id AS model_row_id` et sélectionner les deux colonnes V11.
 
-- [ ] **Step 7: Relancer les tests ciblés**
+- [x] **Step 7: Relancer les tests ciblés**
 
 ```bash
 powershell.exe -NoProfile -Command "Set-Location 'C:\dev\LogAssist'; npx vitest run src/lib/ai/errors.test.ts src/lib/ai/errors.i18n.test.ts src/lib/db/migrations.test.ts src/lib/db/providers.test.ts src/lib/db/activeModel.test.ts"
@@ -381,7 +381,7 @@ powershell.exe -NoProfile -Command "Set-Location 'C:\dev\LogAssist'; npx vitest 
 
 Expected: PASS.
 
-- [ ] **Step 8: Committer le contrat et la migration**
+- [x] **Step 8: Committer le contrat et la migration**
 
 ```bash
 git add src/lib/ai/types.ts src/lib/ai/errors.ts src/lib/ai/errors.test.ts src/lib/ai/errors.i18n.test.ts src/i18n/fr.ts src/lib/db/migrations.ts src/lib/db/database.ts src/lib/db/migrations.test.ts src/lib/db/providers.ts src/lib/db/providers.test.ts src/lib/db/activeModel.ts src/lib/db/activeModel.test.ts src/components/settings/ProvidersDialog.test.tsx

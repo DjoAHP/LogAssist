@@ -289,6 +289,7 @@ export const fr = {
     quota: "Quota ou crédit épuisé",
     unavailable: "Service momentanément indisponible",
     imageUnsupported: "Images non supportées par ce modèle",
+    contextLength: "Le contexte obligatoire dépasse la fenêtre disponible du modèle",
     persistence: "Réponse non enregistrée localement",
     unknown: "Erreur inattendue du fournisseur",
   },

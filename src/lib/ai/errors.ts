@@ -12,6 +12,7 @@ export const KIND_TO_KEY: Record<ApiErrorKind, keyof typeof t.errors> = {
   quota: "quota",
   unavailable: "unavailable",
   image_unsupported: "imageUnsupported",
+  context_length: "contextLength",
   persistence: "persistence",
   unknown: "unknown",
 }
@@ -65,6 +66,8 @@ export function normalizeApiErrorKind(value: unknown): ApiErrorKind {
 // (EAI_AGAIN) n'ont pas de \b devant un underscore, l'underscore est un caractère de mot.
 const QUOTA_HINTS = /\b(quota|credit|billing|insufficient)(?:\b|_)/i
 const IMAGE_HINTS = /\b(image|vision|multimodal?)(?:\b|_)/i
+const CONTEXT_HINTS =
+  /(?:n_keep\s*:\s*\d+\s*>=\s*n_ctx|max(?:imum)? context length|context window|prompt (?:is )?too long|too many (?:input )?tokens)/i
 // "failed to fetch" : rejet du fetch navigateur — CORS bloqué ou réseau coupé.
 // Le reste : erreurs Node/Rust ("fetch failed").
 const NETWORK_HINTS =
@@ -82,6 +85,13 @@ export function normalizeHttpStatus(status: number, body: string, retryAfterMs?:
   if (status === 402) return new ApiError("quota", "Quota ou crédit épuisé", detail)
   if (status >= 500) return new ApiError("unavailable", "Service momentanément indisponible", detail)
   if (status >= 400) {
+    if (CONTEXT_HINTS.test(body)) {
+      return new ApiError(
+        "context_length",
+        "Le contexte dépasse la fenêtre disponible du modèle",
+        detail,
+      )
+    }
     if (IMAGE_HINTS.test(body)) return new ApiError("image_unsupported", "Images non supportées par ce modèle", detail)
     return new ApiError("unknown", "Erreur inattendue du fournisseur", detail)
   }

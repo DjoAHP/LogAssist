@@ -1,4 +1,4 @@
-export const SCHEMA_VERSION = 10
+export const SCHEMA_VERSION = 11
 
 // Chaque statement est un item distinct : audit-able, et exécution séquentielle
 // garantie (sqlx rejette le multi-statement dans un seul execute).
@@ -237,6 +237,13 @@ export const SCHEMA_V10_STATEMENTS: string[] = [
 )`,
   `CREATE INDEX IF NOT EXISTS idx_message_media_message ON message_media(message_id)`,
   `ALTER TABLE messages ADD COLUMN media TEXT NOT NULL DEFAULT '[]'`,
+]
+
+// Migration V11 : corrections manuelles optionnelles du budget de contexte.
+// NULL conserve la détection fournisseur et son repli prudent.
+export const SCHEMA_V11_STATEMENTS: string[] = [
+  "ALTER TABLE models ADD COLUMN context_window_override INTEGER CHECK (context_window_override IS NULL OR context_window_override BETWEEN 512 AND 2000000)",
+  "ALTER TABLE models ADD COLUMN max_output_tokens_override INTEGER CHECK (max_output_tokens_override IS NULL OR max_output_tokens_override BETWEEN 1 AND 262144)",
 ]
 
 export const SCHEMA_V1 = SCHEMA_V1_STATEMENTS.join(";\n")

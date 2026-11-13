@@ -45,6 +45,7 @@ const secondProviderRow: ProviderRow = {
 }
 const existingModel: ModelRow = {
   id: "rm1", provider_id: "p1", model_id: "existing/model", supports_images: 0, is_default: 1,
+  context_window_override: null, max_output_tokens_override: null,
 }
 
 // Faux runtime : état SQL minimal pour refléter INSERT/DELETE entre les relectures.
@@ -78,6 +79,7 @@ beforeEach(() => {
       dbState.models = [...dbState.models, {
         id: (bind as unknown[])[0] as string, provider_id: (bind as unknown[])[1] as string,
         model_id: (bind as unknown[])[2] as string, supports_images: 0, is_default: 0,
+        context_window_override: null, max_output_tokens_override: null,
       }]
     }
     if (s.includes("DELETE FROM providers")) {
