@@ -248,6 +248,12 @@ export function createOpenAICompatible(cfg: ProviderConfig): IProvider {
     signal?: AbortSignal,
     options: TurnOptions = {},
   ) {
+    if (
+      req.maxOutputTokens !== undefined &&
+      (!Number.isSafeInteger(req.maxOutputTokens) || req.maxOutputTokens <= 0)
+    ) {
+      throw new ApiError("unknown", "Limite de sortie interne invalide")
+    }
     const body: Record<string, unknown> = {
       model: modelId,
       messages: req.messages.map(toOpenAiMessage),
@@ -255,6 +261,10 @@ export function createOpenAICompatible(cfg: ProviderConfig): IProvider {
     }
     if (stream && isOfficialOpenAi) {
       body.stream_options = { include_usage: true }
+    }
+    if (req.maxOutputTokens !== undefined) {
+      if (isOfficialOpenAi) body.max_completion_tokens = req.maxOutputTokens
+      else body.max_tokens = req.maxOutputTokens
     }
     if (options.tools !== undefined) body.tools = options.tools
     if (options.toolChoice !== undefined) body.tool_choice = options.toolChoice

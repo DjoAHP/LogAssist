@@ -1794,7 +1794,7 @@ git commit -m "feat: planifie chaque requête dans son budget de contexte"
 - Modify: `src/lib/ai/openai-compat.ts:175-199`
 - Modify: `src/lib/ai/openai-compat.test.ts:153-216,565-602`
 
-- [ ] **Step 1: Écrire les tests rouges du paramètre de sortie**
+- [x] **Step 1: Écrire les tests rouges du paramètre de sortie**
 
 Dans `src/lib/ai/openai-compat.test.ts` :
 
@@ -1834,7 +1834,7 @@ it("envoie max_completion_tokens à OpenAI officiel", async () => {
 })
 ```
 
-- [ ] **Step 2: Exécuter les tests et confirmer l’échec**
+- [x] **Step 2: Exécuter les tests et confirmer l’échec**
 
 ```bash
 powershell.exe -NoProfile -Command "Set-Location 'C:\dev\LogAssist'; npx vitest run src/lib/ai/openai-compat.test.ts"
@@ -1842,7 +1842,7 @@ powershell.exe -NoProfile -Command "Set-Location 'C:\dev\LogAssist'; npx vitest 
 
 Expected: propriétés absentes du corps.
 
-- [ ] **Step 3: Étendre `ChatRequest` et le corps HTTP**
+- [x] **Step 3: Étendre `ChatRequest` et le corps HTTP**
 
 ```ts
 export interface ChatRequest {
@@ -1865,7 +1865,7 @@ Valider en amont que la valeur est un entier strictement positif ; une valeur
 interne invalide lève `ApiError("unknown", "Limite de sortie interne invalide")`
 avant `fetch`.
 
-- [ ] **Step 4: Relancer le test ciblé**
+- [x] **Step 4: Relancer le test ciblé**
 
 ```bash
 powershell.exe -NoProfile -Command "Set-Location 'C:\dev\LogAssist'; npx vitest run src/lib/ai/openai-compat.test.ts"
@@ -1873,7 +1873,7 @@ powershell.exe -NoProfile -Command "Set-Location 'C:\dev\LogAssist'; npx vitest 
 
 Expected: PASS.
 
-- [ ] **Step 5: Committer la traduction fournisseur**
+- [x] **Step 5: Committer la traduction fournisseur**
 
 ```bash
 git add src/lib/ai/types.ts src/lib/ai/openai-compat.ts src/lib/ai/openai-compat.test.ts

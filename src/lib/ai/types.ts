@@ -13,7 +13,11 @@ export interface ChatMessage {
   toolCalls?: ToolCall[]
 }
 
-export interface ChatRequest { messages: ChatMessage[]; timeoutMs?: number }
+export interface ChatRequest {
+  messages: ChatMessage[]
+  timeoutMs?: number
+  maxOutputTokens?: number
+}
 
 export interface TokenUsage {
   inputTokens: number

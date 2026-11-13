@@ -649,6 +649,62 @@ describe("createOpenAICompatible — stream", () => {
 })
 
 describe("createOpenAICompatible — runTurn", () => {
+  it("envoie max_tokens aux endpoints OpenAI-compatibles", async () => {
+    const stream = sseStream([`data: [DONE]${SSE}`])
+    const fetchMock = vi.fn().mockResolvedValue(makeRes({ body: stream }))
+    vi.stubGlobal("fetch", fetchMock)
+
+    await createOpenAICompatible(CFG).runTurn(
+      { messages: [{ role: "user", content: "Salut" }], maxOutputTokens: 1024 } as ChatRequest,
+      "K",
+      "m",
+      {},
+      {},
+      new AbortController().signal,
+    )
+
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body)
+    expect(body.max_tokens).toBe(1024)
+    expect(body).not.toHaveProperty("max_completion_tokens")
+  })
+
+  it("envoie max_completion_tokens à OpenAI officiel", async () => {
+    const stream = sseStream([`data: [DONE]${SSE}`])
+    const fetchMock = vi.fn().mockResolvedValue(makeRes({ body: stream }))
+    vi.stubGlobal("fetch", fetchMock)
+
+    await createOpenAICompatible(OFFICIAL_OPENAI_CFG).runTurn(
+      { messages: [{ role: "user", content: "Salut" }], maxOutputTokens: 2048 } as ChatRequest,
+      "K",
+      "gpt-4o-mini",
+      {},
+      {},
+      new AbortController().signal,
+    )
+
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body)
+    expect(body.max_completion_tokens).toBe(2048)
+    expect(body).not.toHaveProperty("max_tokens")
+  })
+
+  it.each([0, -1, 1.5, Number.POSITIVE_INFINITY])(
+    "refuse une limite de sortie interne invalide : %s",
+    async (maxOutputTokens) => {
+      const fetchMock = vi.fn()
+      vi.stubGlobal("fetch", fetchMock)
+
+      await expect(createOpenAICompatible(CFG).runTurn(
+        { messages: [{ role: "user", content: "Salut" }], maxOutputTokens } as ChatRequest,
+        "K",
+        "m",
+        {},
+        {},
+        new AbortController().signal,
+      )).rejects.toMatchObject({ kind: "unknown", message: "Limite de sortie interne invalide" })
+      expect(fetchMock).not.toHaveBeenCalled()
+    },
+  )
+
   it("demande le chunk d'usage uniquement à l'endpoint OpenAI officiel", async () => {
     const stream = sseStream([`data: [DONE]${SSE}`])
     const fetchMock = vi.fn().mockResolvedValue(makeRes({ body: stream }))
