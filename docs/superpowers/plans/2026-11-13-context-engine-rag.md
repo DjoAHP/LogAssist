@@ -938,7 +938,7 @@ git commit -m "feat: estime prudemment tous les éléments du contexte"
 - Modify: `src/lib/context/types.ts`
 - Modify: `src/lib/context/index.ts`
 
-- [ ] **Step 1: Écrire les tests rouges du chunker**
+- [x] **Step 1: Écrire les tests rouges du chunker**
 
 Créer `src/lib/context/markdownChunker.test.ts` :
 
@@ -992,7 +992,7 @@ describe("chunkMarkdown", () => {
 })
 ```
 
-- [ ] **Step 2: Exécuter le test et confirmer l’échec**
+- [x] **Step 2: Exécuter le test et confirmer l’échec**
 
 ```bash
 powershell.exe -NoProfile -Command "Set-Location 'C:\dev\LogAssist'; npx vitest run src/lib/context/markdownChunker.test.ts"
@@ -1000,7 +1000,7 @@ powershell.exe -NoProfile -Command "Set-Location 'C:\dev\LogAssist'; npx vitest 
 
 Expected: module absent.
 
-- [ ] **Step 3: Définir les types de document et passage**
+- [x] **Step 3: Définir les types de document et passage**
 
 Dans `src/lib/context/types.ts` :
 
@@ -1023,7 +1023,7 @@ export interface KnowledgeChunk {
 }
 ```
 
-- [ ] **Step 4: Implémenter le fingerprint non cryptographique**
+- [x] **Step 4: Implémenter le fingerprint non cryptographique**
 
 Dans `markdownChunker.ts` :
 
@@ -1041,7 +1041,7 @@ export function fingerprintText(value: string): string {
 Cette empreinte sert uniquement à l’invalidation et au diagnostic ; elle n’est
 pas présentée comme une garantie cryptographique.
 
-- [ ] **Step 5: Implémenter le parseur et le regroupement**
+- [x] **Step 5: Implémenter le parseur et le regroupement**
 
 Le parseur lit les lignes, maintient `headingPath` pour `#{1,6}`, accumule les
 paragraphes séparés par ligne vide et reconnaît les fences commençant par trois
@@ -1065,7 +1065,7 @@ export function chunkMarkdown(input: {
 
 Valeurs par défaut : `targetTokens = 450`, `hardLimitTokens = 700`.
 
-- [ ] **Step 6: Relancer le test ciblé**
+- [x] **Step 6: Relancer le test ciblé**
 
 ```bash
 powershell.exe -NoProfile -Command "Set-Location 'C:\dev\LogAssist'; npx vitest run src/lib/context/markdownChunker.test.ts"
@@ -1073,7 +1073,7 @@ powershell.exe -NoProfile -Command "Set-Location 'C:\dev\LogAssist'; npx vitest 
 
 Expected: PASS.
 
-- [ ] **Step 7: Committer le chunker**
+- [x] **Step 7: Committer le chunker**
 
 ```bash
 git add src/lib/context/markdownChunker.ts src/lib/context/markdownChunker.test.ts src/lib/context/types.ts src/lib/context/index.ts

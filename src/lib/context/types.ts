@@ -25,3 +25,20 @@ export interface ContextTokenEstimator {
   countImage(image: NonNullable<ChatMessage["images"]>[number]): number
   dispose(): void
 }
+
+export interface KnowledgeDocument {
+  id: string
+  name: string
+  content: string
+  sortOrder: number
+}
+
+export interface KnowledgeChunk {
+  documentId: string
+  documentName: string
+  fingerprint: string
+  chunkIndex: number
+  headingPath: string[]
+  content: string
+  tokenEstimate: number
+}
