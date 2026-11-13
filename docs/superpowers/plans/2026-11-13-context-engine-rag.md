@@ -2581,7 +2581,7 @@ git commit -m "feat: estime les images avec leurs dimensions éphémères"
 - Modify: `src/components/settings/ProvidersDialog.test.tsx`
 - Modify: `src/i18n/fr.ts:97-148`
 
-- [ ] **Step 1: Écrire les tests rouges du formulaire**
+- [x] **Step 1: Écrire les tests rouges du formulaire**
 
 Créer `ModelContextSettings.test.tsx` :
 
@@ -2625,13 +2625,13 @@ it("enregistre deux entiers ou null pour revenir à la détection automatique", 
 Ajouter un test qui saisit sortie `4096` pour fenêtre `4096`, attend un
 `role="alert"` et vérifie que `onSave` n’est pas appelé.
 
-- [ ] **Step 2: Écrire le test rouge de l’accès depuis le picker**
+- [x] **Step 2: Écrire le test rouge de l’accès depuis le picker**
 
 Étendre `PickerModel` avec les deux overrides. Ajouter `onConfigure(model)` et
 attendre qu’un bouton nommé `Contexte — qwen3.5-9b` appelle cette callback sans
 activer le modèle.
 
-- [ ] **Step 3: Exécuter les tests et confirmer l’échec**
+- [x] **Step 3: Exécuter les tests et confirmer l’échec**
 
 ```bash
 powershell.exe -NoProfile -Command "Set-Location 'C:\dev\LogAssist'; npx vitest run src/components/settings/ModelContextSettings.test.tsx src/components/settings/ModelPickerModal.test.tsx src/components/settings/ProvidersDialog.test.tsx"
@@ -2639,7 +2639,7 @@ powershell.exe -NoProfile -Command "Set-Location 'C:\dev\LogAssist'; npx vitest 
 
 Expected: composant et chaînes absents.
 
-- [ ] **Step 4: Ajouter les chaînes i18n**
+- [x] **Step 4: Ajouter les chaînes i18n**
 
 Dans `t.providers` :
 
@@ -2653,14 +2653,14 @@ invalidContextWindow: "La fenêtre doit être comprise entre 512 et 2000000 toke
 invalidOutputTokens: "La sortie doit être positive et inférieure à la fenêtre configurée.",
 ```
 
-- [ ] **Step 5: Implémenter le formulaire accessible**
+- [x] **Step 5: Implémenter le formulaire accessible**
 
 Deux inputs `type="number"`, `min`, `max`, un texte d’aide, un `role="alert"`,
 Annuler et Enregistrer. Une chaîne vide devient `null`; toute autre valeur doit
 être un entier dans les bornes du repository. Le composant ne lit ni n’écrit la
 base directement.
 
-- [ ] **Step 6: Câbler le picker et ProvidersDialog**
+- [x] **Step 6: Câbler le picker et ProvidersDialog**
 
 `ProvidersDialog` conserve `configuringModel: ModelRow | null`. Il passe les
 overrides au picker, ouvre `ModelContextSettings`, puis appelle :
@@ -2676,7 +2676,7 @@ bouton principal d’activation et un bouton `Settings2` de configuration. Aucun
 bouton n’est imbriqué dans un autre bouton. Le bouton de configuration utilise
 `type="button"`, un nom accessible et n’appelle jamais `onSelect`.
 
-- [ ] **Step 7: Relancer les tests ciblés**
+- [x] **Step 7: Relancer les tests ciblés**
 
 ```bash
 powershell.exe -NoProfile -Command "Set-Location 'C:\dev\LogAssist'; npx vitest run src/components/settings/ModelContextSettings.test.tsx src/components/settings/ModelPickerModal.test.tsx src/components/settings/ProvidersDialog.test.tsx"
@@ -2684,7 +2684,7 @@ powershell.exe -NoProfile -Command "Set-Location 'C:\dev\LogAssist'; npx vitest 
 
 Expected: PASS.
 
-- [ ] **Step 8: Committer les réglages modèle**
+- [x] **Step 8: Committer les réglages modèle**
 
 ```bash
 git add src/components/settings/ModelContextSettings.tsx src/components/settings/ModelContextSettings.test.tsx src/components/settings/ModelPickerModal.tsx src/components/settings/ModelPickerModal.test.tsx src/components/settings/ProvidersDialog.tsx src/components/settings/ProvidersDialog.test.tsx src/i18n/fr.ts

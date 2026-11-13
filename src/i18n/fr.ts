@@ -145,6 +145,13 @@ export const fr = {
     localConfigured: "Déjà configuré",
     localHint: "Le serveur local doit être lancé (LM Studio : Start Server ; Ollama : serve activé).",
     saveInProgress: "Enregistrement…",
+    contextSettings: "Contexte du modèle",
+    contextWindow: "Fenêtre de contexte (tokens)",
+    maxOutputTokens: "Réserve maximale de sortie (tokens)",
+    automaticContext: "Laissez vide pour utiliser la détection automatique et le repli prudent.",
+    saveContext: "Enregistrer le contexte",
+    invalidContextWindow: "La fenêtre doit être comprise entre 512 et 2000000 tokens.",
+    invalidOutputTokens: "La sortie doit être positive et inférieure à la fenêtre configurée.",
   },
   assistant: {
     title: "Assistant",
