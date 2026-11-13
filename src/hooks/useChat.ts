@@ -39,6 +39,8 @@ export interface Attachment {
   base64: string
   mimeType: string
   name: string
+  width?: number
+  height?: number
   // kind "text" : contenu du fichier importé (l'image, elle, passe en base64)
   text?: string
 }
@@ -346,7 +348,12 @@ export function useChat(
           // Stocker en base (table images)
           await imagesDb.create(att.id, att.name)
           // Préparer pour l'API
-          apiImages.push({ base64: att.base64, mimeType: att.mimeType })
+          apiImages.push({
+            base64: att.base64,
+            mimeType: att.mimeType,
+            ...(att.width ? { width: att.width } : {}),
+            ...(att.height ? { height: att.height } : {}),
+          })
           storedAttachments.push(att)
         }
 

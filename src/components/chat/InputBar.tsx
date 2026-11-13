@@ -44,24 +44,48 @@ function fileToText(file: File): Promise<Attachment> {
   })
 }
 
-function fileToBase64(file: File): Promise<Attachment> {
-  return new Promise<Attachment>((resolve, reject) => {
-    if (!ALLOWED_TYPES.includes(file.type)) {
-      reject(new Error("Type de fichier non supporté"))
-      return
-    }
-    if (file.size > MAX_IMAGE_SIZE) {
-      reject(new Error("Fichier trop volumineux (max 10MB)"))
-      return
-    }
+function readBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
     const reader = new FileReader()
     reader.onload = () => {
-      const base64 = (reader.result as string).split(",")[1]
-      resolve({ id: crypto.randomUUID(), kind: "image", base64, mimeType: file.type, name: file.name })
+      if (typeof reader.result !== "string" || !reader.result.includes(",")) {
+        reject(new Error("Image illisible"))
+        return
+      }
+      resolve(reader.result.split(",")[1])
     }
     reader.onerror = reject
     reader.readAsDataURL(file)
   })
+}
+
+async function imageDimensions(file: File): Promise<{ width: number; height: number } | undefined> {
+  if (typeof createImageBitmap !== "function") return undefined
+  const bitmap = await createImageBitmap(file)
+  try {
+    return bitmap.width > 0 && bitmap.height > 0
+      ? { width: bitmap.width, height: bitmap.height }
+      : undefined
+  } finally {
+    bitmap.close()
+  }
+}
+
+async function fileToBase64(file: File): Promise<Attachment> {
+  if (!ALLOWED_TYPES.includes(file.type)) throw new Error("Type de fichier non supporté")
+  if (file.size > MAX_IMAGE_SIZE) throw new Error("Fichier trop volumineux (max 10MB)")
+  const [base64, dimensions] = await Promise.all([
+    readBase64(file),
+    imageDimensions(file).catch(() => undefined),
+  ])
+  return {
+    id: crypto.randomUUID(),
+    kind: "image",
+    base64,
+    mimeType: file.type,
+    name: file.name,
+    ...dimensions,
+  }
 }
 
 // Regex pour détecter les URLs (http/https)

@@ -2467,7 +2467,7 @@ git commit -m "feat: borne les relances dans le même moteur de contexte"
 - Modify: `src/components/chat/InputBar.tsx:16-65`
 - Modify: `src/components/chat/InputBar.test.tsx:20-70`
 
-- [ ] **Step 1: Écrire le test rouge des dimensions éphémères**
+- [x] **Step 1: Écrire le test rouge des dimensions éphémères**
 
 Dans `InputBar.test.tsx`, stubber `createImageBitmap` :
 
@@ -2498,7 +2498,7 @@ it("transmet les dimensions de l’image sans les rendre persistantes", async ()
 Dans `useChat.test.tsx`, vérifier que l’INSERT user sérialise seulement
 `id`, `name`, `mimeType` et `kind`, sans `base64`, `width` ni `height`.
 
-- [ ] **Step 2: Exécuter les tests et confirmer l’échec**
+- [x] **Step 2: Exécuter les tests et confirmer l’échec**
 
 ```bash
 powershell.exe -NoProfile -Command "Set-Location 'C:\dev\LogAssist'; npx vitest run src/components/chat/InputBar.test.tsx src/hooks/useChat.test.tsx"
@@ -2506,7 +2506,7 @@ powershell.exe -NoProfile -Command "Set-Location 'C:\dev\LogAssist'; npx vitest 
 
 Expected: dimensions absentes.
 
-- [ ] **Step 3: Étendre `Attachment`**
+- [x] **Step 3: Étendre `Attachment`**
 
 ```ts
 width?: number
@@ -2516,7 +2516,7 @@ height?: number
 Ces champs ne sont valides que pour `kind: "image"` et ne sont pas inclus dans
 le JSON de persistance.
 
-- [ ] **Step 4: Lire les dimensions en mémoire**
+- [x] **Step 4: Lire les dimensions en mémoire**
 
 Ajouter :
 
@@ -2539,7 +2539,7 @@ retourner les dimensions si disponibles. Une erreur de lecture des dimensions
 ne doit pas rejeter une image dont le Base64 a réussi : utiliser `catch(() =>
 undefined)` uniquement autour de `imageDimensions`.
 
-- [ ] **Step 5: Transmettre les dimensions à `ChatMessage.images`**
+- [x] **Step 5: Transmettre les dimensions à `ChatMessage.images`**
 
 ```ts
 apiImages.push({
@@ -2553,7 +2553,7 @@ apiImages.push({
 L’adaptateur HTTP continue de produire uniquement `data:...;base64,...`; les
 dimensions servent au budget local.
 
-- [ ] **Step 6: Relancer les tests ciblés**
+- [x] **Step 6: Relancer les tests ciblés**
 
 ```bash
 powershell.exe -NoProfile -Command "Set-Location 'C:\dev\LogAssist'; npx vitest run src/components/chat/InputBar.test.tsx src/hooks/useChat.test.tsx"
@@ -2561,7 +2561,7 @@ powershell.exe -NoProfile -Command "Set-Location 'C:\dev\LogAssist'; npx vitest 
 
 Expected: PASS.
 
-- [ ] **Step 7: Committer les métadonnées image**
+- [x] **Step 7: Committer les métadonnées image**
 
 ```bash
 git add src/hooks/useChat.ts src/hooks/useChat.test.tsx src/components/chat/InputBar.tsx src/components/chat/InputBar.test.tsx

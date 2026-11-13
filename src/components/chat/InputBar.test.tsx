@@ -11,7 +11,10 @@ beforeEach(() => {
   onSend.mockResolvedValue(true)
 })
 
-afterEach(cleanup)
+afterEach(() => {
+  cleanup()
+  vi.unstubAllGlobals()
+})
 
 function renderBar(props: Partial<Parameters<typeof InputBar>[0]> = {}) {
   return render(<InputBar onSend={onSend} onInterrupt={onInterrupt} {...props} />)
@@ -66,6 +69,36 @@ describe("InputBar — fichiers texte", () => {
         { forceWeb: false },
       ),
     )
+  })
+
+  it("transmet les dimensions de l’image sans modifier son aperçu", async () => {
+    const close = vi.fn()
+    vi.stubGlobal("createImageBitmap", vi.fn().mockResolvedValue({
+      width: 1920,
+      height: 1080,
+      close,
+    }))
+    renderBar()
+    const input = document.getElementById("image-upload") as HTMLInputElement
+    const file = new File([new Uint8Array(1)], "dimensions.png", { type: "image/png" })
+
+    fireEvent.change(input, { target: { files: [file] } })
+    await waitFor(() => expect(screen.getByText("dimensions.png")).toBeTruthy())
+    expect(screen.getByAltText("dimensions.png")).toBeTruthy()
+    fireEvent.change(screen.getByPlaceholderText(/Écrivez/), { target: { value: "analyse" } })
+    fireEvent.click(screen.getByRole("button", { name: /Envoyer/ }))
+
+    await waitFor(() => expect(onSend).toHaveBeenCalledWith(
+      "analyse",
+      [expect.objectContaining({
+        kind: "image",
+        name: "dimensions.png",
+        width: 1920,
+        height: 1080,
+      })],
+      { forceWeb: false },
+    ))
+    expect(close).toHaveBeenCalledTimes(1)
   })
 })
 

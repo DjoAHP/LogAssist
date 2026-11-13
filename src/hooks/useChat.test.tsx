@@ -1349,7 +1349,15 @@ describe("useChat.send — contract anti-perte", () => {
     vi.mocked(messagesDb.listByConversation).mockImplementation(async () =>
       insertedUser ? [insertedUser as unknown as MessageRow] : [],
     )
-    const img: Attachment = { id: "i1", kind: "image", base64: "AAAA", mimeType: "image/png", name: "shot.png" }
+    const img: Attachment = {
+      id: "i1",
+      kind: "image",
+      base64: "AAAA",
+      mimeType: "image/png",
+      name: "shot.png",
+      width: 1920,
+      height: 1080,
+    }
     const { result } = renderHook(() => useChat(modelSelection))
     await act(async () => {
       await result.current.send("conv-1", "Voilà l'écran", [img])
@@ -1358,7 +1366,18 @@ describe("useChat.send — contract anti-perte", () => {
     expect(persisted).not.toContain("[Fichier")
     const apiReq = runTurnMock.mock.calls[0][0] as { messages: { role: string; content: string; images?: unknown[] }[] }
     const lastMsg = apiReq.messages[apiReq.messages.length - 1]
-    expect(lastMsg.images).toEqual([{ base64: "AAAA", mimeType: "image/png" }])
+    expect(lastMsg.images).toEqual([{
+      base64: "AAAA",
+      mimeType: "image/png",
+      width: 1920,
+      height: 1080,
+    }])
+    const storedMetadata = JSON.parse(
+      (insertedUser as unknown as { attachments: string }).attachments,
+    ) as Record<string, unknown>[]
+    expect(storedMetadata[0]).not.toHaveProperty("base64")
+    expect(storedMetadata[0]).not.toHaveProperty("width")
+    expect(storedMetadata[0]).not.toHaveProperty("height")
   })
 })
 
