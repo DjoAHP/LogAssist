@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react"
 import { Sun, Moon } from "lucide-react"
-import { BookIcon, McpIcon, ReglageIcon } from "@/icons"
+import { BookIcon, McpIcon, ParaGenIcon, ReglageIcon } from "@/icons"
 import logoSrc from "@/assets/logo.png"
 import bgDark from "@/assets/background_dark_logassist.png"
 import bgLight from "@/assets/background_light_logassist.png"
@@ -14,7 +14,10 @@ import { useMcpRuntime } from "@/hooks/useMcpRuntime"
 import { Sidebar } from "@/components/sidebar/Sidebar"
 import { ChatView } from "@/components/chat/ChatView"
 import { InputBar } from "@/components/chat/InputBar"
-import { SettingsDialog } from "@/components/settings/SettingsDialog"
+import { ProvidersDialog } from "@/components/settings/ProvidersDialog"
+import { GeneralSettingsDialog } from "@/components/settings/GeneralSettingsDialog"
+import { LockGate } from "@/components/settings/LockGate"
+import { isLockActive } from "@/lib/applock/service"
 import { AssistantDialog } from "@/components/settings/AssistantDialog"
 import { McpDialog } from "@/components/settings/McpDialog"
 
@@ -25,7 +28,12 @@ function App() {
   const [activeId, setActiveId] = useState<string | null>(null)
   const [activeModel, setActiveModel] = useState<ActiveModel | null>(null)
   const [modelOptions, setModelOptions] = useState<{ rowId: string; label: string; isDefault: boolean; supportsImages: boolean }[]>([])
-  const [settingsOpen, setSettingsOpen] = useState(false)
+  const [providersOpen, setProvidersOpen] = useState(false)
+  const [generalSettingsOpen, setGeneralSettingsOpen] = useState(false)
+  // Verrou de confort : null = état inconnu (lecture du flag en cours),
+  // true = LockGate, false = app déverrouillée. Le fail-open (hash absent)
+  // est déjà géré dans isLockActive.
+  const [locked, setLocked] = useState<boolean | null>(null)
   const [assistantOpen, setAssistantOpen] = useState(false)
   const [mcpOpen, setMcpOpen] = useState(false)
   const [sidebarWidth, setSidebarWidth] = useState(DEFAULT_SIDEBAR_WIDTH)
@@ -49,6 +57,17 @@ function App() {
     else root.classList.remove("dark")
     localStorage.setItem("logassist:dark", JSON.stringify(isDark))
   }, [isDark])
+
+  // Lecture de l'état du verrou au démarrage ; une erreur du pont (invoke
+  // indisponible) laisse l'app ouverte plutôt que bloquée.
+  useEffect(() => {
+    void isLockActive()
+      .then(setLocked)
+      .catch((e) => {
+        console.error(e)
+        setLocked(false)
+      })
+  }, [])
 
   const toggleDark = useCallback(() => setIsDark((d: boolean) => !d), [])
 
@@ -205,6 +224,12 @@ function App() {
     setSidebarCollapsed((prev) => !prev)
   }, [])
 
+  // Tant que l'état du verrou est inconnu : calque opaque (pas de flash de
+  // contenu). Verrou actif : LockGate en calque assombri au-dessus de
+  // l'interface (compromis assumé du verrou de confort — l'interface n'est
+  // ni cliquable ni lisible derrière le calque).
+  if (locked === null) return <div className="fixed inset-0 z-[60] bg-background" aria-hidden="true" />
+
   return (
     <main className="flex h-screen overflow-hidden">
       <Sidebar
@@ -263,12 +288,22 @@ function App() {
             <BookIcon className="size-[22px]" />
           </button>
           <button
-            aria-label={t.settings.modelsSettings}
-            title={t.settings.modelsSettings}
-            onClick={() => setSettingsOpen(true)}
+            aria-label={t.providers.modelsSettings}
+            title={t.providers.modelsSettings}
+            onClick={() => setProvidersOpen(true)}
             className="rounded-md p-1.5 hover:bg-foreground/5"
           >
             <ReglageIcon className="size-[22px]" />
+          </button>
+          {/* Séparateur discret */}
+          <div className="w-px h-5 bg-border mx-1" aria-hidden="true" />
+          <button
+            aria-label={t.generalSettings.open}
+            title={t.generalSettings.open}
+            onClick={() => setGeneralSettingsOpen(true)}
+            className="rounded-md p-1.5 hover:bg-foreground/5"
+          >
+            <ParaGenIcon className="size-[22px]" />
           </button>
         </div>
         </header>
@@ -296,10 +331,14 @@ function App() {
           webUnavailableReason={webToolsUnsupported ? t.chat.webModelUnsupported : t.chat.webUnavailable}
         />
       </section>
-      {settingsOpen && (
-        <SettingsDialog onClose={() => setSettingsOpen(false)} onChanged={onSettingsChanged} />
+      {providersOpen && (
+        <ProvidersDialog onClose={() => setProvidersOpen(false)} onChanged={onSettingsChanged} />
+      )}
+      {generalSettingsOpen && (
+        <GeneralSettingsDialog onClose={() => setGeneralSettingsOpen(false)} />
       )}
       {assistantOpen && <AssistantDialog onClose={() => setAssistantOpen(false)} conversationId={activeId} />}
+      {locked && <LockGate onUnlock={() => setLocked(false)} />}
       {mcpOpen && (
         <McpDialog
           snapshot={mcpRuntime}

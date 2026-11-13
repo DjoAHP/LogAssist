@@ -1,5 +1,36 @@
 export const fr = {
   app: { title: "LogAssist", subtitle: "Assistant IA" },
+  lockSettings: {
+    sectionTitle: "Verrouillage",
+    description: "Demande un mot de passe à l'ouverture de LogAssist.",
+    enabled: "Verrou activé",
+    disabled: "Verrou désactivé",
+    change: "Changer le mot de passe",
+    currentPassword: "Mot de passe actuel",
+    newPassword: "Nouveau mot de passe",
+    confirmPassword: "Confirmer le mot de passe",
+    validate: "Valider",
+    cancel: "Annuler",
+    mismatch: "Les mots de passe ne correspondent pas.",
+    tooShort: "Le mot de passe doit contenir au moins 4 caractères.",
+    verifyCurrentFailed: "Mot de passe actuel incorrect.",
+    saveFailed: "Échec de l'enregistrement. Réessayez.",
+  },
+  generalSettings: {
+    open: "Paramètres généraux",
+    title: "Paramètres généraux",
+    close: "Fermer",
+    categories: { lock: "Mot de passe" },
+  },
+  lock: {
+    title: "LogAssist verrouillé",
+    subtitle: "Entrez votre mot de passe pour accéder à l'application.",
+    passwordField: "Mot de passe",
+    unlock: "Déverrouiller",
+    verifying: "Vérification…",
+    wrongPassword: "Mot de passe incorrect.",
+    verifyFailed: "Échec de la vérification. Réessayez.",
+  },
   sidebar: {
     newConversation: "Nouveau chat",
     search: "Rechercher…",
@@ -63,7 +94,7 @@ export const fr = {
     allowToolOnce: "Autoriser une fois",
     denyTool: "Refuser",
   },
-  settings: {
+  providers: {
     title: "Fournisseur",
     addProvider: "Ajouter un fournisseur",
     editProvider: "Modifier le fournisseur",

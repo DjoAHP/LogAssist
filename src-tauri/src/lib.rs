@@ -4,10 +4,11 @@ pub mod mcp;
 use std::sync::Arc;
 
 use commands::{
-    delete_secret, execute_transaction, get_secret, mcp_auth_status, mcp_call_tool,
-    mcp_cancel_turn, mcp_configure_auth, mcp_connect_and_list_tools, mcp_delete_secret,
-    mcp_disconnect, mcp_finish_turn, mcp_sync_registry, mcp_test_tool, mcp_validate_configs,
-    set_secret,
+    applock_configured, delete_secret, execute_transaction, get_secret, mcp_auth_status,
+    mcp_call_tool, mcp_cancel_turn, mcp_configure_auth, mcp_connect_and_list_tools,
+    mcp_delete_secret, mcp_disconnect, mcp_finish_turn, mcp_sync_registry, mcp_test_tool,
+    mcp_validate_configs, remove_applock_secret, set_applock_secret, set_secret,
+    verify_applock_secret,
 };
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -45,7 +46,11 @@ pub fn run() {
             mcp_cancel_turn,
             mcp_finish_turn,
             mcp_disconnect,
-            execute_transaction
+            execute_transaction,
+            set_applock_secret,
+            verify_applock_secret,
+            applock_configured,
+            remove_applock_secret
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

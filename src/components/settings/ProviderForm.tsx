@@ -12,7 +12,7 @@ interface Props {
   onCancel: () => void
 }
 
-// Formulaire d'un fournisseur (création ou édition inline dans SettingsDialog).
+// Formulaire d'un fournisseur (création ou édition inline dans ProvidersDialog).
 // La clé API ne vit jamais en base : transmise à providers.create/update qui
 // la délègue au Credential Manager via secretRefFor(id).
 export function ProviderForm({ initial, onSaved, onCancel }: Props) {
@@ -26,13 +26,13 @@ export function ProviderForm({ initial, onSaved, onCancel }: Props) {
   const [saving, setSaving] = useState(false)
 
   const submit = async () => {
-    if (!name.trim()) { setError(t.settings.nameRequired); return }
+    if (!name.trim()) { setError(t.providers.nameRequired); return }
     // Nettoyage unique : helper partagé avec l'adaptateur (le /v1 est préservé).
     const cleanedBaseUrl = cleanApiBaseUrl(baseUrl.trim())
     // Invariant sécurité : https distant OU boucle locale (LM Studio/Ollama).
     // Un http:// externe reste refusé — la boucle locale est la seule exception.
     if (!cleanedBaseUrl.startsWith("https://") && !isLocalBaseUrl(cleanedBaseUrl)) {
-      setError(t.settings.invalidUrl)
+      setError(t.providers.invalidUrl)
       return
     }
     setSaving(true)
@@ -44,7 +44,7 @@ export function ProviderForm({ initial, onSaved, onCancel }: Props) {
       onSaved(row)
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e)
-      setError(t.settings.saveFailed)
+      setError(t.providers.saveFailed)
       logger.error({
         context: "ProviderForm.save",
         message: redactSensitiveDetail(message, [secret]),
@@ -62,9 +62,9 @@ export function ProviderForm({ initial, onSaved, onCancel }: Props) {
         void submit()
       }}
     >
-      <p className="text-sm font-semibold">{editing ? t.settings.editProvider : t.settings.addProvider}</p>
+      <p className="text-sm font-semibold">{editing ? t.providers.editProvider : t.providers.addProvider}</p>
       <label className="block space-y-1">
-        <span className="text-xs text-muted-foreground">{t.settings.name}</span>
+        <span className="text-xs text-muted-foreground">{t.providers.name}</span>
         <input
           value={name}
           onChange={(e) => setName(e.target.value)}
@@ -72,7 +72,7 @@ export function ProviderForm({ initial, onSaved, onCancel }: Props) {
         />
       </label>
       <label className="block space-y-1">
-        <span className="text-xs text-muted-foreground">{t.settings.family}</span>
+        <span className="text-xs text-muted-foreground">{t.providers.family}</span>
         <select
           value={family}
           onChange={(e) => setFamily(e.target.value === "gemini" ? "gemini" : "openai")}
@@ -83,7 +83,7 @@ export function ProviderForm({ initial, onSaved, onCancel }: Props) {
         </select>
       </label>
       <label className="block space-y-1">
-        <span className="text-xs text-muted-foreground">{t.settings.baseUrl}</span>
+        <span className="text-xs text-muted-foreground">{t.providers.baseUrl}</span>
         <input
           value={baseUrl}
           onChange={(e) => setBaseUrl(e.target.value)}
@@ -93,15 +93,15 @@ export function ProviderForm({ initial, onSaved, onCancel }: Props) {
       </label>
       <div className="space-y-1">
         <div className="flex items-center justify-between">
-          <span className="text-xs text-muted-foreground">{t.settings.apiKey}</span>
+          <span className="text-xs text-muted-foreground">{t.providers.apiKey}</span>
           {editing && !replaceKey && (
             <button type="button" className="text-xs underline hover:opacity-80" onClick={() => setReplaceKey(true)}>
-              {t.settings.replaceKey}
+              {t.providers.replaceKey}
             </button>
           )}
         </div>
         {!replaceKey ? (
-          <p className="text-xs text-muted-foreground">{t.settings.apiKeyStored}</p>
+          <p className="text-xs text-muted-foreground">{t.providers.apiKeyStored}</p>
         ) : (
           <input
             type="password"
@@ -118,14 +118,14 @@ export function ProviderForm({ initial, onSaved, onCancel }: Props) {
           onClick={onCancel}
           className="rounded-md border border-border px-3 py-1.5 text-sm hover:bg-foreground/5"
         >
-          {t.settings.cancel}
+          {t.providers.cancel}
         </button>
         <button
           type="submit"
           disabled={saving}
           className="rounded-md border border-border bg-foreground/10 px-3 py-1.5 text-sm hover:bg-foreground/20 disabled:opacity-50"
         >
-          {t.settings.save}
+          {t.providers.save}
         </button>
       </div>
     </form>

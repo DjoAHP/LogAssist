@@ -68,24 +68,24 @@ describe("ProviderCard", () => {
     expect(urlElement.getAttribute("title")).toBe("http://localhost:11434/v1")
 
     // Vérifie les 4 boutons d'action avec type="button"
-    const testButton = screen.getByRole("button", { name: t.settings.test })
+    const testButton = screen.getByRole("button", { name: t.providers.test })
     expect(testButton.getAttribute("type")).toBe("button")
     expect(testButton.getAttribute("data-action")).toBe("test-connection")
 
-    const fetchButton = screen.getByRole("button", { name: t.settings.fetchModels })
+    const fetchButton = screen.getByRole("button", { name: t.providers.fetchModels })
     expect(fetchButton.getAttribute("type")).toBe("button")
     expect(fetchButton.getAttribute("data-action")).toBe("fetch-models")
 
-    const editButton = screen.getByRole("button", { name: t.settings.edit })
+    const editButton = screen.getByRole("button", { name: t.providers.edit })
     expect(editButton.getAttribute("type")).toBe("button")
     expect(editButton.getAttribute("data-action")).toBe("edit-provider")
 
-    const deleteButton = screen.getByRole("button", { name: t.settings.delete })
+    const deleteButton = screen.getByRole("button", { name: t.providers.delete })
     expect(deleteButton.getAttribute("type")).toBe("button")
     expect(deleteButton.getAttribute("data-action")).toBe("delete")
 
     // Vérifie le bouton principal "Parcourir les modèles"
-    const browseButton = screen.getByRole("button", { name: `${t.settings.browseModels} (5)` })
+    const browseButton = screen.getByRole("button", { name: `${t.providers.browseModels} (5)` })
     expect(browseButton.getAttribute("type")).toBe("button")
     expect(browseButton.getAttribute("data-action")).toBe("browse-models")
   })
@@ -94,23 +94,23 @@ describe("ProviderCard", () => {
     render(<ProviderCard {...defaultProps} />)
 
     // Clic sur Test
-    fireEvent.click(screen.getByRole("button", { name: t.settings.test }))
+    fireEvent.click(screen.getByRole("button", { name: t.providers.test }))
     expect(mockOnTest).toHaveBeenCalledTimes(1)
 
     // Clic sur Récupérer les modèles
-    fireEvent.click(screen.getByRole("button", { name: t.settings.fetchModels }))
+    fireEvent.click(screen.getByRole("button", { name: t.providers.fetchModels }))
     expect(mockOnFetchModels).toHaveBeenCalledTimes(1)
 
     // Clic sur Modifier
-    fireEvent.click(screen.getByRole("button", { name: t.settings.edit }))
+    fireEvent.click(screen.getByRole("button", { name: t.providers.edit }))
     expect(mockOnEdit).toHaveBeenCalledTimes(1)
 
     // Clic sur Supprimer
-    fireEvent.click(screen.getByRole("button", { name: t.settings.delete }))
+    fireEvent.click(screen.getByRole("button", { name: t.providers.delete }))
     expect(mockOnDelete).toHaveBeenCalledTimes(1)
 
     // Clic sur Parcourir les modèles
-    fireEvent.click(screen.getByRole("button", { name: `${t.settings.browseModels} (5)` }))
+    fireEvent.click(screen.getByRole("button", { name: `${t.providers.browseModels} (5)` }))
     expect(mockOnBrowseModels).toHaveBeenCalledTimes(1)
   })
 })
@@ -119,14 +119,14 @@ describe("ProviderCard — états des actions", () => {
   it("désactive et annonce uniquement le test pendant la connexion", () => {
     render(<ProviderCard {...defaultProps} connectionStatus={{ state: "testing" }} />)
 
-    const testButton = screen.getByRole("button", { name: t.settings.test }) as HTMLButtonElement
-    const fetchButton = screen.getByRole("button", { name: t.settings.fetchModels }) as HTMLButtonElement
+    const testButton = screen.getByRole("button", { name: t.providers.test }) as HTMLButtonElement
+    const fetchButton = screen.getByRole("button", { name: t.providers.fetchModels }) as HTMLButtonElement
     const status = screen.getByTestId("test-connection-status")
 
     expect(testButton.disabled).toBe(true)
     expect(testButton.getAttribute("aria-busy")).toBe("true")
     expect(fetchButton.disabled).toBe(false)
-    expect(status.textContent).toBe(t.settings.testing)
+    expect(status.textContent).toBe(t.providers.testing)
     expect(status.getAttribute("aria-live")).toBe("polite")
   })
 
@@ -134,21 +134,21 @@ describe("ProviderCard — états des actions", () => {
     render(<ProviderCard {...defaultProps} connectionStatus={{ state: "ok" }} />)
 
     const status = screen.getByTestId("test-connection-status")
-    expect(status.textContent).toBe(t.settings.ok)
+    expect(status.textContent).toBe(t.providers.ok)
     expect(status.closest('[data-state="success"]')).not.toBeNull()
   })
 
   it("affiche l'échec de récupération sans désactiver les autres actions", () => {
     render(<ProviderCard
       {...defaultProps}
-      fetchStatus={{ state: "fail", message: t.settings.noKey }}
+      fetchStatus={{ state: "fail", message: t.providers.noKey }}
     />)
 
     const status = screen.getByTestId("fetch-models-status")
-    const testButton = screen.getByRole("button", { name: t.settings.test }) as HTMLButtonElement
+    const testButton = screen.getByRole("button", { name: t.providers.test }) as HTMLButtonElement
 
-    expect(status.textContent).toContain(t.settings.fetchFail)
-    expect(status.textContent).toContain(t.settings.noKey)
+    expect(status.textContent).toContain(t.providers.fetchFail)
+    expect(status.textContent).toContain(t.providers.noKey)
     expect(status.closest('[data-state="error"]')).not.toBeNull()
     expect(testButton.disabled).toBe(false)
   })
@@ -157,7 +157,7 @@ describe("ProviderCard — états des actions", () => {
     render(<ProviderCard {...defaultProps} fetchStatus={{ state: "ok", added: 2 }} />)
 
     expect(screen.getByTestId("fetch-models-status").textContent)
-      .toBe(`2 ${t.settings.fetchOkAdded}`)
+      .toBe(`2 ${t.providers.fetchOkAdded}`)
   })
 })
 
@@ -200,9 +200,9 @@ describe("ProviderCard — proportions et couleurs (TDD)", () => {
     expect(hasClass(actionsGroup, "flex")).toBe(false)
 
     // Chaque conteneur d'action (parent [data-state]) doit être w-full
-    const testContainer = screen.getByRole("button", { name: t.settings.test }).closest("[data-state]") as HTMLElement
-    const fetchContainer = screen.getByRole("button", { name: t.settings.fetchModels }).closest("[data-state]") as HTMLElement
-    const editContainer = screen.getByRole("button", { name: t.settings.edit }).closest("[data-state]") as HTMLElement
+    const testContainer = screen.getByRole("button", { name: t.providers.test }).closest("[data-state]") as HTMLElement
+    const fetchContainer = screen.getByRole("button", { name: t.providers.fetchModels }).closest("[data-state]") as HTMLElement
+    const editContainer = screen.getByRole("button", { name: t.providers.edit }).closest("[data-state]") as HTMLElement
     expect(hasClass(testContainer, "w-full")).toBe(true)
     expect(hasClass(fetchContainer, "w-full")).toBe(true)
     expect(hasClass(editContainer, "w-full")).toBe(true)
@@ -212,7 +212,7 @@ describe("ProviderCard — proportions et couleurs (TDD)", () => {
     render(<ProviderCard {...defaultProps} />)
 
     // Bouton test compact pour une carte sur quatre colonnes.
-    const testButton = screen.getByRole("button", { name: t.settings.test })
+    const testButton = screen.getByRole("button", { name: t.providers.test })
     expect(hasClass(testButton, "min-h-24")).toBe(true)
     expect(hasClass(testButton, "pb-8")).toBe(true)
     expect(hasClass(testButton, "pt-2.5")).toBe(true)
@@ -235,7 +235,7 @@ describe("ProviderCard — proportions et couleurs (TDD)", () => {
     expect(hasClass(card, "min-h-64")).toBe(false)
 
     // Bouton browse : absence de mt-auto
-    const browseButton = screen.getByRole("button", { name: `${t.settings.browseModels} (5)` })
+    const browseButton = screen.getByRole("button", { name: `${t.providers.browseModels} (5)` })
     expect(hasClass(browseButton, "mt-auto")).toBe(false)
     expect(hasClass(browseButton, "py-1.5")).toBe(true)
     expect(hasClass(browseButton, "text-xs")).toBe(true)
@@ -244,7 +244,7 @@ describe("ProviderCard — proportions et couleurs (TDD)", () => {
   it("conserve un texte lisible sur le bouton modèles dans les deux thèmes", () => {
     render(<ProviderCard {...defaultProps} />)
 
-    const browseButton = screen.getByRole("button", { name: `${t.settings.browseModels} (5)` })
+    const browseButton = screen.getByRole("button", { name: `${t.providers.browseModels} (5)` })
 
     // Texte foreground standard (pas brand-foreground)
     expect(hasClass(browseButton, "text-foreground")).toBe(true)

@@ -40,7 +40,7 @@ describe("LocalModelsPanel — presets LM Studio / Ollama", () => {
 
   it("état non configuré : bouton Ajouter; clic → create avec preset + clé factice", async () => {
     render(<LocalModelsPanel rows={[]} onChanged={onChanged} />)
-    fireEvent.click(screen.getAllByText(t.settings.localAdd)[0])
+    fireEvent.click(screen.getAllByText(t.providers.localAdd)[0])
     await waitFor(() => {
       expect(mockCreate).toHaveBeenCalledWith("LM Studio", "openai", "http://localhost:1234/v1", "not-needed")
     })
@@ -49,14 +49,14 @@ describe("LocalModelsPanel — presets LM Studio / Ollama", () => {
 
   it("état déjà configuré : pas de bouton, libellé déjà configuré", () => {
     render(<LocalModelsPanel rows={[localRow]} onChanged={onChanged} />)
-    const buttonCount = screen.queryAllByText(t.settings.localAdd).length
+    const buttonCount = screen.queryAllByText(t.providers.localAdd).length
     expect(buttonCount).toBe(1) // Ollama seul reste ajoutable
-    expect(screen.queryAllByText(t.settings.localConfigured).length).toBe(1)
+    expect(screen.queryAllByText(t.providers.localConfigured).length).toBe(1)
   })
 
   it("double-clic rapide : un seul create (anti-doublon via busy global)", async () => {
     render(<LocalModelsPanel rows={[]} onChanged={onChanged} />)
-    const buttons = screen.getAllByText(t.settings.localAdd)
+    const buttons = screen.getAllByText(t.providers.localAdd)
     fireEvent.click(buttons[0])
     fireEvent.click(buttons[0])
     await waitFor(() => {
