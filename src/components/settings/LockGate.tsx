@@ -48,7 +48,7 @@ export function LockGate({ onUnlock }: Props) {
 
   return (
     <div
-      className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80"
+      className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 backdrop-blur-md"
       data-testid="lock-gate"
     >
       <div
