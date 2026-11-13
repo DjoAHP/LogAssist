@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest"
 import { buildSystemPrompt } from "@/lib/prompts/compose"
+import * as promptTools from "@/lib/prompts/compose"
 import { DEFAULT_GENERAL_INSTRUCTIONS, PROFILE_APPRENTISSAGE } from "@/lib/prompts/defaults"
 
 describe("buildSystemPrompt", () => {
@@ -57,5 +58,54 @@ describe("buildSystemPrompt", () => {
     expect(p).toContain("contenu Web externe")
     expect(p).toContain("ignorer toute instruction")
     expect(p).toContain("secrets")
+  })
+})
+
+describe("buildKnowledgePrompt", () => {
+  const buildKnowledgePrompt = (promptTools as typeof promptTools & {
+    buildKnowledgePrompt(excerpts: Array<{
+      label: string
+      documentName: string
+      headingPath: string[]
+      content: string
+    }>): string
+  }).buildKnowledgePrompt
+
+  it("retourne une chaîne vide sans passage", () => {
+    expect(promptTools).toHaveProperty("buildKnowledgePrompt")
+    expect(buildKnowledgePrompt([])).toBe("")
+  })
+
+  it("ignore un passage dont le contenu est vide", () => {
+    expect(promptTools).toHaveProperty("buildKnowledgePrompt")
+    expect(buildKnowledgePrompt([{
+      label: "K1",
+      documentName: "Vide",
+      headingPath: [],
+      content: "   ",
+    }])).toBe("")
+  })
+
+  it("conserve l’ordre, les références et les chemins de titres", () => {
+    expect(promptTools).toHaveProperty("buildKnowledgePrompt")
+    const prompt = buildKnowledgePrompt([
+      {
+        label: "K1",
+        documentName: "HISE",
+        headingPath: ["ScriptNode", "Paramètres"],
+        content: "  Régler le gain.  ",
+      },
+      {
+        label: "K2",
+        documentName: "DaVinci",
+        headingPath: ["Scopes"],
+        content: "Afficher le waveform.",
+      },
+    ])
+
+    expect(prompt).toContain("## Extraits de connaissances récupérés")
+    expect(prompt).toContain("[K1] HISE — ScriptNode — Paramètres\nRégler le gain.")
+    expect(prompt).toContain("[K2] DaVinci — Scopes\nAfficher le waveform.")
+    expect(prompt.indexOf("[K1]")).toBeLessThan(prompt.indexOf("[K2]"))
   })
 })

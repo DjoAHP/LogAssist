@@ -1411,7 +1411,7 @@ git commit -m "feat: borne l historique par récence et pertinence"
 - Modify: `src/lib/prompts/compose.ts`
 - Modify: `src/lib/prompts/compose.test.ts`
 
-- [ ] **Step 1: Écrire les tests rouges de l’allocateur**
+- [x] **Step 1: Écrire les tests rouges de l’allocateur**
 
 Créer `src/lib/context/allocator.test.ts` :
 
@@ -1439,7 +1439,7 @@ describe("allocateCandidates", () => {
 })
 ```
 
-- [ ] **Step 2: Écrire les tests rouges du planificateur**
+- [x] **Step 2: Écrire les tests rouges du planificateur**
 
 Créer `src/lib/context/contextPlanner.test.ts` avec un estimateur déterministe :
 
@@ -1520,7 +1520,7 @@ it("réduit progressivement connaissances et historique sans muter les sources",
 })
 ```
 
-- [ ] **Step 3: Écrire le test rouge des résultats MCP segmentés**
+- [x] **Step 3: Écrire le test rouge des résultats MCP segmentés**
 
 Dans le même fichier :
 
@@ -1554,7 +1554,7 @@ it("tronque un résultat MCP par segments et garde son enveloppe", () => {
 })
 ```
 
-- [ ] **Step 4: Écrire les tests rouges du diagnostic sûr**
+- [x] **Step 4: Écrire les tests rouges du diagnostic sûr**
 
 Créer `src/lib/context/diagnostics.test.ts` :
 
@@ -1577,7 +1577,7 @@ it("n’expose aucun contenu privé dans le diagnostic", () => {
 })
 ```
 
-- [ ] **Step 5: Exécuter les tests et confirmer l’échec**
+- [x] **Step 5: Exécuter les tests et confirmer l’échec**
 
 ```bash
 powershell.exe -NoProfile -Command "Set-Location 'C:\dev\LogAssist'; npx vitest run src/lib/context/allocator.test.ts src/lib/context/contextPlanner.test.ts src/lib/context/diagnostics.test.ts src/lib/prompts/compose.test.ts"
@@ -1585,7 +1585,7 @@ powershell.exe -NoProfile -Command "Set-Location 'C:\dev\LogAssist'; npx vitest 
 
 Expected: allocateur, session et diagnostic absents.
 
-- [ ] **Step 6: Définir les messages additionnels et statistiques**
+- [x] **Step 6: Définir les messages additionnels et statistiques**
 
 Dans `src/lib/context/types.ts` :
 
@@ -1659,13 +1659,13 @@ export interface ContextSession {
 }
 ```
 
-- [ ] **Step 7: Implémenter l’allocateur déterministe**
+- [x] **Step 7: Implémenter l’allocateur déterministe**
 
 `allocateCandidates()` trie par `utility desc`, puis `utility / tokens desc`, puis
 `id`. Il ignore les tokens non sûrs, n’ajoute un candidat que si le total reste
 inférieur ou égal au budget et retourne une nouvelle liste sans muter l’entrée.
 
-- [ ] **Step 8: Ajouter la composition des extraits référencés**
+- [x] **Step 8: Ajouter la composition des extraits référencés**
 
 Dans `src/lib/prompts/compose.ts`, ajouter :
 
@@ -1693,7 +1693,7 @@ export function buildKnowledgePrompt(excerpts: readonly KnowledgeExcerpt[]): str
 
 Ajouter des tests d’ordre, de labels et d’omission quand la liste est vide.
 
-- [ ] **Step 9: Implémenter la session et l’allocation**
+- [x] **Step 9: Implémenter la session et l’allocation**
 
 `createContextSession()` reçoit exactement :
 
@@ -1747,7 +1747,7 @@ avant le suffixe de fermeture.
 
 `dispose()` appelle une seule fois `estimator.dispose()`.
 
-- [ ] **Step 10: Implémenter la projection de diagnostic**
+- [x] **Step 10: Implémenter la projection de diagnostic**
 
 Utiliser cette signature :
 
@@ -1770,7 +1770,7 @@ fait jamais de spread d’un objet contenant des textes privés. Les seules
 références de connaissance retournées sont `documentId`, `fingerprint` et
 `chunkIndex`.
 
-- [ ] **Step 11: Relancer les tests ciblés**
+- [x] **Step 11: Relancer les tests ciblés**
 
 ```bash
 powershell.exe -NoProfile -Command "Set-Location 'C:\dev\LogAssist'; npx vitest run src/lib/context/allocator.test.ts src/lib/context/contextPlanner.test.ts src/lib/context/diagnostics.test.ts src/lib/prompts/compose.test.ts"
@@ -1778,7 +1778,7 @@ powershell.exe -NoProfile -Command "Set-Location 'C:\dev\LogAssist'; npx vitest 
 
 Expected: PASS.
 
-- [ ] **Step 12: Committer le planificateur**
+- [x] **Step 12: Committer le planificateur**
 
 ```bash
 git add src/lib/context/allocator.ts src/lib/context/allocator.test.ts src/lib/context/contextPlanner.ts src/lib/context/contextPlanner.test.ts src/lib/context/diagnostics.ts src/lib/context/diagnostics.test.ts src/lib/context/types.ts src/lib/context/index.ts src/lib/prompts/compose.ts src/lib/prompts/compose.test.ts

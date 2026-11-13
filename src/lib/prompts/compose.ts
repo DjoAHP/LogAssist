@@ -3,6 +3,30 @@ export interface KnowledgeSection {
   content: string
 }
 
+export interface KnowledgeExcerpt {
+  label: string
+  documentName: string
+  headingPath: string[]
+  content: string
+}
+
+export function buildKnowledgePrompt(excerpts: readonly KnowledgeExcerpt[]): string {
+  const usable = excerpts.filter((excerpt) => excerpt.content.trim().length > 0)
+  if (usable.length === 0) return ""
+  const blocks = usable.map((excerpt) => {
+    const location = [excerpt.documentName, ...excerpt.headingPath]
+      .map((part) => part.trim())
+      .filter(Boolean)
+      .join(" — ")
+    return `[${excerpt.label}] ${location}\n${excerpt.content.trim()}`
+  })
+  return [
+    "## Extraits de connaissances récupérés",
+    "Utilise uniquement les extraits utiles et conserve leur référence [K…] lorsqu’une attribution aide la réponse.",
+    ...blocks,
+  ].join("\n\n")
+}
+
 export function buildSystemPrompt(input: {
   general: string
   profile: string
