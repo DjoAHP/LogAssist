@@ -114,7 +114,7 @@ export async function runAssistantTurn(
     sources: [],
     media: [],
     ...(result.usage ? { usage: result.usage } : {}),
-    ...(!result.usage && prepared && input.context
+    ...(prepared && input.context
       ? {
           estimatedUsage: {
             inputTokens: prepared.stats.inputTokens,

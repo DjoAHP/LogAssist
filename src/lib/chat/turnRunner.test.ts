@@ -77,6 +77,32 @@ describe("runAssistantTurn", () => {
     expect(result).toMatchObject({ estimatedUsage: { inputTokens: 37, outputTokens: 12 } })
   })
 
+  it("conserve une estimation de repli même si le fournisseur annonce un usage", async () => {
+    const context = preparedContext(request)
+    const runTurn = vi.fn().mockResolvedValue({
+      text: "Réponse",
+      toolCalls: [],
+      firstTokenMs: 12,
+      totalMs: 40,
+      usage: { inputTokens: 40, outputTokens: 10 },
+    })
+
+    const result = await runAssistantTurn({
+      provider: providerWithRunTurn(runTurn),
+      request,
+      context,
+      apiKey: "secret",
+      modelId: "model",
+      callbacks,
+      signal,
+    })
+
+    expect(result).toMatchObject({
+      usage: { inputTokens: 40, outputTokens: 10 },
+      estimatedUsage: { inputTokens: 37, outputTokens: 12 },
+    })
+  })
+
   it("retourne un résultat uniforme pour un tour direct", async () => {
     const runTurn = vi.fn().mockResolvedValue({
       text: "Réponse",

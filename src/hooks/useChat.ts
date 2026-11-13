@@ -26,8 +26,11 @@ import type {
   WebStatus,
 } from "@/lib/mcp/types"
 import { buildChatMessages } from "@/lib/chat/contextBuilder"
+import { prepareConversationContext } from "@/lib/chat/prepareConversationContext"
 import { createRecoveryPlan, type RecoveryMode } from "@/lib/chat/recoveryPolicy"
 import { runAssistantTurn, type AssistantTurnResult } from "@/lib/chat/turnRunner"
+import { invalidateModelContextProfile } from "@/lib/context/modelCapabilities"
+import type { ContextSession } from "@/lib/context"
 import type { ToolMedia } from "@/lib/mcp/toolAgent"
 import {
   estimateTurnMetrics,
@@ -105,6 +108,24 @@ function normalizeDuration(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) && value >= 0
     ? Math.round(value)
     : null
+}
+
+function metricsFromEstimatedUsage(
+  usage: AssistantTurnResult["estimatedUsage"],
+): TurnMetrics | null {
+  if (
+    !usage ||
+    !Number.isSafeInteger(usage.inputTokens) ||
+    !Number.isSafeInteger(usage.outputTokens) ||
+    usage.inputTokens < 0 ||
+    usage.outputTokens < 0
+  ) return null
+  return {
+    inputTokens: usage.inputTokens,
+    outputTokens: usage.outputTokens,
+    usageSource: "estimated",
+    costMicrousd: null,
+  }
 }
 
 /** Réfs JSON ordonnées des médias : tolérant aux valeurs historiques invalides. */
@@ -186,7 +207,14 @@ async function hydrateMedia(
 }
 
 export function useChat(
-  modelSelection: { provider: ProviderConfig; modelId: string; supportsImages: boolean } | null,
+  modelSelection: {
+    provider: ProviderConfig
+    modelRowId: string
+    modelId: string
+    supportsImages: boolean
+    contextWindowOverride: number | null
+    maxOutputTokensOverride: number | null
+  } | null,
   mcpRuntime: McpRuntimeSnapshot = EMPTY_MCP_RUNTIME,
 ) {
   const [vm, setVm] = useState<ChatMessageVM[]>([])
@@ -347,7 +375,7 @@ export function useChat(
 
         // Dès que le message user est committé, la bulle assistant et sa voie
         // d'erreur existent avant toute préparation susceptible d'échouer.
-        const { provider, modelId, supportsImages } = modelSelection
+        const { provider, modelId } = modelSelection
         const label = buildPreview(provider.name, modelId)
         const assistantId = crypto.randomUUID()
         setVm((s) => [...s, {
@@ -439,8 +467,12 @@ export function useChat(
               return
             }
             const api = e as Partial<ApiError>
+            const kind = normalizeApiErrorKind(api.kind)
+            if (kind === "context_length") {
+              invalidateModelContextProfile(`${provider.id}/${modelId}`)
+            }
             const payload: ApiErrorPayload = {
-              kind: normalizeApiErrorKind(api.kind),
+              kind,
               message: redactTurnDetail(api.message ?? "Erreur inattendue"),
               ...(api.detail ? { detail: redactTurnDetail(api.detail) } : {}),
             }
@@ -477,51 +509,24 @@ export function useChat(
             upsertLast({ content: accRef.current })
           },
         }
+        let turnContext: ContextSession | null = null
 
         try {
           // Historique APRÈS l'insert user : le message fait partie du contexte API.
-          // Le prompt est reconstruit à chaque envoi pour appliquer les réglages
-          // et les connaissances actifs au moment du tour.
-          const [promptSettings, enabledKnowledge] = await Promise.all([
-            loadPromptSettings(),
-            (async () => {
-              const overrideIds = await conversationKnowledge.listOn(conversationId)
-              if (overrideIds.length > 0) {
-                const rows = await knowledgeDb.list()
-                const byId = new Map(rows.map((knowledge) => [knowledge.id, knowledge]))
-                return overrideIds
-                  .map((id) => byId.get(id))
-                  .filter((knowledge): knowledge is typeof rows[0] =>
-                    !!knowledge && knowledge.enabled === 1)
-              }
-              return knowledgeDb.listEnabled()
-            })(),
-          ])
-          const system = buildSystemPrompt({
-            general: promptSettings.general,
-            profile: promptSettings.profile,
-            knowledge: enabledKnowledge.map((knowledge) => ({
-              name: knowledge.name,
-              content: knowledge.content,
-            })),
-            webEnabled: mcpRuntime.webAccess.enabled && mcpRuntime.webAccess.configured,
-          })
           const history = await messagesDb.listByConversation(conversationId)
-          const apiMessages = buildChatMessages({
-            system,
-            history: history.map((message) => ({ role: message.role, content: message.content })),
-            currentImages: apiImages,
-          })
           const apiProvider = createProvider(provider)
           activeApiKey = (await secrets.get(provider.secretRef)) ?? ""
-
-          // DEBUG: uniquement des métadonnées non sensibles (no-op en production).
-          logger.debug("[useChat] Envoi à l'API:", {
+          turnContext = await prepareConversationContext({
+            conversationId,
+            history,
+            currentImages: apiImages,
+            provider,
+            providerAdapter: apiProvider,
+            apiKey: activeApiKey,
             modelId,
-            supportsImages,
-            apiImagesLength: apiImages.length,
-            lastUserMsgImages: apiMessages[apiMessages.length - 1]?.images?.length ?? 0,
-            messagesCount: apiMessages.length,
+            contextWindowOverride: modelSelection.contextWindowOverride,
+            maxOutputTokensOverride: modelSelection.maxOutputTokensOverride,
+            webEnabled: mcpRuntime.webAccess.enabled && mcpRuntime.webAccess.configured,
           })
 
           activeTurnIdRef.current = assistantId
@@ -547,7 +552,8 @@ export function useChat(
             tools
               ? {
                   provider: apiProvider,
-                  request: { messages: apiMessages },
+                  request: { messages: [] },
+                  context: turnContext,
                   apiKey: activeApiKey,
                   modelId,
                   callbacks: turnCallbacks,
@@ -556,7 +562,8 @@ export function useChat(
                 }
               : {
                   provider: apiProvider,
-                  request: { messages: apiMessages },
+                  request: { messages: [] },
+                  context: turnContext,
                   apiKey: activeApiKey,
                   modelId,
                   callbacks: turnCallbacks,
@@ -574,9 +581,7 @@ export function useChat(
             const providerMetrics = result.usage
               ? metricsFromProviderUsage(result.usage, pricingProvider, modelId)
               : null
-            metrics = providerMetrics ?? (tools
-              ? null
-              : estimateTurnMetrics(apiMessages, result.text, provider.baseUrl, modelId))
+            metrics = providerMetrics ?? metricsFromEstimatedUsage(result.estimatedUsage)
           } catch (metricsError) {
             // Les métriques sont optionnelles : leur panne ne requalifie jamais
             // une réponse fournisseur réussie en erreur API.
@@ -601,6 +606,8 @@ export function useChat(
           }
         } catch (e) {
           await persistError(e)
+        } finally {
+          turnContext?.dispose()
         }
         return true
       } catch (e) {

@@ -2204,7 +2204,7 @@ git commit -m "feat: centralise les sources du contexte de conversation"
 - Modify: `src/lib/chat/contextBuilder.ts`
 - Modify: `src/lib/chat/contextBuilder.test.ts`
 
-- [ ] **Step 1: Écrire le test rouge d’une longue conversation bornée**
+- [x] **Step 1: Écrire le test rouge d’une longue conversation bornée**
 
 Dans `useChat.test.tsx`, ne pas mocker le planificateur pour ce cas ; injecter une
 fabrique de session via `prepareConversationContext` mockée :
@@ -2227,7 +2227,7 @@ it("transmet une ContextSession au runner au lieu de tout l’historique", async
 })
 ```
 
-- [ ] **Step 2: Écrire le test rouge de l’overflow après persistance**
+- [x] **Step 2: Écrire le test rouge de l’overflow après persistance**
 
 ```ts
 it("persiste une erreur de contexte et retourne true après l’insert user", async () => {
@@ -2254,7 +2254,7 @@ expect(invalidateModelContextProfileMock).toHaveBeenCalledWith(`${provider.id}/m
 
 Le payload d’erreur assistant reste persisté comme dans le test précédent.
 
-- [ ] **Step 3: Exécuter les tests et confirmer l’échec**
+- [x] **Step 3: Exécuter les tests et confirmer l’échec**
 
 ```bash
 powershell.exe -NoProfile -Command "Set-Location 'C:\dev\LogAssist'; npx vitest run src/hooks/useChat.test.tsx src/hooks/useChat.media.test.tsx src/App.test.tsx"
@@ -2262,7 +2262,7 @@ powershell.exe -NoProfile -Command "Set-Location 'C:\dev\LogAssist'; npx vitest 
 
 Expected: aucune `ContextSession` transmise.
 
-- [ ] **Step 4: Étendre la sélection active transportée par App**
+- [x] **Step 4: Étendre la sélection active transportée par App**
 
 Le type de `modelSelection` devient :
 
@@ -2280,7 +2280,7 @@ Le type de `modelSelection` devient :
 `App.tsx` prend ces valeurs dans `activeModel` et conserve la recherche de
 `supportsImages` actuelle.
 
-- [ ] **Step 5: Remplacer la préparation manuelle dans `send()`**
+- [x] **Step 5: Remplacer la préparation manuelle dans `send()`**
 
 Après l’insert utilisateur et la création du provider :
 
@@ -2314,7 +2314,7 @@ Dans le chemin d’erreur, si
 `` `${provider.id}/${modelId}` `` avant la persistance de l’erreur afin
 qu’un retry redécouvre une fenêtre LM Studio modifiée.
 
-- [ ] **Step 6: Adapter les métriques estimées**
+- [x] **Step 6: Adapter les métriques estimées**
 
 Priorité :
 
@@ -2333,7 +2333,7 @@ const metrics = result.usage
 
 Ne plus réencoder une requête après le tour dans `useChat`.
 
-- [ ] **Step 7: Garder `contextBuilder` uniquement comme compatibilité testée ou le supprimer**
+- [x] **Step 7: Garder `contextBuilder` uniquement comme compatibilité testée ou le supprimer**
 
 Après migration de tous ses consommateurs, vérifier avec `grep` qu’aucun import de
 `buildChatMessages` ne subsiste. S’il n’en reste aucun, supprimer
@@ -2341,7 +2341,7 @@ Après migration de tous ses consommateurs, vérifier avec `grep` qu’aucun imp
 le conserver et documenter ce consommateur dans le rapport final ; ne pas garder
 un fichier mort.
 
-- [ ] **Step 8: Relancer les tests ciblés**
+- [x] **Step 8: Relancer les tests ciblés**
 
 ```bash
 powershell.exe -NoProfile -Command "Set-Location 'C:\dev\LogAssist'; npx vitest run src/hooks/useChat.test.tsx src/hooks/useChat.media.test.tsx src/App.test.tsx"
@@ -2349,7 +2349,7 @@ powershell.exe -NoProfile -Command "Set-Location 'C:\dev\LogAssist'; npx vitest 
 
 Expected: PASS, y compris contrat anti-perte, images et persistance.
 
-- [ ] **Step 9: Committer l’envoi borné**
+- [x] **Step 9: Committer l’envoi borné**
 
 ```bash
 git add src/hooks/useChat.ts src/hooks/useChat.test.tsx src/hooks/useChat.media.test.tsx src/App.tsx src/App.test.tsx src/lib/chat/contextBuilder.ts src/lib/chat/contextBuilder.test.ts

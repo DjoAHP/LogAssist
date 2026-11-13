@@ -6,6 +6,8 @@ import type { MessageRow } from "@/lib/db/messages"
 import type { ProviderConfig } from "@/lib/ai/types"
 import type { McpRuntimeSnapshot } from "@/lib/mcp/runtime"
 import type { AssistantTurnResult } from "@/lib/chat/turnRunner"
+import type { ContextSession } from "@/lib/context"
+import { ApiError } from "@/lib/ai/errors"
 import { snapshot, genericTool, tinyfishTool } from "@/test/mcpFixtures"
 
 const runTurnMock = vi.hoisted(() => vi.fn())
@@ -44,6 +46,8 @@ const runAssistantTurnMock = vi.hoisted(() => vi.fn(async (input: any) => {
 const mcpCallToolMock = vi.hoisted(() => vi.fn())
 const mcpCancelTurnMock = vi.hoisted(() => vi.fn())
 const resolveWebIntentMock = vi.hoisted(() => vi.fn(() => "auto"))
+const prepareConversationContextMock = vi.hoisted(() => vi.fn())
+const invalidateModelContextProfileMock = vi.hoisted(() => vi.fn())
 
 const runtimeWithTools = (): McpRuntimeSnapshot => snapshot({
   activeTools: [genericTool("db", "delete", "db__delete", "confirm")],
@@ -57,6 +61,20 @@ const runtimeWithWeb = (): McpRuntimeSnapshot => snapshot({
 const assistantResult = (text: string): AssistantTurnResult => ({
   text, sources: [], media: [], firstTokenMs: 5, totalMs: 20,
 })
+
+function preparedContext(inputTokens = 7, outputTokens = 3): ContextSession {
+  return {
+    prepareRound: vi.fn().mockReturnValue({
+      request: {
+        messages: [{ role: "user", content: "Contexte préparé" }],
+        maxOutputTokens: 1024,
+      },
+      stats: { inputTokens, totalWithReserve: inputTokens + 1152 },
+    }),
+    estimateOutput: vi.fn().mockReturnValue(outputTokens),
+    dispose: vi.fn(),
+  } as unknown as ContextSession
+}
 
 function actSend(current: ReturnType<typeof useChat>): Promise<boolean> {
   let sending!: Promise<boolean>
@@ -108,6 +126,12 @@ vi.mock("@/lib/logger", () => ({
   logger: { debug: vi.fn(), error: loggerErrorMock },
 }))
 vi.mock("@/lib/chat/turnRunner", () => ({ runAssistantTurn: runAssistantTurnMock }))
+vi.mock("@/lib/chat/prepareConversationContext", () => ({
+  prepareConversationContext: prepareConversationContextMock,
+}))
+vi.mock("@/lib/context/modelCapabilities", () => ({
+  invalidateModelContextProfile: invalidateModelContextProfileMock,
+}))
 
 import { messages as messagesDb } from "@/lib/db/messages"
 import { messageMedia as messageMediaDb } from "@/lib/db/messageMedia"
@@ -124,7 +148,14 @@ const provider = {
   baseUrl: "https://api.test/v1",
   secretRef: "ref",
 } as unknown as ProviderConfig
-const modelSelection = { provider, modelId: "m1", supportsImages: false }
+const modelSelection = {
+  provider,
+  modelRowId: "model-row-1",
+  modelId: "m1",
+  supportsImages: false,
+  contextWindowOverride: null,
+  maxOutputTokensOverride: null,
+}
 
 function messageRow(overrides: Partial<MessageRow>): MessageRow {
   return {
@@ -161,6 +192,26 @@ beforeEach(() => {
   mcpCallToolMock.mockReset()
   mcpCancelTurnMock.mockReset()
   resolveWebIntentMock.mockReset()
+  prepareConversationContextMock.mockReset().mockImplementation(async (input: {
+    history: Array<{ role: "user" | "assistant"; content: string }>
+    currentImages: Array<{ base64: string; mimeType: string }>
+  }) => {
+    const context = preparedContext()
+    const current = input.history[input.history.length - 1]
+    vi.mocked(context.prepareRound).mockReturnValue({
+      request: {
+        messages: [{
+          role: "user",
+          content: current?.content ?? "Contexte préparé",
+          ...(input.currentImages.length > 0 ? { images: input.currentImages } : {}),
+        }],
+        maxOutputTokens: 1024,
+      },
+      stats: { inputTokens: 7, totalWithReserve: 1159 },
+    } as never)
+    return context
+  })
+  invalidateModelContextProfileMock.mockReset()
   systemPromptMock.mockReturnValue("")
   resolveWebIntentMock.mockReturnValue("auto")
   vi.mocked(messagesDb.insert).mockReset().mockResolvedValue("row-1")
@@ -180,11 +231,15 @@ beforeEach(() => {
     usage: { inputTokens: 40, outputTokens: 10 },
   })
   runAssistantTurnMock.mockImplementation(async (input: any) => {
+    const prepared = input.context?.prepareRound({ additionalMessages: [], tools: [] })
+    const request = prepared?.request ?? input.request
     if (input.tools) {
       // Tool agent path - use runTurnMock with tools config
-      return runTurnMock(input.request, input.apiKey, input.modelId, { tools: [], toolChoice: "auto" }, input.callbacks, input.signal)
+      const result = await runTurnMock(request, input.apiKey, input.modelId, { tools: [], toolChoice: "auto" }, input.callbacks, input.signal)
+      return { ...result, sources: [], media: [], estimatedUsage: { inputTokens: 7, outputTokens: 3 } }
     }
-    return runTurnMock(input.request, input.apiKey, input.modelId, {}, input.callbacks, input.signal)
+    const result = await runTurnMock(request, input.apiKey, input.modelId, {}, input.callbacks, input.signal)
+    return { ...result, sources: [], media: [], estimatedUsage: { inputTokens: 7, outputTokens: 3 } }
   })
   estimateTurnMetricsMock.mockReturnValue({
     inputTokens: 7,
@@ -210,6 +265,61 @@ beforeEach(() => {
 afterEach(cleanup)
 
 describe("useChat.send — contract anti-perte", () => {
+  it("prépare le contexte centralisé, le transmet au runner puis le libère", async () => {
+    const context = preparedContext()
+    prepareConversationContextMock.mockResolvedValueOnce(context)
+    vi.mocked(messagesDb.listByConversation).mockResolvedValueOnce([
+      messageRow({ id: "user-1", role: "user", content: "Salut" }),
+    ])
+    const { result } = renderHook(() => useChat(modelSelection))
+
+    await act(async () => expect(await result.current.send("conv-1", "Salut")).toBe(true))
+
+    expect(prepareConversationContextMock).toHaveBeenCalledWith(expect.objectContaining({
+      conversationId: "conv-1",
+      history: [expect.objectContaining({ id: "user-1", role: "user", content: "Salut" })],
+      currentImages: [],
+      provider,
+      apiKey: "sk-test",
+      modelId: "m1",
+      contextWindowOverride: null,
+      maxOutputTokensOverride: null,
+      webEnabled: false,
+    }))
+    expect(runAssistantTurnMock).toHaveBeenCalledWith(expect.objectContaining({ context }))
+    expect(context.dispose).toHaveBeenCalledTimes(1)
+  })
+
+  it("persiste une erreur de contexte et retourne true après l’insert user", async () => {
+    prepareConversationContextMock.mockRejectedValueOnce(
+      new ApiError("context_length", "Le contexte dépasse la fenêtre disponible du modèle"),
+    )
+    const { result } = renderHook(() => useChat(modelSelection))
+
+    await act(async () => expect(await result.current.send("conv-1", "Question immense")).toBe(true))
+
+    expect(messagesDb.insert).toHaveBeenCalledWith(expect.objectContaining({ role: "user" }))
+    expect(messagesDb.insert).toHaveBeenCalledWith(expect.objectContaining({
+      role: "assistant",
+      error: expect.stringContaining("context_length"),
+    }))
+    expect(runAssistantTurnMock).not.toHaveBeenCalled()
+  })
+
+  it("invalide la fenêtre en cache après un rejet de contexte du fournisseur", async () => {
+    const context = preparedContext()
+    prepareConversationContextMock.mockResolvedValueOnce(context)
+    runAssistantTurnMock.mockRejectedValueOnce(
+      new ApiError("context_length", "n_keep: 9000 >= n_ctx: 8192"),
+    )
+    const { result } = renderHook(() => useChat(modelSelection))
+
+    await act(async () => expect(await result.current.send("conv-1", "Salut")).toBe(true))
+
+    expect(invalidateModelContextProfileMock).toHaveBeenCalledWith("p1/m1")
+    expect(context.dispose).toHaveBeenCalledTimes(1)
+  })
+
   it("persiste les métriques fournisseur et résout true après le tour", async () => {
     const { result } = renderHook(() => useChat(modelSelection))
     await act(async () => {
@@ -262,12 +372,7 @@ describe("useChat.send — contract anti-perte", () => {
     })
 
     expect(metricsFromProviderUsageMock).not.toHaveBeenCalled()
-    expect(estimateTurnMetricsMock).toHaveBeenCalledWith(
-      expect.any(Array),
-      "Sans usage",
-      "https://api.test/v1",
-      "m1",
-    )
+    expect(estimateTurnMetricsMock).not.toHaveBeenCalled()
     expect(messagesDb.insert).toHaveBeenCalledWith(
       expect.objectContaining({
         input_tokens: 7,
@@ -278,15 +383,13 @@ describe("useChat.send — contract anti-perte", () => {
     )
   })
 
-  it("conserve la réponse quand l'estimation des métriques échoue", async () => {
-    runTurnMock.mockResolvedValueOnce({
+  it("conserve la réponse quand le runner ne fournit aucune métrique", async () => {
+    runAssistantTurnMock.mockResolvedValueOnce({
       text: "Réponse sans métriques",
-      toolCalls: [],
+      sources: [],
+      media: [],
       firstTokenMs: 18,
       totalMs: 42,
-    })
-    estimateTurnMetricsMock.mockImplementationOnce(() => {
-      throw new Error("metric failed with Bearer sk-metric-secret")
     })
     const { result } = renderHook(() => useChat(modelSelection))
 
@@ -311,7 +414,7 @@ describe("useChat.send — contract anti-perte", () => {
       firstTokenMs: 18,
     })
     expect(result.current.vm[result.current.vm.length - 1].apiError).toBeUndefined()
-    expect(JSON.stringify(loggerErrorMock.mock.calls)).not.toContain("sk-metric-secret")
+    expect(estimateTurnMetricsMock).not.toHaveBeenCalled()
   })
 
   it("estime les métriques quand l'usage fournisseur est invalide", async () => {
@@ -323,7 +426,7 @@ describe("useChat.send — contract anti-perte", () => {
     })
 
     expect(metricsFromProviderUsageMock).toHaveBeenCalledTimes(1)
-    expect(estimateTurnMetricsMock).toHaveBeenCalledTimes(1)
+    expect(estimateTurnMetricsMock).not.toHaveBeenCalled()
     expect(messagesDb.insert).toHaveBeenCalledWith(
       expect.objectContaining({
         input_tokens: 7,
@@ -342,9 +445,9 @@ describe("useChat.send — contract anti-perte", () => {
       baseUrl: "https://proxy.example.test/v1",
     } as ProviderConfig
     const { result } = renderHook(() => useChat({
+      ...modelSelection,
       provider: displayedAsOpenAi,
       modelId: "gpt-4o-mini",
-      supportsImages: false,
     }))
 
     await act(async () => {
@@ -357,12 +460,7 @@ describe("useChat.send — contract anti-perte", () => {
       "",
       "gpt-4o-mini",
     )
-    expect(estimateTurnMetricsMock).toHaveBeenCalledWith(
-      expect.any(Array),
-      "Réponse",
-      "https://proxy.example.test/v1",
-      "gpt-4o-mini",
-    )
+    expect(estimateTurnMetricsMock).not.toHaveBeenCalled()
   })
 
   it("utilise le Web après l'insert user et persiste uniquement les sources finales", async () => {
@@ -859,28 +957,20 @@ describe("useChat.send — contract anti-perte", () => {
     expect(runTurnMock).not.toHaveBeenCalled()
   })
 
-  it("construit le prompt système depuis les réglages stockés et les connaissances activées", async () => {
-    vi.mocked(conversationKnowledge.listOn).mockResolvedValueOnce([])
-    vi.mocked(knowledge.listEnabled).mockResolvedValueOnce([
-      { id: "k1", name: "HISE", content: "## HISE", enabled: 1, sort_order: 0, created_at: "x" },
-    ])
+  it("délègue la construction du prompt et des connaissances au contexte centralisé", async () => {
     const { result } = renderHook(() => useChat(modelSelection))
     await act(async () => {
       await result.current.send("conv-1", "Salut")
     })
-    const calls = systemPromptMock.mock.calls
-    const arg = calls[calls.length - 1][0] as {
-      general: string
-      profile: string
-      knowledge: { name: string; content: string }[]
-    }
-    expect(arg.general).toBe("GEN")
-    expect(arg.profile).toBe("PROF")
-    expect(arg.knowledge).toEqual([{ name: "HISE", content: "## HISE" }])
+    expect(prepareConversationContextMock).toHaveBeenCalledTimes(1)
+    expect(loadPromptSettings).not.toHaveBeenCalled()
+    expect(knowledge.listEnabled).not.toHaveBeenCalled()
+    expect(conversationKnowledge.listOn).not.toHaveBeenCalled()
+    expect(systemPromptMock).not.toHaveBeenCalled()
   })
 
   it("matérialise une erreur de chargement du prompt après l'insert user", async () => {
-    vi.mocked(loadPromptSettings).mockRejectedValueOnce(new Error("prompt failed"))
+    prepareConversationContextMock.mockRejectedValueOnce(new Error("prompt failed"))
     const { result } = renderHook(() => useChat(modelSelection))
 
     await act(async () => {

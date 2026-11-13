@@ -130,8 +130,11 @@ function App() {
   const modelSelection = activeModel
     ? {
         provider: activeModel.provider,
+        modelRowId: activeModel.modelRowId,
         modelId: activeModel.modelId,
         supportsImages: modelOptions.find((o) => o.isDefault)?.supportsImages ?? false,
+        contextWindowOverride: activeModel.contextWindowOverride,
+        maxOutputTokensOverride: activeModel.maxOutputTokensOverride,
       }
     : null
   const {

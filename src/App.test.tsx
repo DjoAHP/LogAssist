@@ -52,4 +52,11 @@ describe("App — runtime MCP et galerie", () => {
     expect(source).toContain("useChat(modelSelection, mcpRuntime)")
     expect(source).toContain("snapshot={mcpRuntime}")
   })
+
+  it("transmet les overrides du modèle actif au moteur de chat", () => {
+    const source = readFileSync(new URL("./App.tsx", import.meta.url), "utf8")
+    expect(source).toContain("modelRowId: activeModel.modelRowId")
+    expect(source).toContain("contextWindowOverride: activeModel.contextWindowOverride")
+    expect(source).toContain("maxOutputTokensOverride: activeModel.maxOutputTokensOverride")
+  })
 })
