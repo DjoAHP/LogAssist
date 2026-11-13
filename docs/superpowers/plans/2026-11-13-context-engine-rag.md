@@ -1892,7 +1892,7 @@ git commit -m "feat: borne la génération selon le budget disponible"
 - Modify: `src/lib/context/types.ts`
 - Modify: `src/lib/context/contextPlanner.ts`
 
-- [ ] **Step 1: Écrire le test rouge du tour direct préparé**
+- [x] **Step 1: Écrire le test rouge du tour direct préparé**
 
 Dans `turnRunner.test.ts`, créer un faux `ContextSession` :
 
@@ -1918,7 +1918,7 @@ reçoive `preparedRequest`, ainsi que :
 expect(context.prepareRound).toHaveBeenCalledWith({ additionalMessages: [], tools: [] })
 ```
 
-- [ ] **Step 2: Écrire le test rouge de tous les tours MCP**
+- [x] **Step 2: Écrire le test rouge de tous les tours MCP**
 
 Dans `toolAgent.test.ts`, injecter une session dont `prepareRound` retourne une
 requête distincte à chaque appel. Simuler : premier appel outil, second appel
@@ -1940,7 +1940,7 @@ expect(runTurn).toHaveBeenNthCalledWith(
 Ajouter un cas d’incompatibilité outils et attendre un appel supplémentaire de
 `prepareRound({ additionalMessages: [], tools: [] })` pour le repli.
 
-- [ ] **Step 3: Écrire le test rouge de l’enveloppe MCP structurée**
+- [x] **Step 3: Écrire le test rouge de l’enveloppe MCP structurée**
 
 Après un résultat de 200 paragraphes, vérifier que `prepareRound` reçoit un
 élément :
@@ -1958,7 +1958,7 @@ expect.objectContaining({
 Vérifier séparément que le Base64 média n’apparaît ni dans `prefix`, ni dans
 `segments`, ni dans `suffix`.
 
-- [ ] **Step 4: Exécuter les tests et confirmer l’échec**
+- [x] **Step 4: Exécuter les tests et confirmer l’échec**
 
 ```bash
 powershell.exe -NoProfile -Command "Set-Location 'C:\dev\LogAssist'; npx vitest run src/lib/chat/turnRunner.test.ts src/lib/mcp/toolAgent.test.ts"
@@ -1966,7 +1966,7 @@ powershell.exe -NoProfile -Command "Set-Location 'C:\dev\LogAssist'; npx vitest 
 
 Expected: `context` non accepté et appels fournisseur directs.
 
-- [ ] **Step 5: Adapter TurnRunner avec compatibilité transitoire**
+- [x] **Step 5: Adapter TurnRunner avec compatibilité transitoire**
 
 Étendre l’entrée avec `context?: ContextSession`. Tant que `useChat` n’est pas
 encore migré, conserver `request` et créer une session passthrough interne qui
@@ -2004,7 +2004,7 @@ export interface AssistantTurnResult extends ToolAgentResult {
 Ne jamais substituer cette estimation à `result.usage` lorsque le fournisseur
 rapporte son usage exact.
 
-- [ ] **Step 6: Adapter ToolAgent**
+- [x] **Step 6: Adapter ToolAgent**
 
 `ToolAgentInput` reçoit `context: ContextSession`. Remplacer le tableau initial de
 requêtes complètes par :
@@ -2038,13 +2038,13 @@ code. Ajouter l’élément `external_tool` à `additionalMessages`.
 
 Les refus, limites et erreurs d’outil restent de petits messages `kind: "message"`.
 
-- [ ] **Step 7: Préserver usage, annulation, sources et médias**
+- [x] **Step 7: Préserver usage, annulation, sources et médias**
 
 Conserver `UsageAccumulator`, la limite de deux tours, quatre appels, la
 déduplication des sources, la note média sans Base64, les approbations et le même
 `AbortSignal`. Seule la construction de la requête change.
 
-- [ ] **Step 8: Relancer les tests ciblés**
+- [x] **Step 8: Relancer les tests ciblés**
 
 ```bash
 powershell.exe -NoProfile -Command "Set-Location 'C:\dev\LogAssist'; npx vitest run src/lib/chat/turnRunner.test.ts src/lib/mcp/toolAgent.test.ts"
@@ -2052,7 +2052,7 @@ powershell.exe -NoProfile -Command "Set-Location 'C:\dev\LogAssist'; npx vitest 
 
 Expected: PASS.
 
-- [ ] **Step 9: Committer la garde des tours**
+- [x] **Step 9: Committer la garde des tours**
 
 ```bash
 git add src/lib/chat/turnRunner.ts src/lib/chat/turnRunner.test.ts src/lib/mcp/toolAgent.ts src/lib/mcp/toolAgent.test.ts src/lib/context/types.ts src/lib/context/contextPlanner.ts

@@ -4,6 +4,7 @@ import { buildToolDefinitions, firstRoundChoice, firstRoundTools, runToolAgent }
 import type { McpAgentTool, McpToolResult, WebSource } from "@/lib/mcp/types"
 import type { IProvider } from "@/lib/ai/openai-compat"
 import type { TokenUsage, TurnResult, ToolCall, ChatRequest, TurnCallbacks } from "@/lib/ai/types"
+import type { ContextAdditionalMessage, ContextSession } from "@/lib/context"
 import { ApiError } from "@/lib/ai/errors"
 
 describe("buildToolDefinitions", () => {
@@ -245,12 +246,38 @@ function createHarness(options: {
   }
   const callTool = vi.fn()
   const approve = vi.fn().mockResolvedValue("allow")
+  const request = { messages: [{ role: "user", content: "Question" }] } as ChatRequest
+  const prepareRound = vi.fn((round: {
+    additionalMessages: ContextAdditionalMessage[]
+    tools: unknown[]
+  }) => ({
+    request: {
+      messages: [
+        ...request.messages,
+        ...round.additionalMessages.map((entry) => entry.kind === "message"
+          ? entry.message
+          : {
+              role: "tool" as const,
+              toolCallId: entry.toolCallId,
+              content: [entry.prefix, ...entry.segments, entry.suffix].filter(Boolean).join("\n\n"),
+            }),
+      ],
+      maxOutputTokens: 1024,
+    },
+    stats: { inputTokens: 100, totalWithReserve: 1200 },
+  }))
+  const context = {
+    prepareRound,
+    estimateOutput: vi.fn().mockReturnValue(10),
+    dispose: vi.fn(),
+  } as unknown as ContextSession
   const input = {
     provider: { runTurn } as unknown as IProvider,
     toolClient: { call: callTool },
     tools: options.tools,
     webIntent: options.webIntent ?? "auto",
-    request: { messages: [{ role: "user", content: "Question" }] } as ChatRequest,
+    request,
+    context,
     apiKey: "LLM-KEY",
     modelId: "model",
     callbacks: {} as TurnCallbacks,
@@ -261,7 +288,7 @@ function createHarness(options: {
     approve,
     onWebStatus: vi.fn(),
   }
-  return { input, runTurn, callTool, approve, onWebStatus: input.onWebStatus }
+  return { input, runTurn, callTool, approve, context, onWebStatus: input.onWebStatus }
 }
 
 describe("runToolAgent", () => {
@@ -332,6 +359,7 @@ describe("runToolAgent", () => {
     await expect(runToolAgent(harness.input)).resolves.toMatchObject({ text: "Finale" })
     expect(harness.callTool).toHaveBeenCalledTimes(4)
     expect(harness.runTurn.mock.calls[2][3]).toEqual({ toolChoice: "none" })
+    expect(harness.context.prepareRound).toHaveBeenCalledTimes(3)
   })
 
   it("mémorise l'incompatibilité et ne relance qu'une fois sans outils", async () => {
@@ -344,6 +372,7 @@ describe("runToolAgent", () => {
     expect(output.text).toBe("Sans outils")
     expect(harness.input.unsupportedTools.has(harness.input.compatibilityKey)).toBe(true)
     expect(harness.runTurn).toHaveBeenCalledTimes(2)
+    expect(harness.context.prepareRound).toHaveBeenCalledTimes(2)
   })
 
   it("propage AbortError sans appeler un outil", async () => {
@@ -391,6 +420,14 @@ describe("runToolAgent", () => {
       isError: false,
     })
     await runToolAgent(harness.input)
+    const preparedSecondRound = vi.mocked(harness.context.prepareRound).mock.calls[1]?.[0]
+    expect(preparedSecondRound?.additionalMessages).toContainEqual(expect.objectContaining({
+      kind: "external_tool",
+      toolCallId: "c1",
+      prefix: expect.stringContaining("<external_mcp_result"),
+      segments: expect.arrayContaining([expect.stringContaining("Résultat")]),
+      suffix: "</external_mcp_result>",
+    }))
     // Le résultat d'outil est wrappé dans un bloc external_mcp_result (comportement normal) :
     // invariant anti-injection — le structuredContent brut ne doit jamais être persisté
     // directement dans messages.toolResults.
