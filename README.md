@@ -6,6 +6,7 @@
 
 <p align="center">
   <img alt="LogAssist" src="https://img.shields.io/badge/LogAssist-v3.2.1-A5BFD6?style=plastic">
+  <img alt="LogAssist" src="https://img.shields.io/github/package-json/v/DjoAHP/LogAssist?label=version&logo=github">
   <img src="https://img.shields.io/github/package-json/v/DjoAHP/LogAssist?label=version&logo=github" alt="package version" />
 </p>
 
