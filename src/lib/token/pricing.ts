@@ -106,6 +106,12 @@ export function getModelPricing(provider: string, modelId: string): ModelPricing
   return providerPricing?.[normalizeModelId(modelId)] ?? null
 }
 
+/** Tokenizer exact uniquement quand l'origine et le modèle OpenAI sont vérifiés. */
+export function getExactTiktokenModel(baseUrl: string, modelId: string): TiktokenModel | null {
+  if (!isOfficialOpenAiBaseUrl(baseUrl)) return null
+  return MODEL_PRICING.openai[normalizeModelId(modelId)]?.tiktokenModel ?? null
+}
+
 /**
  * Retourne le modèle tiktoken à utiliser pour l'encodage.
  */

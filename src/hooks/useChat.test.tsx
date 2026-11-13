@@ -265,7 +265,7 @@ describe("useChat.send — contract anti-perte", () => {
     expect(estimateTurnMetricsMock).toHaveBeenCalledWith(
       expect.any(Array),
       "Sans usage",
-      "",
+      "https://api.test/v1",
       "m1",
     )
     expect(messagesDb.insert).toHaveBeenCalledWith(
@@ -360,7 +360,7 @@ describe("useChat.send — contract anti-perte", () => {
     expect(estimateTurnMetricsMock).toHaveBeenCalledWith(
       expect.any(Array),
       "Réponse",
-      "",
+      "https://proxy.example.test/v1",
       "gpt-4o-mini",
     )
   })

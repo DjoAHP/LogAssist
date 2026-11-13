@@ -1,7 +1,19 @@
 import { describe, expect, it } from "vitest"
 import { getModelPricing, getTiktokenModel, resolvePricingProvider } from "./pricing"
+import * as pricingTools from "./pricing"
 
 describe("pricing", () => {
+  it("ne fournit un tokenizer exact qu’à un modèle OpenAI officiel connu", () => {
+    const getExactTiktokenModel = (pricingTools as typeof pricingTools & {
+      getExactTiktokenModel(baseUrl: string, modelId: string): string | null
+    }).getExactTiktokenModel
+    expect(pricingTools).toHaveProperty("getExactTiktokenModel")
+    expect(getExactTiktokenModel("https://api.openai.com/v1", "gpt-4o-mini")).toBe("gpt-4o-mini")
+    expect(getExactTiktokenModel("http://localhost:1234/v1", "gpt-4o-mini")).toBeNull()
+    expect(getExactTiktokenModel("https://openrouter.ai/api/v1", "openai/gpt-4o-mini")).toBeNull()
+    expect(getExactTiktokenModel("https://api.openai.com/v1", "modele-inconnu")).toBeNull()
+  })
+
   it("normalise le nom du fournisseur", () => {
     expect(getModelPricing(" OpenAI ", "gpt-4o-mini")).toMatchObject({
       input: 0.15,

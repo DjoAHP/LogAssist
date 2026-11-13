@@ -8,7 +8,7 @@ export const API_ERROR_KINDS: ApiErrorKind[] =
 export interface ChatMessage {
   role: "system" | "user" | "assistant" | "tool"
   content: string
-  images?: { base64: string; mimeType: string }[]
+  images?: { base64: string; mimeType: string; width?: number; height?: number }[]
   toolCallId?: string
   toolCalls?: ToolCall[]
 }

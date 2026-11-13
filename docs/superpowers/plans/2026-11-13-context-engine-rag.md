@@ -745,7 +745,7 @@ git commit -m "feat: détecte la fenêtre réelle des modèles"
 - Modify: `src/hooks/useChat.ts:571-580,749-758`
 - Modify: `src/hooks/useChat.test.tsx`
 
-- [ ] **Step 1: Écrire les tests rouges de l’estimateur conservateur**
+- [x] **Step 1: Écrire les tests rouges de l’estimateur conservateur**
 
 Créer `src/lib/context/tokenEstimator.test.ts` :
 
@@ -791,7 +791,7 @@ describe("tokenEstimator", () => {
 })
 ```
 
-- [ ] **Step 2: Écrire le test rouge qui réserve tiktoken à OpenAI officiel**
+- [x] **Step 2: Écrire le test rouge qui réserve tiktoken à OpenAI officiel**
 
 Dans `src/lib/token/pricing.test.ts` :
 
@@ -809,7 +809,7 @@ serveur privé par des attentes `getExactTiktokenModel(...) === null`. Conserver
 les tests de normalisation des snapshots OpenAI officiels en leur passant
 `https://api.openai.com/v1`.
 
-- [ ] **Step 3: Exécuter les tests et confirmer l’échec**
+- [x] **Step 3: Exécuter les tests et confirmer l’échec**
 
 ```bash
 powershell.exe -NoProfile -Command "Set-Location 'C:\dev\LogAssist'; npx vitest run src/lib/context/tokenEstimator.test.ts src/lib/token/pricing.test.ts src/lib/token/estimate.test.ts"
@@ -817,7 +817,7 @@ powershell.exe -NoProfile -Command "Set-Location 'C:\dev\LogAssist'; npx vitest 
 
 Expected: nouveaux exports absents.
 
-- [ ] **Step 4: Étendre les images internes avec leurs dimensions éphémères**
+- [x] **Step 4: Étendre les images internes avec leurs dimensions éphémères**
 
 Dans `ChatMessage` :
 
@@ -846,7 +846,7 @@ export interface ContextTokenEstimator {
 }
 ```
 
-- [ ] **Step 5: Implémenter la résolution tiktoken exacte**
+- [x] **Step 5: Implémenter la résolution tiktoken exacte**
 
 Dans `src/lib/token/pricing.ts` :
 
@@ -861,7 +861,7 @@ Ne pas utiliser la recherche transversale actuelle de `getTiktokenModel()` dans 
 préflight. La fonction historique peut rester exportée le temps d’adapter les
 consommateurs, puis être retirée si elle n’est plus référencée.
 
-- [ ] **Step 6: Implémenter l’estimateur**
+- [x] **Step 6: Implémenter l’estimateur**
 
 Dans `src/lib/context/tokenEstimator.ts`, utiliser :
 
@@ -891,7 +891,7 @@ Si `getExactTiktokenModel()` retourne un modèle, créer un encodeur avec
 `encoding_for_model`; sinon utiliser `conservativeTextTokens`. `dispose()` libère
 l’encodeur une seule fois.
 
-- [ ] **Step 7: Faire utiliser l’estimateur honnête aux métriques locales**
+- [x] **Step 7: Faire utiliser l’estimateur honnête aux métriques locales**
 
 Changer la signature :
 
@@ -913,7 +913,7 @@ Dans les deux appels encore présents dans `useChat.ts`, passer
 mock correspondantes dans `useChat.test.tsx` afin que ce commit compile avant la
 migration complète de `useChat`.
 
-- [ ] **Step 8: Relancer les tests ciblés**
+- [x] **Step 8: Relancer les tests ciblés**
 
 ```bash
 powershell.exe -NoProfile -Command "Set-Location 'C:\dev\LogAssist'; npx vitest run src/lib/context/tokenEstimator.test.ts src/lib/token/pricing.test.ts src/lib/token/estimate.test.ts"
@@ -921,7 +921,7 @@ powershell.exe -NoProfile -Command "Set-Location 'C:\dev\LogAssist'; npx vitest 
 
 Expected: PASS.
 
-- [ ] **Step 9: Committer l’estimateur**
+- [x] **Step 9: Committer l’estimateur**
 
 ```bash
 git add src/lib/context/tokenEstimator.ts src/lib/context/tokenEstimator.test.ts src/lib/context/types.ts src/lib/context/index.ts src/lib/ai/types.ts src/lib/token/pricing.ts src/lib/token/pricing.test.ts src/lib/token/estimate.ts src/lib/token/estimate.test.ts src/hooks/useChat.ts src/hooks/useChat.test.tsx

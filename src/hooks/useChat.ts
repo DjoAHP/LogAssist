@@ -576,7 +576,7 @@ export function useChat(
               : null
             metrics = providerMetrics ?? (tools
               ? null
-              : estimateTurnMetrics(apiMessages, result.text, pricingProvider, modelId))
+              : estimateTurnMetrics(apiMessages, result.text, provider.baseUrl, modelId))
           } catch (metricsError) {
             // Les métriques sont optionnelles : leur panne ne requalifie jamais
             // une réponse fournisseur réussie en erreur API.
@@ -754,7 +754,7 @@ export function useChat(
             : null
           metrics = providerMetrics ?? (recoveryTools
             ? null
-            : estimateTurnMetrics(apiMessages, finalContent, pricingProvider, modelId))
+            : estimateTurnMetrics(apiMessages, finalContent, provider.baseUrl, modelId))
         } catch (metricsError) {
           logger.error({ kind: "chat_recovery_metrics", message: safeRecoveryError(metricsError) })
         }
