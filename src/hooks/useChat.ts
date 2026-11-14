@@ -25,7 +25,11 @@ import { prepareConversationContext } from "@/lib/chat/prepareConversationContex
 import { createRecoveryPlan, type RecoveryMode } from "@/lib/chat/recoveryPolicy"
 import { runAssistantTurn, type AssistantTurnResult } from "@/lib/chat/turnRunner"
 import { invalidateModelContextProfile } from "@/lib/context/modelCapabilities"
+import { ContextLengthDiagnosticError } from "@/lib/context/diagnostics"
+import type { SafeContextDiagnostic } from "@/lib/context/types"
 import type { ContextSession } from "@/lib/context"
+import { formatTemplate } from "@/i18n/format"
+import { t } from "@/i18n/fr"
 import type { ToolMedia } from "@/lib/mcp/toolAgent"
 import {
   metricsFromProviderUsage,
@@ -98,6 +102,45 @@ function safeErrorMessage(error: unknown, exactSecrets: readonly string[] = []):
     ? error.message
     : "Erreur inattendue"
   return redactSensitiveDetail(message, exactSecrets)
+}
+
+// Extrait le diagnostic sûr attaché à un échec de contexte, uniquement si tous
+// les compteurs sont des nombres finis (défense en profondeur : jamais de
+// jeton {clé} laissé vide dans le message visible).
+function contextCountersOf(
+  error: unknown,
+): SafeContextDiagnostic | null {
+  if (!(error instanceof ContextLengthDiagnosticError)) return null
+  const tokens = error.diagnostic.tokens
+  const counters = [
+    error.diagnostic.contextWindowTokens,
+    tokens.system,
+    tokens.currentUser,
+    tokens.images,
+    tokens.tools,
+    tokens.mcpResults,
+    tokens.outputReserve,
+    tokens.safetyMargin,
+    tokens.totalWithReserve,
+  ]
+  return counters.every((value) => typeof value === "number" && Number.isFinite(value))
+    ? error.diagnostic
+    : null
+}
+
+function contextFailureMessage(diagnostic: SafeContextDiagnostic): string {
+  const tokens = diagnostic.tokens
+  return formatTemplate(t.errors.contextDetail, {
+    window: diagnostic.contextWindowTokens,
+    system: tokens.system,
+    currentUser: tokens.currentUser,
+    images: tokens.images,
+    tools: tokens.tools,
+    mcp: tokens.mcpResults,
+    outputReserve: tokens.outputReserve,
+    safetyMargin: tokens.safetyMargin,
+    total: tokens.totalWithReserve,
+  })
 }
 
 function normalizeDuration(value: unknown): number | null {
@@ -472,9 +515,20 @@ export function useChat(
             if (kind === "context_length") {
               invalidateModelContextProfile(`${provider.id}/${modelId}`)
             }
+            // Échec de contexte : journal avec diagnostic sûr + compteurs visibles.
+            const failureDiagnostic = contextCountersOf(e)
+            if (failureDiagnostic) {
+              logger.error({
+                kind: "chat_context_failure",
+                message: safeTurnErrorMessage(e),
+                diagnostic: failureDiagnostic,
+              })
+            }
             const payload: ApiErrorPayload = {
               kind,
-              message: redactTurnDetail(api.message ?? "Erreur inattendue"),
+              message: failureDiagnostic
+                ? redactTurnDetail(contextFailureMessage(failureDiagnostic))
+                : redactTurnDetail(api.message ?? "Erreur inattendue"),
               ...(api.detail ? { detail: redactTurnDetail(api.detail) } : {}),
             }
             upsertLast({ apiError: payload, interrupted: false, webStatus: undefined })
@@ -794,7 +848,12 @@ export function useChat(
         if (kind === "context_length") {
           invalidateModelContextProfile(`${modelSelection.provider.id}/${modelSelection.modelId}`)
         }
-        logger.error({ kind: "chat_recovery", message: safeRecoveryError(error) })
+        const failureDiagnostic = contextCountersOf(error)
+        logger.error({
+          kind: "chat_recovery",
+          message: safeRecoveryError(error),
+          ...(failureDiagnostic ? { diagnostic: failureDiagnostic } : {}),
+        })
         upsertTarget({
           recoveryMode: undefined,
           recoveryFailed: true,

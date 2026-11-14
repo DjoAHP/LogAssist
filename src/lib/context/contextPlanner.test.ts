@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest"
 import type { ChatMessage, ToolDefinition } from "@/lib/ai/types"
 import type { ContextTokenEstimator, ModelContextProfile } from "./types"
+import { ContextLengthDiagnosticError } from "./diagnostics"
 import { createContextSession } from "./contextPlanner"
 
 const fallbackProfile: ModelContextProfile = {
@@ -70,6 +71,51 @@ describe("createContextSession", () => {
       caught = error
     }
     expect(caught).toMatchObject({ kind: "context_length" })
+  })
+
+  it("attache un diagnostic de compteurs sûr à l’échec obligatoire", () => {
+    const tools: ToolDefinition[] = [{
+      type: "function",
+      function: {
+        name: "big_tool",
+        description: "DETAIL_SCHEMA",
+        parameters: { type: "object", properties: {} },
+      },
+    }]
+    const session = createContextSession({
+      modelId: "qwen",
+      profile: fallbackProfile,
+      estimator: createEstimator(),
+      baseSystem: "S".repeat(20_000),
+      documents: [],
+      history: [],
+      currentUser: { content: "QUESTION", images: [] },
+      retrievalQuery: "QUESTION",
+    })
+    let caught: unknown
+    try {
+      session.prepareRound({ additionalMessages: [], tools })
+    } catch (error) {
+      caught = error
+    }
+
+    expect(caught).toBeInstanceOf(ContextLengthDiagnosticError)
+    const diagnostic = (caught as ContextLengthDiagnosticError).diagnostic
+    const toolsTokens = Math.ceil(JSON.stringify(tools).length / 4)
+    expect(diagnostic.modelId).toBe("qwen")
+    expect(diagnostic.contextWindowTokens).toBe(4_096)
+    expect(diagnostic.contextWindowSource).toBe("fallback")
+    expect(diagnostic.tokens.tools).toBe(toolsTokens)
+    // countMessage = 4 (en-tête) + rôle + contenu.
+    expect(diagnostic.tokens.system).toBe(4 + Math.ceil("system".length / 4) + Math.ceil(20_000 / 4))
+    expect(diagnostic.tokens.currentUser).toBe(4 + Math.ceil("user".length / 4) + Math.ceil("QUESTION".length / 4))
+    expect(diagnostic.tokens.images).toBe(0)
+    expect(diagnostic.tokens.outputReserve).toBe(1_024)
+    expect(diagnostic.tokens.totalWithReserve).toBe(
+      diagnostic.tokens.input + diagnostic.tokens.outputReserve + diagnostic.tokens.safetyMargin,
+    )
+    // Aucun contenu du schéma d’outils dans le diagnostic : uniquement des compteurs.
+    expect(JSON.stringify(diagnostic)).not.toContain("DETAIL_SCHEMA")
   })
 
   it("réduit connaissances et historique sans muter les sources", () => {

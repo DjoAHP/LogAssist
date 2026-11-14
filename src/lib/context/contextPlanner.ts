@@ -1,15 +1,18 @@
 import type { ChatMessage } from "@/lib/ai/types"
-import { ApiError } from "@/lib/ai/errors"
-import { t } from "@/i18n/fr"
 import { buildKnowledgePrompt } from "@/lib/prompts/compose"
 import { allocateCandidates } from "./allocator"
-import { toSafeContextDiagnostic } from "./diagnostics"
+import {
+  ContextLengthDiagnosticError,
+  toFailedRoundDiagnostic,
+  toSafeContextDiagnostic,
+} from "./diagnostics"
 import { selectHistory } from "./historySelector"
 import { createKnowledgeRetriever } from "./knowledgeRetriever"
 import type {
   ContextAdditionalMessage,
   ContextHistoryMessage,
   ContextOmissionReason,
+  ContextOmittedStats,
   ContextSession,
   ContextStats,
   ContextTokenEstimator,
@@ -82,6 +85,61 @@ function materializeAdditional(
 
 function messageTokens(estimator: ContextTokenEstimator, messages: readonly ChatMessage[]): number {
   return messages.reduce((total, message) => total + estimator.countMessage(message), 0)
+}
+
+// Diagnostic d'échec partagé par les deux sites de rejet : compteurs uniquement
+// (invariant 13 d'AGENTS.md — jamais de contenu, de secret ni de Base64).
+function failureError(input: {
+  modelId: string
+  profile: ModelContextProfile
+  estimator: ContextTokenEstimator
+  baseSystem: string
+  current: ChatMessage
+  toolsTokens: number
+  outputReserve: number
+  safetyMargin: number
+  knowledgeChunks: KnowledgeChunk[]
+  historyMessages: ChatMessage[]
+  additional: ChatMessage[]
+  inputTokens: number
+  totalWithReserve: number
+  omitted: ContextOmittedStats
+}): ContextLengthDiagnosticError {
+  const baseSystemTokens = messageTokens(input.estimator, systemMessage(input.baseSystem))
+  const systemWithKnowledgeTokens = messageTokens(
+    input.estimator,
+    systemMessage(composeSystem(input.baseSystem, input.knowledgeChunks)),
+  )
+  const currentWithoutImages: ChatMessage = { role: "user", content: input.current.content }
+  const imageTokens = (input.current.images ?? []).reduce(
+    (total, image) => total + input.estimator.countImage(image),
+    0,
+  )
+  return new ContextLengthDiagnosticError(toFailedRoundDiagnostic({
+    modelId: input.modelId,
+    profile: input.profile,
+    categories: {
+      system: baseSystemTokens,
+      knowledge: Math.max(0, systemWithKnowledgeTokens - baseSystemTokens),
+      history: messageTokens(input.estimator, input.historyMessages),
+      currentUser: input.estimator.countMessage(currentWithoutImages),
+      images: imageTokens,
+      tools: input.toolsTokens,
+      mcpResults: messageTokens(input.estimator, input.additional),
+      outputReserve: input.outputReserve,
+      safetyMargin: input.safetyMargin,
+    },
+    inputTokens: input.inputTokens,
+    totalWithReserve: input.totalWithReserve,
+    selectedKnowledge: input.knowledgeChunks.map((chunk) => ({
+      documentId: chunk.documentId,
+      fingerprint: chunk.fingerprint,
+      chunkIndex: chunk.chunkIndex,
+    })),
+    historyMessages: input.historyMessages.length,
+    historyTurns: Math.floor(input.historyMessages.length / 2),
+    omitted: input.omitted,
+  }))
 }
 
 function currentMessage(input: CreateContextSessionInput): ChatMessage {
@@ -186,7 +244,22 @@ export function createContextSession(input: CreateContextSessionInput): ContextS
       ]
       const mandatoryInput = estimator.countMessages(mandatoryMessages) + toolsTokens
       if (mandatoryInput + outputReserve + safetyMargin > windowTokens) {
-        throw new ApiError("context_length", t.errors.contextLength)
+        throw failureError({
+          modelId: input.modelId,
+          profile: input.profile,
+          estimator,
+          baseSystem,
+          current,
+          toolsTokens,
+          outputReserve,
+          safetyMargin,
+          knowledgeChunks: [],
+          historyMessages: [],
+          additional: baselineAdditional,
+          inputTokens: mandatoryInput,
+          totalWithReserve: mandatoryInput + outputReserve + safetyMargin,
+          omitted: { knowledgeChunks: 0, historyTurns: 0, mcpSegments: 0, reasons: ["mandatory_overflow"] },
+        })
       }
 
       const optionalBudget = windowTokens - mandatoryInput - outputReserve - safetyMargin
@@ -288,7 +361,30 @@ export function createContextSession(input: CreateContextSessionInput): ContextS
         assemble()
       }
       if (totalWithReserve > windowTokens) {
-        throw new ApiError("context_length", t.errors.contextLength)
+        throw failureError({
+          modelId: input.modelId,
+          profile: input.profile,
+          estimator,
+          baseSystem,
+          current,
+          toolsTokens,
+          outputReserve,
+          safetyMargin,
+          knowledgeChunks: selectedKnowledge.chunks,
+          historyMessages: selectedHistory.messages.map((message) => ({
+            role: message.role,
+            content: message.content,
+          })),
+          additional,
+          inputTokens,
+          totalWithReserve,
+          omitted: {
+            knowledgeChunks: 0,
+            historyTurns: 0,
+            mcpSegments: 0,
+            reasons: uniqueReasons([...reasons, "mandatory_overflow"]),
+          },
+        })
       }
 
       const omittedMcpSegments = externalEntries.reduce(

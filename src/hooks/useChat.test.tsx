@@ -7,9 +7,12 @@ import type { ProviderConfig } from "@/lib/ai/types"
 import type { McpRuntimeSnapshot } from "@/lib/mcp/runtime"
 import type { AssistantTurnResult } from "@/lib/chat/turnRunner"
 import {
+  ContextLengthDiagnosticError,
   createContextSession,
   createTokenEstimator,
+  toFailedRoundDiagnostic,
   type ContextSession,
+  type SafeContextDiagnostic,
 } from "@/lib/context"
 import type { PrepareConversationContextInput } from "@/lib/chat/prepareConversationContext"
 import { ApiError } from "@/lib/ai/errors"
@@ -474,6 +477,55 @@ describe("useChat.send — contract anti-perte", () => {
       error: expect.stringContaining("context_length"),
     }))
     expect(runAssistantTurnMock).not.toHaveBeenCalled()
+  })
+
+  it("affiche les compteurs de contexte dans l’erreur et journalise le diagnostic d’échec", async () => {
+    const diagnostic = toFailedRoundDiagnostic({
+      modelId: "m1",
+      profile: {
+        contextWindowTokens: 16_384,
+        maxOutputTokens: 4_096,
+        source: "manual",
+        tokenizer: "conservative",
+      },
+      categories: {
+        system: 1_383,
+        knowledge: 0,
+        history: 0,
+        currentUser: 120,
+        images: 0,
+        tools: 24_189,
+        mcpResults: 0,
+        outputReserve: 4_096,
+        safetyMargin: 1_310,
+      },
+      inputTokens: 25_692,
+      totalWithReserve: 31_102,
+    })
+    prepareConversationContextMock.mockRejectedValueOnce(
+      new ContextLengthDiagnosticError(diagnostic),
+    )
+    const { result } = renderHook(() => useChat(modelSelection))
+
+    await act(async () => expect(await result.current.send("conv-1", "Question immense")).toBe(true))
+
+    // L’erreur visible embarque les compteurs chiffrés (aucun contenu privé).
+    const assistantInsert = vi.mocked(messagesDb.insert).mock.calls
+      .map(([row]) => row)
+      .find((row) => row.role === "assistant")
+    const payload = JSON.parse(String(assistantInsert?.error))
+    expect(payload.kind).toBe("context_length")
+    expect(payload.message).toContain("16384")
+    expect(payload.message).toContain("24189")
+    expect(payload.message).toContain("31102")
+
+    // Le journal d’échec porte le diagnostic sûr et structuré.
+    const loggedWithDiagnostic = loggerErrorMock.mock.calls
+      .map(([entry]) => entry as { kind?: string; diagnostic?: SafeContextDiagnostic })
+      .filter((entry) => typeof entry?.diagnostic === "object")
+    expect(loggedWithDiagnostic.length).toBeGreaterThan(0)
+    expect(loggedWithDiagnostic.every((entry) => entry.diagnostic?.tokens.tools === 24_189)).toBe(true)
+    expect(loggedWithDiagnostic.every((entry) => entry.diagnostic?.contextWindowTokens === 16_384)).toBe(true)
   })
 
   it("invalide la fenêtre en cache après un rejet de contexte du fournisseur", async () => {

@@ -297,6 +297,7 @@ export const fr = {
     unavailable: "Service momentanément indisponible",
     imageUnsupported: "Images non supportées par ce modèle",
     contextLength: "Le contexte obligatoire dépasse la fenêtre disponible du modèle",
+    contextDetail: "Fenêtre {window} — système {system}, message {currentUser}, images {images}, outils {tools}, MCP {mcp}, réserve de sortie {outputReserve}, marge {safetyMargin}, total {total}",
     persistence: "Réponse non enregistrée localement",
     unknown: "Erreur inattendue du fournisseur",
   },

@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest"
+import { ApiError } from "@/lib/ai/errors"
 import type { ContextOmissionReason } from "./types"
-import { toSafeContextDiagnostic } from "./diagnostics"
+import { ContextLengthDiagnosticError, toFailedRoundDiagnostic, toSafeContextDiagnostic } from "./diagnostics"
 
 describe("toSafeContextDiagnostic", () => {
   it("n’expose aucun contenu privé dans le diagnostic", () => {
@@ -118,5 +119,98 @@ describe("toSafeContextDiagnostic", () => {
 
     source.omitted.reasons.push("budget_history")
     expect(safe.omitted.reasons).toEqual(["budget_knowledge"])
+  })
+})
+
+describe("diagnostic d’échec de contexte", () => {
+  const failureCategories = {
+    system: 1_383,
+    knowledge: 0,
+    history: 0,
+    currentUser: 120,
+    images: 0,
+    tools: 24_189,
+    mcpResults: 0,
+    outputReserve: 4_096,
+    safetyMargin: 1_310,
+  }
+
+  it("fabrique un diagnostic sûr réduit aux compteurs", () => {
+    const safe = toFailedRoundDiagnostic({
+      modelId: "qwen",
+      profile: {
+        contextWindowTokens: 16_384,
+        maxOutputTokens: 4_096,
+        source: "manual",
+        tokenizer: "conservative",
+      },
+      categories: failureCategories,
+      inputTokens: 25_692,
+      totalWithReserve: 31_102,
+    })
+
+    expect(safe.modelId).toBe("qwen")
+    expect(safe.contextWindowTokens).toBe(16_384)
+    expect(safe.contextWindowSource).toBe("manual")
+    expect(safe.tokens.tools).toBe(24_189)
+    expect(safe.tokens.input).toBe(25_692)
+    expect(safe.tokens.totalWithReserve).toBe(31_102)
+    expect(safe.selected).toEqual({ knowledge: [], historyMessages: 0, historyTurns: 0 })
+    expect(safe.omitted).toEqual({
+      knowledgeChunks: 0,
+      historyTurns: 0,
+      mcpSegments: 0,
+      reasons: ["mandatory_overflow"],
+    })
+  })
+
+  it("accepte une raison d’omission fournie par le planificateur", () => {
+    const safe = toFailedRoundDiagnostic({
+      modelId: "qwen",
+      profile: {
+        contextWindowTokens: 4_096,
+        maxOutputTokens: 1_024,
+        source: "fallback",
+        tokenizer: "conservative",
+      },
+      categories: failureCategories,
+      inputTokens: 25_692,
+      totalWithReserve: 31_102,
+      omitted: {
+        knowledgeChunks: 2,
+        historyTurns: 4,
+        mcpSegments: 1,
+        reasons: ["final_recheck", "mandatory_overflow"],
+      },
+    })
+
+    expect(safe.omitted).toEqual({
+      knowledgeChunks: 2,
+      historyTurns: 4,
+      mcpSegments: 1,
+      reasons: ["final_recheck", "mandatory_overflow"],
+    })
+  })
+
+  it("porte le diagnostic sur une ApiError context_length", () => {
+    const safe = toFailedRoundDiagnostic({
+      modelId: "qwen",
+      profile: {
+        contextWindowTokens: 16_384,
+        maxOutputTokens: 4_096,
+        source: "manual",
+        tokenizer: "conservative",
+      },
+      categories: failureCategories,
+      inputTokens: 25_692,
+      totalWithReserve: 31_102,
+    })
+    const error = new ContextLengthDiagnosticError(safe)
+
+    expect(error).toBeInstanceOf(ApiError)
+    expect(error.kind).toBe("context_length")
+    expect(error.message).toContain("contexte")
+    expect(error.diagnostic.tokens.tools).toBe(24_189)
+    expect(error.diagnostic.tokens.totalWithReserve).toBe(31_102)
   })
 })
