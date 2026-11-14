@@ -2839,7 +2839,7 @@ git commit -m "refactor: interdit les appels fournisseur non bornés"
 - Modify: `AGENTS.md`
 - Modify: `docs/superpowers/plans/2026-11-13-context-engine-rag.md`
 
-- [ ] **Step 1: Documenter le comportement utilisateur**
+- [x] **Step 1: Documenter le comportement utilisateur**
 
 Ajouter au README une section concise expliquant :
 
@@ -2850,7 +2850,7 @@ Ajouter au README une section concise expliquant :
 - erreur explicite quand les éléments obligatoires ne tiennent pas ;
 - absence de résumé automatique dans cette version.
 
-- [ ] **Step 2: Mettre à jour les invariants techniques**
+- [x] **Step 2: Mettre à jour les invariants techniques**
 
 Dans `AGENTS.md` :
 
@@ -2860,7 +2860,7 @@ Dans `AGENTS.md` :
 - noter que les diagnostics de contexte ne contiennent que IDs et compteurs ;
 - indiquer les nouveaux fichiers `src/lib/context/`.
 
-- [ ] **Step 3: Exécuter TypeScript**
+- [x] **Step 3: Exécuter TypeScript**
 
 ```bash
 powershell.exe -NoProfile -Command "Set-Location 'C:\dev\LogAssist'; npx tsc --noEmit"
@@ -2868,7 +2868,7 @@ powershell.exe -NoProfile -Command "Set-Location 'C:\dev\LogAssist'; npx tsc --n
 
 Expected: PASS.
 
-- [ ] **Step 4: Exécuter toute la suite Vitest**
+- [x] **Step 4: Exécuter toute la suite Vitest**
 
 ```bash
 powershell.exe -NoProfile -Command "Set-Location 'C:\dev\LogAssist'; npm run test"
@@ -2876,7 +2876,7 @@ powershell.exe -NoProfile -Command "Set-Location 'C:\dev\LogAssist'; npm run tes
 
 Expected: tous les tests passent. Consigner le nombre exact.
 
-- [ ] **Step 5: Exécuter le build Windows**
+- [x] **Step 5: Exécuter le build Windows**
 
 ```bash
 powershell.exe -NoProfile -Command "Set-Location 'C:\dev\LogAssist'; npm run build"
@@ -2884,7 +2884,7 @@ powershell.exe -NoProfile -Command "Set-Location 'C:\dev\LogAssist'; npm run bui
 
 Expected: TypeScript, Vitest et bundle Vite passent.
 
-- [ ] **Step 6: Exécuter les tests Rust**
+- [x] **Step 6: Exécuter les tests Rust**
 
 ```bash
 powershell.exe -NoProfile -Command "Set-Location 'C:\dev\LogAssist\src-tauri'; cargo test"
@@ -2892,7 +2892,7 @@ powershell.exe -NoProfile -Command "Set-Location 'C:\dev\LogAssist\src-tauri'; c
 
 Expected: PASS.
 
-- [ ] **Step 7: Exécuter Clippy sans warning**
+- [x] **Step 7: Exécuter Clippy sans warning**
 
 ```bash
 powershell.exe -NoProfile -Command "Set-Location 'C:\dev\LogAssist\src-tauri'; cargo clippy --all-targets -- -D warnings"
@@ -2900,7 +2900,7 @@ powershell.exe -NoProfile -Command "Set-Location 'C:\dev\LogAssist\src-tauri'; c
 
 Expected: PASS sans warning.
 
-- [ ] **Step 8: Vérifier le diff et l’absence de données sensibles**
+- [x] **Step 8: Vérifier le diff et l’absence de données sensibles**
 
 ```bash
 git diff --check
@@ -2911,7 +2911,7 @@ rg "PRIVATE_SENTINEL|PRIVATE_KEY|PRIVATE_BASE64" src --glob '!*.test.ts' --glob 
 Expected: aucun problème de whitespace ; seules les modifications attendues ;
 aucune sentinelle dans le code de production.
 
-- [ ] **Step 9: Committer la documentation finale**
+- [x] **Step 9: Committer la documentation finale**
 
 ```bash
 git add README.md AGENTS.md

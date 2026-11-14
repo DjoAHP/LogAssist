@@ -44,6 +44,14 @@ Credential Manager Windows.
    React ne fournit jamais d'endpoint MCP : tout appel passe par le pont Rust.
 10. **Données Web non fiables** : ne jamais persister le contenu brut TinyFish. Seules
     les sources finales validées (`url`, `title`, `origin`) vivent dans `messages.sources`.
+11. **Tout appel de génération fournisseur passe par `ContextSession`** : elle prépare
+    et borne chaque tour avant `IProvider.runTurn`. Aucun contexte de conversation ne
+    doit être construit ou envoyé directement par un consommateur.
+12. **Estimation des images** : le Base64 ne participe jamais au calcul. Seules les
+    dimensions éphémères sont utilisées, avec une réserve prudente si elles manquent.
+13. **Diagnostics de contexte sans contenu privé** : uniquement des IDs, compteurs,
+    sources du profil et raisons d'omission ; jamais de clé, Base64, Markdown, message
+    ou résultat MCP.
 
 ---
 
@@ -84,6 +92,7 @@ src/
 ├── lib/
 │   ├── ai/            # IProvider, openai-compat, sse.ts, errors.ts, factory
 │   ├── chat/          # contexte pur, TurnRunner, récupération et politique de scroll
+│   ├── context/       # budget central, RAG Markdown, historique et diagnostics sûrs
 │   ├── db/            # repos SQL (migrations.ts, providers, messages, conversations…)
 │   ├── secrets/       # pont Credential Manager (invoke Rust)
 │   ├── prompts/       # system prompt composé + defaults
@@ -125,11 +134,14 @@ src-tauri/
   `messages.sources`.
 - **Sources** : la migration V5 ajoute `messages.sources`. Les URL sont validées côté
   Rust avant le retour vers React puis filtrées à nouveau avant rendu.
-- **Schéma courant** : V9. V6 ajoute les métriques, V7 nettoie les anciennes erreurs
-  potentiellement sensibles, V8 répare les assistants historiques vides et V9 crée le
-  registre MCP distant (`mcp_servers`, `mcp_tools`) avec amorçage de TinyFish.
-- **Images** : le base64 n'est jamais persisté. Après rechargement, seule la puce de
-  métadonnées reste visible ; ne pas introduire de cache binaire durable.
+- **Schéma courant** : V11. V6 ajoute les métriques, V7 nettoie les anciennes erreurs
+  potentiellement sensibles, V8 répare les assistants historiques vides, V9 crée le
+  registre MCP distant, V10 ajoute les médias MCP validés (`message_media` et leurs
+  références dans `messages.media`) et V11 ajoute les overrides de contexte et de
+  sortie par modèle.
+- **Captures utilisateur** : leur Base64 n'est jamais persisté. Après rechargement,
+  seule la puce de métadonnées reste visible ; ne pas introduire de cache binaire
+  durable. Les médias MCP de V10 suivent leur circuit validé séparé.
 
 ### Conventions
 
