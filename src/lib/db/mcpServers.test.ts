@@ -631,6 +631,24 @@ describe("mutations MCP simples", () => {
     )
   })
 
+  it("bascule tous les outils d'un serveur", async () => {
+    await mcpServers.setAllToolsEnabled("github", true)
+
+    expect(execute).toHaveBeenCalledExactlyOnceWith(
+      "UPDATE mcp_tools SET enabled = ? WHERE server_id = ?",
+      [1, "github"],
+    )
+  })
+
+  it("bascule une liste ciblée d'outils d'un serveur", async () => {
+    await mcpServers.setAllToolsEnabled("github", true, ["search", "issues"])
+
+    expect(execute).toHaveBeenCalledExactlyOnceWith(
+      "UPDATE mcp_tools SET enabled = ? WHERE server_id = ? AND native_name IN (?, ?)",
+      [1, "github", "search", "issues"],
+    )
+  })
+
   it("accepte auto pour un outil read-only non destructif", async () => {
     select.mockResolvedValueOnce([
       { annotations: JSON.stringify({ readOnlyHint: true, destructiveHint: false }) },

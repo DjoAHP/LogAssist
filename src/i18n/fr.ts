@@ -256,6 +256,7 @@ export const fr = {
     addServer: "Ajouter un serveur",
     // Navigateur d'outils et console
     searchTools: "Rechercher un outil",
+    allTools: "Tous les outils",
     readOnly: "Lecture seule",
     destructive: "Destructif",
     unknownRisk: "Risque inconnu",
