@@ -190,6 +190,32 @@ export function McpDialog({ snapshot, onClose, onChanged }: Props) {
     await afterChange()
   }
 
+  // Bascule globale : à l'activation, les candidats sont ajoutés au catalogue
+  // et validés (64 outils / 256 Kio) AVANT toute persistance — sinon la base
+  // serait modifiée avec un runtime en échec au prochain refresh. Les outils
+  // déjà actifs (dédupliqués par llm_name) ne sont pas comptés deux fois.
+  const toggleAllTools = async (server: McpServerConfig, enabled: boolean, nativeNames: string[]) => {
+    if (enabled) {
+      const activeLlmNames = new Set(snapshot.activeTools.map((tool) => tool.llmName))
+      const additions: McpAgentTool[] = (tools[server.id] ?? [])
+        .filter((row) => nativeNames.includes(row.native_name) && !activeLlmNames.has(row.llm_name))
+        .map((row) => ({
+          serverId: server.id,
+          serverName: server.name,
+          nativeName: row.native_name,
+          llmName: row.llm_name,
+          title: row.title ?? undefined,
+          description: row.description ?? undefined,
+          inputSchema: JSON.parse(row.input_schema) as Record<string, unknown>,
+          approvalMode: row.approval_mode,
+          kind: server.id === "tinyfish" ? "tinyfish_web" as const : "generic" as const,
+        }))
+      await buildActiveToolCatalog([...snapshot.activeTools, ...additions])
+    }
+    await mcpServers.setAllToolsEnabled(server.id, enabled, nativeNames)
+    await afterChange()
+  }
+
   // Build server configs from rows
   const serverConfigs = rows.map(serverConfigFromRow)
 
@@ -372,6 +398,9 @@ export function McpDialog({ snapshot, onClose, onChanged }: Props) {
             server={browsing}
             tools={tools[browsing.id] ?? []}
             onToggle={(nativeName, enabled) => void runUi(() => toggleTool(browsing, nativeName, enabled))}
+            onToggleAll={(enabled, nativeNames) =>
+              void runUi(() => toggleAllTools(browsing, enabled, nativeNames))
+            }
             onApprovalMode={(nativeName, mode) =>
               void runUi(async () => {
                 await mcpServers.setApprovalMode(browsing.id, nativeName, mode)

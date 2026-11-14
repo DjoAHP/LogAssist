@@ -125,6 +125,13 @@ describe("normalizeHttpStatus", () => {
   it("400 avec \"multimodal\" dans le corps → image_unsupported", () => {
     expect(normalizeHttpStatus(400, "Multimodal inputs not supported").kind).toBe("image_unsupported")
   })
+  it.each([
+    "n_keep: 37609 >= n_ctx: 8192",
+    "maximum context length is 8192 tokens",
+    "prompt is too long for this model",
+  ])("classe un dépassement de contexte : %s", (body) => {
+    expect(normalizeHttpStatus(400, body)).toMatchObject({ kind: "context_length" })
+  })
   it("400 sans motif connu → unknown avec détail", () => {
     const e = normalizeHttpStatus(400, '{"error": {"message": "foo"}}')
     expect(e.kind).toBe("unknown")

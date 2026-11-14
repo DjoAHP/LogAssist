@@ -89,6 +89,51 @@ describe("providers", () => {
     expect(sql).toContain("DELETE FROM models WHERE id =")
     expect(bind).toEqual(["m1"])
   })
+
+  it("enregistre ou réinitialise les overrides de contexte avec des binds", async () => {
+    expect(providers).toHaveProperty("updateModelContext")
+    const updateModelContext = (providers as typeof providers & {
+      updateModelContext(
+        id: string,
+        input: { contextWindowOverride: number | null; maxOutputTokensOverride: number | null },
+      ): Promise<void>
+    }).updateModelContext
+    mockExecute.mockResolvedValue(undefined)
+
+    await updateModelContext("m1", {
+      contextWindowOverride: 8192,
+      maxOutputTokensOverride: 1536,
+    })
+    expect(mockExecute).toHaveBeenCalledWith(
+      "UPDATE models SET context_window_override = ?, max_output_tokens_override = ? WHERE id = ?",
+      [8192, 1536, "m1"],
+    )
+
+    await updateModelContext("m1", {
+      contextWindowOverride: null,
+      maxOutputTokensOverride: null,
+    })
+    expect(mockExecute).toHaveBeenLastCalledWith(
+      "UPDATE models SET context_window_override = ?, max_output_tokens_override = ? WHERE id = ?",
+      [null, null, "m1"],
+    )
+  })
+
+  it("refuse une sortie supérieure ou égale à la fenêtre manuelle", async () => {
+    expect(providers).toHaveProperty("updateModelContext")
+    const updateModelContext = (providers as typeof providers & {
+      updateModelContext(
+        id: string,
+        input: { contextWindowOverride: number | null; maxOutputTokensOverride: number | null },
+      ): Promise<void>
+    }).updateModelContext
+
+    await expect(updateModelContext("m1", {
+      contextWindowOverride: 4096,
+      maxOutputTokensOverride: 4096,
+    })).rejects.toThrow("sortie")
+    expect(mockExecute).not.toHaveBeenCalled()
+  })
 })
 
 describe("secretRefFor", () => {

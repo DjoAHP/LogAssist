@@ -1,24 +1,33 @@
 export type ApiErrorKind =
   | "auth" | "model_not_found" | "network" | "rate_limit" | "quota"
-  | "unavailable" | "image_unsupported" | "persistence" | "unknown"
+  | "unavailable" | "image_unsupported" | "context_length" | "persistence" | "unknown"
 
 export const API_ERROR_KINDS: ApiErrorKind[] =
-  ["auth", "model_not_found", "network", "rate_limit", "quota", "unavailable", "image_unsupported", "persistence", "unknown"]
+  ["auth", "model_not_found", "network", "rate_limit", "quota", "unavailable", "image_unsupported", "context_length", "persistence", "unknown"]
 
 export interface ChatMessage {
   role: "system" | "user" | "assistant" | "tool"
   content: string
-  images?: { base64: string; mimeType: string }[]
+  images?: { base64: string; mimeType: string; width?: number; height?: number }[]
   toolCallId?: string
   toolCalls?: ToolCall[]
 }
 
-export interface ChatRequest { messages: ChatMessage[]; timeoutMs?: number }
+export interface ChatRequest {
+  messages: ChatMessage[]
+  timeoutMs?: number
+  maxOutputTokens?: number
+}
 
 export interface TokenUsage {
   inputTokens: number
   outputTokens: number
   cachedInputTokens?: number
+}
+
+export interface ProviderModelContext {
+  contextWindowTokens: number
+  source: "loaded" | "metadata"
 }
 
 export interface CompletionStats {

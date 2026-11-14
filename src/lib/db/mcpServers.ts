@@ -347,6 +347,25 @@ export const mcpServers = {
     ))
   },
 
+  // Bascule globale d'un serveur : les modes d'approbation restent inchangés,
+  // les outils risqués conservent leur confirmation individuelle. Sans liste,
+  // tout le serveur ; avec liste, uniquement les outils ciblés (recherche
+  // active) — les valeurs restent liées par placeholders, jamais concaténées.
+  setAllToolsEnabled(serverId: string, enabled: boolean, nativeNames?: string[]): Promise<void> {
+    const names = nativeNames ?? []
+    if (names.length === 0) {
+      return runMcpMutation(() => execute(
+        "UPDATE mcp_tools SET enabled = ? WHERE server_id = ?",
+        [enabled ? 1 : 0, serverId],
+      ))
+    }
+    const placeholders = names.map(() => "?").join(", ")
+    return runMcpMutation(() => execute(
+      `UPDATE mcp_tools SET enabled = ? WHERE server_id = ? AND native_name IN (${placeholders})`,
+      [enabled ? 1 : 0, serverId, ...names],
+    ))
+  },
+
   setApprovalMode(
     serverId: string,
     nativeName: string,

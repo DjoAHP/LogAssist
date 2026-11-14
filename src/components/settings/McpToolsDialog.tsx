@@ -9,6 +9,9 @@ interface Props {
   server: McpServerConfig
   tools: McpToolRow[]
   onToggle(nativeName: string, enabled: boolean): void
+  // nativeNames = les outils affichés au moment du clic (filtre vide = tout
+  // le serveur) ; la décision « affichés seulement » vient de l'utilisateur.
+  onToggleAll(enabled: boolean, nativeNames: string[]): void
   onApprovalMode(nativeName: string, mode: McpApprovalMode): void
   onRun(nativeName: string, arguments_: Record<string, unknown>): Promise<McpToolResult>
   onConfirmRisk(): Promise<boolean>
@@ -84,9 +87,10 @@ function ToolRow({
   )
 }
 
-export function McpToolsDialog({ server, tools, onToggle, onApprovalMode, onRun, onConfirmRisk, onClose }: Props) {
+export function McpToolsDialog({ server, tools, onToggle, onToggleAll, onApprovalMode, onRun, onConfirmRisk, onClose }: Props) {
   const searchInputRef = useRef<HTMLInputElement>(null)
   const dialogSectionRef = useRef<HTMLElement>(null)
+  const allCheckboxRef = useRef<HTMLInputElement>(null)
   const [search, setSearch] = useState("")
   const [selected, setSelected] = useState(tools[0]?.native_name ?? "")
   const [argumentsText, setArgumentsText] = useState("{}")
@@ -147,6 +151,15 @@ export function McpToolsDialog({ server, tools, onToggle, onApprovalMode, onRun,
     tool.native_name.toLocaleLowerCase("fr").includes(search.trim().toLocaleLowerCase("fr"))
   )
   const selectedTool = tools.find((tool) => tool.native_name === selected)
+  const shownEnabled = filtered.filter((tool) => tool.enabled === 1).length
+  const allShownEnabled = filtered.length > 0 && shownEnabled === filtered.length
+
+  // Le tri-état indéterminé n'est pas exprimable en JSX : reflété par effet.
+  useEffect(() => {
+    if (allCheckboxRef.current) {
+      allCheckboxRef.current.indeterminate = shownEnabled > 0 && !allShownEnabled
+    }
+  }, [shownEnabled, allShownEnabled])
 
   const run = async () => {
     setError(undefined)
@@ -185,13 +198,25 @@ export function McpToolsDialog({ server, tools, onToggle, onApprovalMode, onRun,
         onClick={(event) => event.stopPropagation()}
       >
         <div className="min-h-0 border-r border-border p-4">
+          <label className="mb-3 flex w-fit items-center gap-2 text-[11px] text-muted-foreground">
+            <input
+              ref={allCheckboxRef}
+              type="checkbox"
+              aria-label={`${t.mcp.allTools} (${shownEnabled}/${filtered.length})`}
+              checked={allShownEnabled}
+              disabled={filtered.length === 0}
+              onChange={(event) => onToggleAll(event.target.checked, filtered.map((tool) => tool.native_name))}
+              className="size-3.5 accent-brand-from"
+            />
+            {t.mcp.allTools} ({shownEnabled}/{filtered.length})
+          </label>
           <input
             ref={searchInputRef}
             type="search"
             aria-label={t.mcp.searchTools}
             value={search}
             onChange={(event) => setSearch(event.target.value)}
-            className="mb-3 w-full rounded-md border border-border bg-background px-2 py-1.5 text-xs focus-visible:ring-2 focus-visible:ring-brand-to"
+            className="mb-2 w-full rounded-md border border-border bg-background px-2 py-1.5 text-xs focus-visible:ring-2 focus-visible:ring-brand-to"
           />
           <ul className="max-h-[60vh] space-y-2 overflow-y-auto">
             {filtered.map((tool) => (

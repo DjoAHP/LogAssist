@@ -15,6 +15,8 @@ export interface ModelRow {
   model_id: string
   supports_images: number
   is_default: number
+  context_window_override: number | null
+  max_output_tokens_override: number | null
 }
 
 // Convention de secretRef partagée avec activeModel.ts : identifiant Credential
@@ -89,6 +91,8 @@ export const providers = {
       model_id: modelId,
       supports_images: IMAGE_MODEL_HINT.test(modelId) ? 1 : 0,
       is_default: 0,
+      context_window_override: null,
+      max_output_tokens_override: null,
     }
     await execute(
       "INSERT INTO models (id, provider_id, model_id, supports_images, is_default) VALUES (?,?,?,?,0)",
@@ -98,7 +102,36 @@ export const providers = {
   },
 
   async listModels(providerId: string): Promise<ModelRow[]> {
-    return select<ModelRow>("SELECT * FROM models WHERE provider_id = ? ORDER BY model_id ASC", [providerId])
+    const rows = await select<ModelRow>("SELECT * FROM models WHERE provider_id = ? ORDER BY model_id ASC", [providerId])
+    return rows.map((row) => ({
+      ...row,
+      context_window_override: row.context_window_override ?? null,
+      max_output_tokens_override: row.max_output_tokens_override ?? null,
+    }))
+  },
+
+  async updateModelContext(
+    id: string,
+    input: {
+      contextWindowOverride: number | null
+      maxOutputTokensOverride: number | null
+    },
+  ): Promise<void> {
+    const context = input.contextWindowOverride
+    const output = input.maxOutputTokensOverride
+    if (context !== null && (!Number.isSafeInteger(context) || context < 512 || context > 2_000_000)) {
+      throw new Error("La fenêtre de contexte doit être un entier compris entre 512 et 2000000.")
+    }
+    if (output !== null && (!Number.isSafeInteger(output) || output < 1 || output > 262_144)) {
+      throw new Error("La réserve de sortie doit être un entier compris entre 1 et 262144.")
+    }
+    if (context !== null && output !== null && output >= context) {
+      throw new Error("La réserve de sortie doit être inférieure à la fenêtre de contexte.")
+    }
+    await execute(
+      "UPDATE models SET context_window_override = ?, max_output_tokens_override = ? WHERE id = ?",
+      [context, output, id],
+    )
   },
 
   async removeModel(id: string): Promise<void> {

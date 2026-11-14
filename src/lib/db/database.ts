@@ -12,6 +12,7 @@ import {
   SCHEMA_V8_STATEMENTS,
   SCHEMA_V9_STATEMENTS,
   SCHEMA_V10_STATEMENTS,
+  SCHEMA_V11_STATEMENTS,
 } from "./migrations"
 
 let dbPromise: Promise<Database> | null = null
@@ -122,7 +123,12 @@ export async function executeSchema(db: Database, fromVersion: number): Promise<
       await db.execute(statement)
     }
   }
-  // Ajouter ici les futures migrations (fromVersion < 11, etc.)
+  if (fromVersion < 11) {
+    for (const statement of SCHEMA_V11_STATEMENTS) {
+      await db.execute(statement)
+    }
+  }
+  // Ajouter ici les futures migrations (fromVersion < 12, etc.)
 }
 
 export async function execute(sql: string, bind: unknown[] = []): Promise<void> {

@@ -11,6 +11,7 @@ import { secrets } from "@/lib/secrets/service"
 import { ProviderForm } from "./ProviderForm"
 import { LocalModelsPanel } from "./LocalModelsPanel"
 import { ModelPickerModal } from "./ModelPickerModal"
+import { ModelContextSettings, type ModelContextOverrides } from "./ModelContextSettings"
 import { HEADER_TOOL_DIALOG_SIZE_CLASS } from "./headerToolDialog"
 import {
   ProviderCard,
@@ -57,6 +58,7 @@ export function ProvidersDialog({ onClose, onChanged }: Props) {
   const [testStatus, setTestStatus] = useState<Record<string, ProviderConnectionStatus>>({})
   const [fetchStatus, setFetchStatus] = useState<Record<string, ProviderFetchStatus | undefined>>({})
   const [browsing, setBrowsing] = useState<ProviderRow | null>(null)
+  const [configuringModel, setConfiguringModel] = useState<ModelRow | null>(null)
   const [providerQuery, setProviderQuery] = useState("")
   // Onglet par défaut = « Fournisseurs » : le comportement historique reste
   // identique (tests existants inchangés) ; « Modèles local » est à côté.
@@ -80,13 +82,16 @@ export function ProvidersDialog({ onClose, onChanged }: Props) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
+        // Le sous-dialogue possède seul sa politique de fermeture : le parent
+        // ne doit jamais contourner son verrou pendant une sauvegarde.
+        if (configuringModel) return
         if (browsing) setBrowsing(null)
         else onClose()
       }
     }
     window.addEventListener("keydown", onKey)
     return () => window.removeEventListener("keydown", onKey)
-  }, [onClose, browsing])
+  }, [onClose, browsing, configuringModel])
 
   const afterChange = useCallback(async () => {
     await refresh()
@@ -299,6 +304,8 @@ export function ProvidersDialog({ onClose, onChanged }: Props) {
             providerName={browsing.name}
             models={(models[browsing.id] ?? []).map((m) => ({
               id: m.id, label: m.model_id, isDefault: m.is_default === 1,
+              contextWindowOverride: m.context_window_override,
+              maxOutputTokensOverride: m.max_output_tokens_override,
             }))}
             onAddModel={async (modelId) => {
               if (!browsing) return
@@ -311,7 +318,30 @@ export function ProvidersDialog({ onClose, onChanged }: Props) {
                 .then(afterChange)
                 .catch((error) => logSettingsError("settings.selectModel", error))
             }}
+            onConfigure={(model) => {
+              const row = (models[browsing.id] ?? []).find((candidate) => candidate.id === model.id)
+              if (row) setConfiguringModel(row)
+            }}
             onClose={() => setBrowsing(null)}
+            inactive={configuringModel !== null}
+          />
+        )}
+        {configuringModel && (
+          <ModelContextSettings
+            modelLabel={configuringModel.model_id}
+            contextWindowOverride={configuringModel.context_window_override}
+            maxOutputTokensOverride={configuringModel.max_output_tokens_override}
+            onSave={async (overrides: ModelContextOverrides) => {
+              try {
+                await providers.updateModelContext(configuringModel.id, overrides)
+                await afterChange()
+                setConfiguringModel(null)
+              } catch (error) {
+                logSettingsError("settings.updateModelContext", error)
+                throw error
+              }
+            }}
+            onClose={() => setConfiguringModel(null)}
           />
         )}
       </div>

@@ -16,4 +16,11 @@ describe("garde-fou i18n des erreurs", () => {
     expect(KIND_TO_KEY).toHaveProperty("persistence", "persistence")
     expect(t.errors).toHaveProperty("persistence", "Réponse non enregistrée localement")
   })
+
+  it("déclare un libellé dédié au contexte trop volumineux", () => {
+    expect(API_ERROR_KINDS).toContain("context_length")
+    expect(KIND_TO_KEY).toHaveProperty("context_length", "contextLength")
+    expect(t.errors).toHaveProperty("contextLength")
+    expect((t.errors as Record<string, string>).contextLength).toContain("contexte")
+  })
 })

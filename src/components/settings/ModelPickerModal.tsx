@@ -1,11 +1,13 @@
 import { useState } from "react"
-import { Check, Plus, Search, Star, X } from "lucide-react"
+import { Check, Plus, Search, Settings2, Star, X } from "lucide-react"
 import { t } from "@/i18n/fr"
 
 export interface PickerModel {
   id: string
   label: string
   isDefault: boolean
+  contextWindowOverride: number | null
+  maxOutputTokensOverride: number | null
 }
 
 interface ModelPickerModalProps {
@@ -13,7 +15,9 @@ interface ModelPickerModalProps {
   models: PickerModel[]
   onAddModel: (modelId: string) => Promise<void>
   onSelect: (modelRowId: string) => void
+  onConfigure: (model: PickerModel) => void
   onClose: () => void
+  inactive?: boolean
 }
 
 // Modal de parcourt du modèle (remplace le menu déroulant) : recherche + ajout
@@ -24,7 +28,9 @@ export function ModelPickerModal({
   models,
   onAddModel,
   onSelect,
+  onConfigure,
   onClose,
+  inactive = false,
 }: ModelPickerModalProps) {
   const [search, setSearch] = useState("")
   const [newModel, setNewModel] = useState("")
@@ -41,12 +47,16 @@ export function ModelPickerModal({
   return (
     <div
       className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60"
-      onClick={onClose}
+      onClick={() => {
+        if (!inactive) onClose()
+      }}
       data-testid="model-picker-modal"
+      aria-hidden={inactive || undefined}
+      inert={inactive || undefined}
     >
       <div
         role="dialog"
-        aria-modal="true"
+        aria-modal={inactive ? undefined : "true"}
         aria-label={`${t.providers.browseModels} — ${providerName}`}
         className="max-h-[80vh] w-[520px] max-w-[92vw] overflow-y-auto rounded-lg border border-border bg-background p-4"
         onClick={(e) => e.stopPropagation()}
@@ -103,22 +113,36 @@ export function ModelPickerModal({
             <div className="px-2 py-2 text-xs text-muted-foreground">{t.providers.noModels}</div>
           ) : (
             filtered.map((m) => (
-              <button
+              <div
                 key={m.id}
-                data-testid={`pick-${m.id}`}
-                onClick={() => onSelect(m.id)}
-                className="w-full flex items-center justify-between gap-2 border-b border-border/60 px-2 py-1.5 text-xs text-left hover:bg-foreground/5 last:border-b-0"
+                className="flex items-center border-b border-border/60 last:border-b-0"
               >
-                <span className="truncate">{m.label}</span>
-                <div className="flex flex-shrink-0 items-center gap-1.5">
-                  {m.isDefault && (
-                    <span aria-label={t.providers.activeModelBadge}>
-                      <Star className="size-3 text-amber-500" />
-                    </span>
-                  )}
-                  <Check className={`size-3.5 ${m.isDefault ? "text-green-600" : "text-muted-foreground/40"}`} />
-                </div>
-              </button>
+                <button
+                  type="button"
+                  data-testid={`pick-${m.id}`}
+                  onClick={() => onSelect(m.id)}
+                  className="flex min-w-0 flex-1 items-center justify-between gap-2 px-2 py-1.5 text-left text-xs hover:bg-foreground/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand-to"
+                >
+                  <span className="truncate">{m.label}</span>
+                  <span className="flex flex-shrink-0 items-center gap-1.5">
+                    {m.isDefault && (
+                      <span aria-label={t.providers.activeModelBadge}>
+                        <Star className="size-3 text-amber-500" />
+                      </span>
+                    )}
+                    <Check className={`size-3.5 ${m.isDefault ? "text-green-600" : "text-muted-foreground/40"}`} />
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  aria-label={`${t.providers.contextSettings} — ${m.label}`}
+                  title={t.providers.contextSettings}
+                  onClick={() => onConfigure(m)}
+                  className="mr-1 rounded-md p-1.5 text-muted-foreground hover:bg-foreground/5 hover:text-brand-to focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-to"
+                >
+                  <Settings2 className="size-3.5" />
+                </button>
+              </div>
             ))
           )}
         </div>

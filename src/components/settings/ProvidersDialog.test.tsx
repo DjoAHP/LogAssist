@@ -45,6 +45,7 @@ const secondProviderRow: ProviderRow = {
 }
 const existingModel: ModelRow = {
   id: "rm1", provider_id: "p1", model_id: "existing/model", supports_images: 0, is_default: 1,
+  context_window_override: null, max_output_tokens_override: null,
 }
 
 // Faux runtime : état SQL minimal pour refléter INSERT/DELETE entre les relectures.
@@ -78,12 +79,23 @@ beforeEach(() => {
       dbState.models = [...dbState.models, {
         id: (bind as unknown[])[0] as string, provider_id: (bind as unknown[])[1] as string,
         model_id: (bind as unknown[])[2] as string, supports_images: 0, is_default: 0,
+        context_window_override: null, max_output_tokens_override: null,
       }]
     }
     if (s.includes("DELETE FROM providers")) {
       const providerId = (bind as unknown[])[0]
       dbState.providers = dbState.providers.filter((provider) => provider.id !== providerId)
       dbState.models = dbState.models.filter((model) => model.provider_id !== providerId)
+    }
+    if (s.includes("UPDATE models SET context_window_override")) {
+      const [contextWindow, maxOutputTokens, modelId] = bind as [number | null, number | null, string]
+      dbState.models = dbState.models.map((model) => model.id === modelId
+        ? {
+            ...model,
+            context_window_override: contextWindow,
+            max_output_tokens_override: maxOutputTokens,
+          }
+        : model)
     }
     return Promise.resolve(undefined)
   })
@@ -294,6 +306,50 @@ describe("ProvidersDialog — récupération des modèles", () => {
     })
     // le modèle nouvellement ajouté apparaît ensuite dans la liste du modal
     expect(screen.queryAllByText("openai/nouveau-modele").length).toBeGreaterThan(0)
+  })
+
+  it("Parcourir les modèles : configure puis persiste les overrides de contexte", async () => {
+    dbState.models = [{
+      ...existingModel,
+      context_window_override: 8192,
+      max_output_tokens_override: 1024,
+    }]
+    renderDialog()
+    const row = (await screen.findByText("OpenRouter")).closest('[data-testid="provider-card"]')!
+    fireEvent.click(row.querySelector('[data-action="browse-models"]') as HTMLElement)
+    await screen.findByTestId("model-picker-modal")
+    fireEvent.click(screen.getByRole("button", {
+      name: `${t.providers.contextSettings} — existing/model`,
+    }))
+
+    const contextDialog = await screen.findByTestId("model-context-settings")
+    const picker = screen.getByTestId("model-picker-modal")
+    expect(picker.hasAttribute("inert")).toBe(true)
+    expect(picker.getAttribute("aria-hidden")).toBe("true")
+    fireEvent.keyDown(window, { key: "Escape" })
+    expect(screen.getByTestId("model-context-settings")).toBe(contextDialog)
+    expect((within(contextDialog).getByLabelText(t.providers.contextWindow) as HTMLInputElement).value).toBe("8192")
+    expect((within(contextDialog).getByLabelText(t.providers.maxOutputTokens) as HTMLInputElement).value).toBe("1024")
+    fireEvent.change(within(contextDialog).getByLabelText(t.providers.contextWindow), {
+      target: { value: "16384" },
+    })
+    fireEvent.change(within(contextDialog).getByLabelText(t.providers.maxOutputTokens), {
+      target: { value: "2048" },
+    })
+    fireEvent.click(within(contextDialog).getByRole("button", { name: t.providers.saveContext }))
+
+    await waitFor(() => expect(mockExecute).toHaveBeenCalledWith(
+      "UPDATE models SET context_window_override = ?, max_output_tokens_override = ? WHERE id = ?",
+      [16384, 2048, "rm1"],
+    ))
+    await waitFor(() => expect(screen.queryByTestId("model-context-settings")).toBeNull())
+
+    fireEvent.click(screen.getByRole("button", {
+      name: `${t.providers.contextSettings} — existing/model`,
+    }))
+    const refreshedDialog = await screen.findByTestId("model-context-settings")
+    expect((within(refreshedDialog).getByLabelText(t.providers.contextWindow) as HTMLInputElement).value).toBe("16384")
+    expect((within(refreshedDialog).getByLabelText(t.providers.maxOutputTokens) as HTMLInputElement).value).toBe("2048")
   })
 })
 

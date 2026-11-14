@@ -1,18 +1,21 @@
 import type { IProvider } from "@/lib/ai/openai-compat"
-import type { ChatRequest, TurnCallbacks } from "@/lib/ai/types"
+import type { TokenUsage, TurnCallbacks } from "@/lib/ai/types"
+import type { ContextSession } from "@/lib/context"
 import { runToolAgent, type ToolAgentInput, type ToolAgentResult } from "@/lib/mcp/toolAgent"
 
 /** Le contrat du tour assistant hérite des médias validés remontés par ToolAgent. */
-export interface AssistantTurnResult extends ToolAgentResult {}
+export interface AssistantTurnResult extends ToolAgentResult {
+  estimatedUsage?: TokenUsage
+}
 
 type ToolTurnOptions = Omit<
   ToolAgentInput,
-  "provider" | "request" | "apiKey" | "modelId" | "callbacks" | "signal"
+  "provider" | "context" | "apiKey" | "modelId" | "callbacks" | "signal"
 >
 
 interface BaseTurnInput {
   provider: IProvider
-  request: ChatRequest
+  context: ContextSession
   apiKey: string
   modelId: string
   callbacks: TurnCallbacks
@@ -31,7 +34,7 @@ export async function runAssistantTurn(
     return (input.runTools ?? runToolAgent)({
       ...input.tools,
       provider: input.provider,
-      request: input.request,
+      context: input.context,
       apiKey: input.apiKey,
       modelId: input.modelId,
       callbacks: input.callbacks,
@@ -39,8 +42,9 @@ export async function runAssistantTurn(
     })
   }
 
+  const prepared = input.context.prepareRound({ additionalMessages: [], tools: [] })
   const result = await input.provider.runTurn(
-    input.request,
+    prepared.request,
     input.apiKey,
     input.modelId,
     {},
@@ -55,5 +59,9 @@ export async function runAssistantTurn(
     sources: [],
     media: [],
     ...(result.usage ? { usage: result.usage } : {}),
+    estimatedUsage: {
+      inputTokens: prepared.stats.inputTokens,
+      outputTokens: input.context.estimateOutput(result.text),
+    },
   }
 }

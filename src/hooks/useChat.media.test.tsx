@@ -19,6 +19,7 @@ const mockMessageMediaDb = vi.hoisted(() => ({
   removeByMessageIds: vi.fn(),
 }))
 const mockRunAssistantTurn = vi.hoisted(() => vi.fn())
+const mockPrepareConversationContext = vi.hoisted(() => vi.fn())
 
 vi.mock("@/lib/db/messages", () => ({ messages: mockMessagesDb }))
 vi.mock("@/lib/db/messageMedia", () => ({ messageMedia: mockMessageMediaDb }))
@@ -42,6 +43,12 @@ vi.mock("@/lib/mcp/webIntent", () => ({ resolveWebIntent: vi.fn(() => "auto") })
 vi.mock("@/lib/mcp/client", () => ({ mcp: { callTool: vi.fn(), cancelTurn: vi.fn() } }))
 vi.mock("@/lib/logger", () => ({ logger: { debug: vi.fn(), error: vi.fn() } }))
 vi.mock("@/lib/chat/turnRunner", () => ({ runAssistantTurn: mockRunAssistantTurn }))
+vi.mock("@/lib/chat/prepareConversationContext", () => ({
+  prepareConversationContext: mockPrepareConversationContext,
+}))
+vi.mock("@/lib/context/modelCapabilities", () => ({
+  invalidateModelContextProfile: vi.fn(),
+}))
 
 import { useChat } from "@/hooks/useChat"
 import { renderHook, act } from "@testing-library/react"
@@ -54,8 +61,11 @@ import { buildSystemPrompt } from "@/lib/prompts/compose"
 
 const MODEL = {
   provider: { id: "p1", name: "Provider", secretRef: "ref" } as never,
+  modelRowId: "model-row-1",
   modelId: "m",
   supportsImages: true,
+  contextWindowOverride: null,
+  maxOutputTokensOverride: null,
 }
 
 const MEDIA = [
@@ -90,6 +100,11 @@ function blankRow(overrides: Partial<MessageRow>): MessageRow {
 beforeEach(() => {
   vi.clearAllMocks()
   mockRunAssistantTurn.mockReset()
+  mockPrepareConversationContext.mockReset().mockResolvedValue({
+    prepareRound: vi.fn(),
+    estimateOutput: vi.fn(),
+    dispose: vi.fn(),
+  })
   mockMessagesDb.listByConversation.mockResolvedValue([])
   mockMessagesDb.insert.mockResolvedValue("msg-1")
   mockMessagesDb.setMediaRefs.mockResolvedValue(undefined)

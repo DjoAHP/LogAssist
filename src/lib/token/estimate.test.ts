@@ -8,11 +8,37 @@ const messages = [
 
 describe("turn metrics", () => {
   it("marque le comptage local comme estimé", () => {
-    const metrics = estimateTurnMetrics(messages, "Réponse", "Serveur privé", "modele-inconnu")
+    const metrics = estimateTurnMetrics(messages, "Réponse", "https://serveur-prive.example/v1", "modele-inconnu")
     expect(metrics.inputTokens).toBeGreaterThan(0)
     expect(metrics.outputTokens).toBeGreaterThan(0)
     expect(metrics.usageSource).toBe("estimated")
     expect(metrics.costMicrousd).toBeNull()
+  })
+
+  it("compte une image selon ses dimensions sans compter son Base64", () => {
+    const textOnly = estimateTurnMetrics([
+      ...messages,
+      { role: "user" as const, content: "Décris" },
+    ], "Réponse", "http://localhost:1234/v1", "qwen")
+    const shortBase64 = estimateTurnMetrics([
+      ...messages,
+      {
+        role: "user" as const,
+        content: "Décris",
+        images: [{ base64: "A", mimeType: "image/png", width: 1024, height: 768 }],
+      },
+    ], "Réponse", "http://localhost:1234/v1", "qwen")
+    const longBase64 = estimateTurnMetrics([
+      ...messages,
+      {
+        role: "user" as const,
+        content: "Décris",
+        images: [{ base64: "A".repeat(1_000_000), mimeType: "image/png", width: 1024, height: 768 }],
+      },
+    ], "Réponse", "http://localhost:1234/v1", "qwen")
+
+    expect(shortBase64.inputTokens).toBe(longBase64.inputTokens)
+    expect(shortBase64.inputTokens).toBeGreaterThan(textOnly.inputTokens)
   })
 
   it("calcule le coût mini sans remise quand aucun token d'entrée n'est caché", () => {

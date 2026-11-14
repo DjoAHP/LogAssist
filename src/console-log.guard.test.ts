@@ -27,10 +27,34 @@ function findConsoleLog(file: string): string[] {
   return hits
 }
 
+function countLoggerDebug(file: string): number {
+  return [...readFileSync(file, "utf-8").matchAll(/logger\.debug\s*\(/g)].length
+}
+
 describe("garde-fou console.log", () => {
   it("aucun console.log dans src/ hors tests et logger", () => {
     const files = collect(path.resolve(import.meta.dirname, "."))
     const offenders = files.flatMap(findConsoleLog)
     expect(offenders).toEqual([])
+  })
+
+  it("limite logger.debug aux quatre appels explicitement audités", () => {
+    const root = path.resolve(import.meta.dirname, ".")
+    const callSites = Object.fromEntries(
+      collect(root)
+        .map((file) => [
+          path.relative(root, file).split(path.sep).join("/"),
+          countLoggerDebug(file),
+        ] as const)
+        .filter(([, count]) => count > 0),
+    )
+
+    // Toute nouvelle journalisation doit être revue : ces sites ne passent que
+    // des métadonnées UI, un détail HTTP déjà nettoyé ou le diagnostic sûr.
+    expect(callSites).toEqual({
+      "components/chat/ChatView.tsx": 2,
+      "lib/ai/openai-compat.ts": 1,
+      "lib/chat/prepareConversationContext.ts": 1,
+    })
   })
 })

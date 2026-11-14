@@ -1,7 +1,7 @@
-import { encoding_for_model, get_encoding, type Tiktoken } from "@dqbd/tiktoken"
 import type { ChatMessage, TokenUsage } from "@/lib/ai/types"
+import { createTokenEstimator } from "@/lib/context/tokenEstimator"
 import type { TurnMetrics } from "./types"
-import { getModelPricing, getTiktokenModel } from "./pricing"
+import { getModelPricing } from "./pricing"
 
 function isValidTokenUsage(usage: unknown): usage is TokenUsage {
   if (typeof usage !== "object" || usage === null) return false
@@ -13,15 +13,6 @@ function isValidTokenUsage(usage: unknown): usage is TokenUsage {
     typeof outputTokens === "number" &&
     Number.isSafeInteger(outputTokens) &&
     outputTokens >= 0
-}
-
-function createEncoder(provider: string, modelId: string): Tiktoken {
-  const model = getTiktokenModel(provider, modelId)
-  try {
-    return encoding_for_model(model)
-  } catch {
-    return get_encoding("cl100k_base")
-  }
 }
 
 function calculateCostMicrousd(
@@ -71,16 +62,13 @@ export function metricsFromProviderUsage(
 export function estimateTurnMetrics(
   messages: ChatMessage[],
   output: string,
-  provider: string,
+  baseUrl: string,
   modelId: string,
 ): TurnMetrics {
-  const encoder = createEncoder(provider, modelId)
+  const estimator = createTokenEstimator({ baseUrl, modelId })
   try {
-    const inputTokens = messages.reduce(
-      (total, message) => total + encoder.encode(message.content).length,
-      0,
-    )
-    const outputTokens = encoder.encode(output).length
+    const inputTokens = estimator.countMessages(messages)
+    const outputTokens = estimator.countText(output)
     return {
       inputTokens,
       outputTokens,
@@ -89,6 +77,6 @@ export function estimateTurnMetrics(
       costMicrousd: null,
     }
   } finally {
-    encoder.free()
+    estimator.dispose()
   }
 }

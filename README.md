@@ -53,6 +53,13 @@
 
 - Clés API stockées dans le Credential Manager Windows, jamais dans SQLite ou `localStorage`.
 
+## Gestion du contexte
+
+- Avant chaque appel au modèle, LogAssist recherche localement les passages utiles dans les bases de connaissances Markdown actives de la conversation, avec un classement lexical de type BM25. Les documents originaux restent conservés intégralement dans SQLite.
+- L'historique complet des messages reste lui aussi dans SQLite. Pour chaque tour, LogAssist sélectionne dynamiquement les échanges récents et les anciens échanges pertinents qui tiennent dans la fenêtre disponible.
+- Avec LM Studio, LogAssist détecte la fenêtre du modèle chargé ou, à défaut, celle annoncée par ses métadonnées ; pour les autres fournisseurs OpenAI-compatible, la fenêtre annoncée dans la liste des modèles est utilisée si elle existe. La fenêtre de contexte et la réserve de sortie peuvent être remplacées manuellement dans les réglages de chaque modèle.
+- Si le system prompt, le message en cours ou les résultats d'outils ne tiennent pas dans la fenêtre, l'appel est bloqué avec une erreur explicite. Cette version ne produit aucune synthèse automatique des documents ou de l'historique.
+
 ## Prérequis
 
 - Windows 10 ou 11 avec Microsoft Edge WebView2.

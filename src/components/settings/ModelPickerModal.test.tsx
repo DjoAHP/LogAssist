@@ -7,9 +7,9 @@ import { render, screen, fireEvent, cleanup } from "@testing-library/react"
 import { ModelPickerModal, type PickerModel } from "./ModelPickerModal"
 
 const models: PickerModel[] = [
-  { id: "mid-a", label: "openai/gpt-4o", isDefault: true },
-  { id: "mid-b", label: "anthropic/claude-3.5-sonnet", isDefault: false },
-  { id: "mid-c", label: "meta-llama/llama-3.1-70b-instruct", isDefault: false },
+  { id: "mid-a", label: "openai/gpt-4o", isDefault: true, contextWindowOverride: 128000, maxOutputTokensOverride: 4096 },
+  { id: "mid-b", label: "anthropic/claude-3.5-sonnet", isDefault: false, contextWindowOverride: null, maxOutputTokensOverride: null },
+  { id: "mid-c", label: "meta-llama/llama-3.1-70b-instruct", isDefault: false, contextWindowOverride: null, maxOutputTokensOverride: null },
 ]
 
 const baseProps = {
@@ -18,6 +18,7 @@ const baseProps = {
   onClose: vi.fn(),
   onSelect: vi.fn(),
   onAddModel: vi.fn(),
+  onConfigure: vi.fn(),
 }
 
 beforeEach(() => {
@@ -62,6 +63,16 @@ describe("ModelPickerModal", () => {
     fireEvent.click(screen.getByText("anthropic/claude-3.5-sonnet"))
     expect(baseProps.onSelect).toHaveBeenCalledWith("mid-b")
     expect(baseProps.onClose).not.toHaveBeenCalled() // la fermeture est le rôle du parent
+  })
+
+  it("ouvre le réglage de contexte sans activer le modèle", () => {
+    renderModal()
+    fireEvent.click(screen.getByRole("button", {
+      name: "Contexte du modèle — anthropic/claude-3.5-sonnet",
+    }))
+
+    expect(baseProps.onConfigure).toHaveBeenCalledWith(models[1])
+    expect(baseProps.onSelect).not.toHaveBeenCalled()
   })
 
   it("le modèle actif est repéré (étoile) et Alone le clic reste possible", () => {

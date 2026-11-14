@@ -3,7 +3,10 @@ import type { ProviderConfig } from "@/lib/ai/types"
 
 export interface ActiveModel {
   provider: ProviderConfig
+  modelRowId: string
   modelId: string
+  contextWindowOverride: number | null
+  maxOutputTokensOverride: number | null
 }
 
 // Lecture minimale du modèle actif. INVARIANT : is_default est GLOBAL (un seul
@@ -16,9 +19,14 @@ export async function getActiveModel(): Promise<ActiveModel | null> {
     name: string
     api_family: string
     base_url: string
+    model_row_id: string
     model_id: string
+    context_window_override: number | null
+    max_output_tokens_override: number | null
   }>(
-    `SELECT p.id, p.name, p.api_family, p.base_url, m.model_id
+    `SELECT p.id, p.name, p.api_family, p.base_url,
+            m.id AS model_row_id, m.model_id,
+            m.context_window_override, m.max_output_tokens_override
      FROM providers p
      JOIN models m ON m.provider_id = p.id
      WHERE m.is_default = 1
@@ -34,6 +42,9 @@ export async function getActiveModel(): Promise<ActiveModel | null> {
       baseUrl: r.base_url,
       secretRef: `logassist/provider/${r.id}`,
     },
+    modelRowId: r.model_row_id,
     modelId: r.model_id,
+    contextWindowOverride: r.context_window_override ?? null,
+    maxOutputTokensOverride: r.max_output_tokens_override ?? null,
   }
 }

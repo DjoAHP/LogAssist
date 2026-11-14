@@ -2,11 +2,21 @@ import { describe, expect, it, vi } from "vitest"
 import type { IProvider } from "@/lib/ai/openai-compat"
 import type { ChatRequest, TurnCallbacks } from "@/lib/ai/types"
 import type { ToolAgentInput } from "@/lib/mcp/toolAgent"
+import type { ContextSession } from "@/lib/context"
 import { runAssistantTurn } from "./turnRunner"
+
+type AssistantTurnInput = Parameters<typeof runAssistantTurn>[0]
+type IsRequiredKey<T, K extends keyof T> = {} extends Pick<T, K> ? false : true
+type HasNoRequest<T> = "request" extends keyof T ? false : true
+type HasStrictContextContract = IsRequiredKey<AssistantTurnInput, "context"> extends true
+  ? HasNoRequest<AssistantTurnInput>
+  : false
+
+const HAS_STRICT_CONTEXT_CONTRACT: HasStrictContextContract = true
 
 type ToolTurnOptions = Omit<
   ToolAgentInput,
-  "provider" | "request" | "apiKey" | "modelId" | "callbacks" | "signal"
+  "provider" | "context" | "apiKey" | "modelId" | "callbacks" | "signal"
 >
 
 const request: ChatRequest = {
@@ -17,6 +27,17 @@ const callbacks: TurnCallbacks = {}
 
 function providerWithRunTurn(runTurn: ReturnType<typeof vi.fn>): IProvider {
   return { runTurn } as unknown as IProvider
+}
+
+function preparedContext(preparedRequest: ChatRequest): ContextSession {
+  return {
+    prepareRound: vi.fn().mockReturnValue({
+      request: preparedRequest,
+      stats: { inputTokens: 37, totalWithReserve: 1061 },
+    }),
+    estimateOutput: vi.fn().mockReturnValue(12),
+    dispose: vi.fn(),
+  } as unknown as ContextSession
 }
 
 function createToolOptions(): ToolTurnOptions {
@@ -34,6 +55,61 @@ function createToolOptions(): ToolTurnOptions {
 }
 
 describe("runAssistantTurn", () => {
+  it("exige une ContextSession et n'expose plus de requête non préparée dans son type public", () => {
+    expect(HAS_STRICT_CONTEXT_CONTRACT).toBe(true)
+  })
+
+  it("exécute le tour direct avec la requête préparée par la ContextSession", async () => {
+    const preparedRequest: ChatRequest = {
+      messages: [{ role: "user", content: "Question bornée" }],
+      maxOutputTokens: 1024,
+    }
+    const context = preparedContext(preparedRequest)
+    const runTurn = vi.fn().mockResolvedValue({
+      text: "Réponse",
+      toolCalls: [],
+      firstTokenMs: 12,
+      totalMs: 40,
+    })
+    const result = await runAssistantTurn({
+      provider: providerWithRunTurn(runTurn),
+      context,
+      apiKey: "secret",
+      modelId: "model",
+      callbacks,
+      signal,
+    })
+
+    expect(context.prepareRound).toHaveBeenCalledWith({ additionalMessages: [], tools: [] })
+    expect(runTurn).toHaveBeenCalledWith(preparedRequest, "secret", "model", {}, callbacks, signal)
+    expect(result).toMatchObject({ estimatedUsage: { inputTokens: 37, outputTokens: 12 } })
+  })
+
+  it("conserve une estimation de repli même si le fournisseur annonce un usage", async () => {
+    const context = preparedContext(request)
+    const runTurn = vi.fn().mockResolvedValue({
+      text: "Réponse",
+      toolCalls: [],
+      firstTokenMs: 12,
+      totalMs: 40,
+      usage: { inputTokens: 40, outputTokens: 10 },
+    })
+
+    const result = await runAssistantTurn({
+      provider: providerWithRunTurn(runTurn),
+      context,
+      apiKey: "secret",
+      modelId: "model",
+      callbacks,
+      signal,
+    })
+
+    expect(result).toMatchObject({
+      usage: { inputTokens: 40, outputTokens: 10 },
+      estimatedUsage: { inputTokens: 37, outputTokens: 12 },
+    })
+  })
+
   it("retourne un résultat uniforme pour un tour direct", async () => {
     const runTurn = vi.fn().mockResolvedValue({
       text: "Réponse",
@@ -46,7 +122,7 @@ describe("runAssistantTurn", () => {
 
     const result = await runAssistantTurn({
       provider,
-      request,
+      context: preparedContext(request),
       apiKey: "secret",
       modelId: "model",
       callbacks,
@@ -73,10 +149,11 @@ describe("runAssistantTurn", () => {
     const runTools = vi.fn().mockResolvedValue({ text: "Réponse", sources: [], firstTokenMs: 10, totalMs: 20 })
     const tools = createToolOptions()
     const provider = providerWithRunTurn(vi.fn())
+    const context = preparedContext(request)
 
-    await runAssistantTurn({ provider, request, apiKey: "secret", modelId: "model", callbacks, signal, tools, runTools })
+    await runAssistantTurn({ provider, context, apiKey: "secret", modelId: "model", callbacks, signal, tools, runTools })
 
-    expect(runTools).toHaveBeenCalledWith({ ...tools, provider, request, apiKey: "secret", modelId: "model", callbacks, signal })
+    expect(runTools).toHaveBeenCalledWith({ ...tools, provider, context, apiKey: "secret", modelId: "model", callbacks, signal })
   })
 
   it("utilise un tour direct sans catalogue", async () => {
@@ -88,7 +165,14 @@ describe("runAssistantTurn", () => {
     })
     const provider = providerWithRunTurn(runTurn)
 
-    await runAssistantTurn({ provider, request, apiKey: "secret", modelId: "model", callbacks, signal })
+    await runAssistantTurn({
+      provider,
+      context: preparedContext(request),
+      apiKey: "secret",
+      modelId: "model",
+      callbacks,
+      signal,
+    })
 
     expect(runTurn).toHaveBeenCalledWith(request, "secret", "model", {}, callbacks, signal)
   })
@@ -110,7 +194,7 @@ describe("runAssistantTurn", () => {
 
     await runAssistantTurn({
       provider,
-      request,
+      context: preparedContext(request),
       apiKey: "secret",
       modelId: "model",
       callbacks,
@@ -139,7 +223,7 @@ describe("runAssistantTurn", () => {
 
     const result = await runAssistantTurn({
       provider: providerWithRunTurn(vi.fn()),
-      request,
+      context: preparedContext(request),
       apiKey: "secret",
       modelId: "model",
       callbacks,
@@ -161,7 +245,7 @@ describe("runAssistantTurn", () => {
 
     await expect(runAssistantTurn({
       provider,
-      request,
+      context: preparedContext(request),
       apiKey: "secret",
       modelId: "model",
       callbacks,
@@ -175,7 +259,7 @@ describe("runAssistantTurn", () => {
 
     await expect(runAssistantTurn({
       provider,
-      request,
+      context: preparedContext(request),
       apiKey: "secret",
       modelId: "model",
       callbacks,
@@ -189,7 +273,7 @@ describe("runAssistantTurn", () => {
 
     await expect(runAssistantTurn({
       provider: providerWithRunTurn(vi.fn()),
-      request,
+      context: preparedContext(request),
       apiKey: "secret",
       modelId: "model",
       callbacks,
@@ -205,7 +289,7 @@ describe("runAssistantTurn", () => {
 
     await expect(runAssistantTurn({
       provider: providerWithRunTurn(vi.fn()),
-      request,
+      context: preparedContext(request),
       apiKey: "secret",
       modelId: "model",
       callbacks,

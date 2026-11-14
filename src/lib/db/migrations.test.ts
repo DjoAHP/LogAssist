@@ -13,12 +13,17 @@ import {
   SCHEMA_V10_STATEMENTS,
   SCHEMA_VERSION,
 } from "./migrations"
+import * as migrations from "./migrations"
 import { executeSchema } from "./database"
 
 const ERROR_CLEANUP_STATEMENT =
   "UPDATE messages SET error = CASE WHEN error = '{\"interrupted\":true}' THEN '{\"interrupted\":true}' ELSE '{\"kind\":\"unknown\",\"message\":\"\"}' END WHERE error IS NOT NULL"
 const EMPTY_ASSISTANT_REPAIR_STATEMENT =
   "UPDATE messages SET error = '{\"kind\":\"unknown\",\"message\":\"\"}' WHERE role = 'assistant' AND content = '' AND error IS NULL"
+const MODEL_CONTEXT_STATEMENTS = [
+  "ALTER TABLE models ADD COLUMN context_window_override INTEGER CHECK (context_window_override IS NULL OR context_window_override BETWEEN 512 AND 2000000)",
+  "ALTER TABLE models ADD COLUMN max_output_tokens_override INTEGER CHECK (max_output_tokens_override IS NULL OR max_output_tokens_override BETWEEN 1 AND 262144)",
+]
 
 function createMigrationDbMock() {
   const execute = vi.fn().mockResolvedValue(undefined)
@@ -39,7 +44,7 @@ describe("SCHEMA_V1_STATEMENTS", () => {
     expect(SCHEMA_V1).toBe(SCHEMA_V1_STATEMENTS.join(";\n"))
   })
   it("SCHEMA_VERSION correspond à la dernière migration", () => {
-    expect(SCHEMA_VERSION).toBe(10)
+    expect(SCHEMA_VERSION).toBe(11)
     expect(SCHEMA_V1).toContain("CREATE TABLE IF NOT EXISTS conversations")
     expect(SCHEMA_V1).toContain("idx_conversations_project")
   })
@@ -125,6 +130,7 @@ describe("SCHEMA_V7_STATEMENTS", () => {
       EMPTY_ASSISTANT_REPAIR_STATEMENT,
       ...SCHEMA_V9_STATEMENTS,
       ...SCHEMA_V10_STATEMENTS,
+      ...MODEL_CONTEXT_STATEMENTS,
     ])
   })
 
@@ -139,6 +145,7 @@ describe("SCHEMA_V7_STATEMENTS", () => {
       EMPTY_ASSISTANT_REPAIR_STATEMENT,
       ...SCHEMA_V9_STATEMENTS,
       ...SCHEMA_V10_STATEMENTS,
+      ...MODEL_CONTEXT_STATEMENTS,
     ])
   })
 })
@@ -157,6 +164,7 @@ describe("SCHEMA_V8_STATEMENTS", () => {
       EMPTY_ASSISTANT_REPAIR_STATEMENT,
       ...SCHEMA_V9_STATEMENTS,
       ...SCHEMA_V10_STATEMENTS,
+      ...MODEL_CONTEXT_STATEMENTS,
     ])
   })
 })
@@ -186,6 +194,7 @@ describe("SCHEMA_V9_STATEMENTS", () => {
     expect(execute.mock.calls.map(([statement]) => statement)).toEqual([
       ...SCHEMA_V9_STATEMENTS,
       ...SCHEMA_V10_STATEMENTS,
+      ...MODEL_CONTEXT_STATEMENTS,
     ])
   })
 })
@@ -203,9 +212,26 @@ describe("SCHEMA_V10_STATEMENTS", () => {
     expect(text).toContain("ALTER TABLE messages ADD COLUMN media TEXT NOT NULL DEFAULT '[]'")
   })
 
-  it("applique uniquement V10 à une base V9", async () => {
+  it("applique V10 puis V11 à une base V9", async () => {
     const { db, execute } = createMigrationDbMock()
     await executeSchema(db, 9)
-    expect(execute.mock.calls.map(([statement]) => statement)).toEqual(SCHEMA_V10_STATEMENTS)
+    expect(execute.mock.calls.map(([statement]) => statement)).toEqual([
+      ...SCHEMA_V10_STATEMENTS,
+      ...MODEL_CONTEXT_STATEMENTS,
+    ])
+  })
+})
+
+describe("SCHEMA_V11_STATEMENTS", () => {
+  it("ajoute deux overrides nullable et bornés aux modèles", () => {
+    expect((migrations as typeof migrations & {
+      SCHEMA_V11_STATEMENTS?: string[]
+    }).SCHEMA_V11_STATEMENTS).toEqual(MODEL_CONTEXT_STATEMENTS)
+  })
+
+  it("applique uniquement V11 à une base V10", async () => {
+    const { db, execute } = createMigrationDbMock()
+    await executeSchema(db, 10)
+    expect(execute.mock.calls.map(([statement]) => statement)).toEqual(MODEL_CONTEXT_STATEMENTS)
   })
 })
