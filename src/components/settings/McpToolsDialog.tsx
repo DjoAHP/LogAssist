@@ -198,14 +198,6 @@ export function McpToolsDialog({ server, tools, onToggle, onToggleAll, onApprova
         onClick={(event) => event.stopPropagation()}
       >
         <div className="min-h-0 border-r border-border p-4">
-          <input
-            ref={searchInputRef}
-            type="search"
-            aria-label={t.mcp.searchTools}
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
-            className="mb-2 w-full rounded-md border border-border bg-background px-2 py-1.5 text-xs focus-visible:ring-2 focus-visible:ring-brand-to"
-          />
           <label className="mb-3 flex w-fit items-center gap-2 text-[11px] text-muted-foreground">
             <input
               ref={allCheckboxRef}
@@ -218,6 +210,14 @@ export function McpToolsDialog({ server, tools, onToggle, onToggleAll, onApprova
             />
             {t.mcp.allTools} ({shownEnabled}/{filtered.length})
           </label>
+          <input
+            ref={searchInputRef}
+            type="search"
+            aria-label={t.mcp.searchTools}
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            className="mb-2 w-full rounded-md border border-border bg-background px-2 py-1.5 text-xs focus-visible:ring-2 focus-visible:ring-brand-to"
+          />
           <ul className="max-h-[60vh] space-y-2 overflow-y-auto">
             {filtered.map((tool) => (
               <ToolRow
