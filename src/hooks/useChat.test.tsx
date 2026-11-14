@@ -518,6 +518,18 @@ describe("useChat.send — contract anti-perte", () => {
     expect(payload.message).toContain("16384")
     expect(payload.message).toContain("24189")
     expect(payload.message).toContain("31102")
+    // Compteurs structurés pour reconstruction i18n au rechargement.
+    expect(payload.contextCounters).toEqual({
+      window: 16_384,
+      system: 1_383,
+      currentUser: 120,
+      images: 0,
+      tools: 24_189,
+      mcp: 0,
+      outputReserve: 4_096,
+      safetyMargin: 1_310,
+      total: 31_102,
+    })
 
     // Le journal d’échec porte le diagnostic sûr et structuré.
     const loggedWithDiagnostic = loggerErrorMock.mock.calls
@@ -1074,6 +1086,56 @@ describe("useChat.send — contract anti-perte", () => {
       kind: "persistence",
       message: "",
     })
+  })
+
+  it("restaure les compteurs de contexte au rechargement", async () => {
+    vi.mocked(messagesDb.listByConversation).mockResolvedValueOnce([
+      messageRow({
+        id: "assistant-context-counters",
+        error: JSON.stringify({
+          kind: "context_length",
+          message: "",
+          contextCounters: {
+            window: 16384,
+            system: 1487,
+            currentUser: 9,
+            images: 0,
+            tools: 22520,
+            mcp: 0,
+            outputReserve: 4096,
+            safetyMargin: 1311,
+            total: 29425,
+          },
+        }),
+      }),
+    ])
+    const { result } = renderHook(() => useChat(modelSelection))
+
+    await act(async () => result.current.load("conv-1"))
+
+    expect(result.current.vm[0].apiError).toEqual({
+      kind: "context_length",
+      message:
+        "Fenêtre 16384 — système 1487, message 9, images 0, outils 22520, MCP 0, réserve de sortie 4096, marge 1311, total 29425",
+    })
+  })
+
+  it("ignore des compteurs de contexte invalides au rechargement", async () => {
+    vi.mocked(messagesDb.listByConversation).mockResolvedValueOnce([
+      messageRow({
+        id: "assistant-context-bad-counters",
+        error: JSON.stringify({
+          kind: "context_length",
+          message: "legacy arbitraire",
+          contextCounters: { window: "16384", tools: -Infinity },
+        }),
+      }),
+    ])
+    const { result } = renderHook(() => useChat(modelSelection))
+
+    await act(async () => result.current.load("conv-1"))
+
+    expect(result.current.vm[0].apiError).toEqual({ kind: "context_length", message: "" })
   })
 
   it("rabats un kind historique inconnu sans l'exposer dans la VM", async () => {

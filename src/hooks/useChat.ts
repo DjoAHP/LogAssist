@@ -51,10 +51,25 @@ export interface Attachment {
 
 // Payload d'erreur persisté en JSON dans messages.error (rond-trip : la class
 // ApiError ne survit pas à JSON.stringify, on sérialise un objet plat).
+// Compteurs de contexte d'un échec — uniquement des nombres, reconstruits en
+// phrase i18n à l'affichage (jamais de texte arbitraire relui depuis SQLite).
+export interface ContextCounters {
+  window: number
+  system: number
+  currentUser: number
+  images: number
+  tools: number
+  mcp: number
+  outputReserve: number
+  safetyMargin: number
+  total: number
+}
+
 export interface ApiErrorPayload {
   kind: ApiErrorKind
   message: string
   detail?: string
+  contextCounters?: ContextCounters
 }
 
 export interface ChatMessageVM {
@@ -129,8 +144,12 @@ function contextCountersOf(
 }
 
 function contextFailureMessage(diagnostic: SafeContextDiagnostic): string {
+  return formatTemplate(t.errors.contextDetail, contextCountersOfNumbers(diagnostic))
+}
+
+function contextCountersOfNumbers(diagnostic: SafeContextDiagnostic): ContextCounters {
   const tokens = diagnostic.tokens
-  return formatTemplate(t.errors.contextDetail, {
+  return {
     window: diagnostic.contextWindowTokens,
     system: tokens.system,
     currentUser: tokens.currentUser,
@@ -140,7 +159,7 @@ function contextFailureMessage(diagnostic: SafeContextDiagnostic): string {
     outputReserve: tokens.outputReserve,
     safetyMargin: tokens.safetyMargin,
     total: tokens.totalWithReserve,
-  })
+  }
 }
 
 function normalizeDuration(value: unknown): number | null {
@@ -530,6 +549,7 @@ export function useChat(
                 ? redactTurnDetail(contextFailureMessage(failureDiagnostic))
                 : redactTurnDetail(api.message ?? "Erreur inattendue"),
               ...(api.detail ? { detail: redactTurnDetail(api.detail) } : {}),
+              ...(failureDiagnostic ? { contextCounters: contextCountersOfNumbers(failureDiagnostic) } : {}),
             }
             upsertLast({ apiError: payload, interrupted: false, webStatus: undefined })
             const id = await messagesDb.insert({
@@ -914,6 +934,23 @@ export function useChat(
   }
 }
 
+const CONTEXT_COUNTER_KEYS = [
+  "window", "system", "currentUser", "images", "tools",
+  "mcp", "outputReserve", "safetyMargin", "total",
+] as const
+
+function parseContextCounters(value: unknown): ContextCounters | null {
+  if (typeof value !== "object" || value === null) return null
+  const record = value as Record<string, unknown>
+  const counters: Record<string, number> = {}
+  for (const key of CONTEXT_COUNTER_KEYS) {
+    const entry = record[key]
+    if (typeof entry !== "number" || !Number.isFinite(entry)) return null
+    counters[key] = entry
+  }
+  return counters as unknown as ContextCounters
+}
+
 function mapRow(r: MessageRow): ChatMessageVM {
   let apiError: ApiErrorPayload | undefined
   let interrupted: boolean | undefined
@@ -924,11 +961,14 @@ function mapRow(r: MessageRow): ChatMessageVM {
       const parsed = JSON.parse(r.error) as ApiErrorPayload & { interrupted?: boolean }
       if (parsed.interrupted) interrupted = true
       else if (parsed.kind) {
+        // Une ligne legacy ne permet pas de retrouver sa clé arbitraire exacte.
+        // Seul le kind contrôlé atteint la VM ; le libellé vient de l'i18n.
+        // Les compteurs de contexte sont des nombres validés : la phrase est
+        // reconstruite par l'i18n, jamais relue depuis le texte persisté.
+        const counters = parseContextCounters(parsed.contextCounters)
         apiError = {
           kind: normalizeApiErrorKind(parsed.kind),
-          // Une ligne legacy ne permet pas de retrouver sa clé arbitraire exacte.
-          // Seul le kind contrôlé atteint la VM ; le libellé vient de l'i18n.
-          message: "",
+          message: counters ? formatTemplate(t.errors.contextDetail, counters) : "",
         }
       }
     } catch {
