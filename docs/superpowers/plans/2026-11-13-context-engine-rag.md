@@ -2919,13 +2919,13 @@ git add -f docs/superpowers/plans/2026-11-13-context-engine-rag.md
 git commit -m "docs: décrit la gestion intelligente du contexte"
 ```
 
-- [ ] **Step 10: Pousser la branche**
+- [x] **Step 10: Pousser la branche**
 
 ```bash
 git push origin feat/context-engine-rag
 ```
 
-- [ ] **Step 11: Ouvrir la PR sans fusion automatique**
+- [x] **Step 11: Ouvrir la PR sans fusion automatique**
 
 ```bash
 gh pr create --base feat/m1-socle-chat --head feat/context-engine-rag --title "feat: gestion intelligente du contexte IA" --body "Implémente le moteur de contexte centralisé, le RAG Markdown local, la sélection d’historique, la détection de fenêtre LM Studio et le budget de tous les tours MCP. Préserve les données SQLite, le streaming, l’annulation, la vision et le contrat anti-perte."
@@ -2938,7 +2938,7 @@ pour cette branche, récupérer son URL avec :
 gh pr view feat/context-engine-rag --json url --jq .url
 ```
 
-- [ ] **Step 12: Préparer le rapport final**
+- [x] **Step 12: Préparer le rapport final**
 
 Le rapport final doit contenir :
 
