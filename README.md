@@ -44,7 +44,7 @@
 
 - Galerie de serveurs MCP Streamable HTTP importables par JSON.
 - Authentification sans secret, Bearer ou API Key dans un header personnalisé.
-- Activation explicite des serveurs et outils, avec confirmation des actions risquées.
+- Activation explicite des serveurs et outils, avec confirmation des actions risquées ; bascule globale « Tous les outils » par serveur dans le navigateur d'outils.
 - TinyFish reste intégré pour la recherche Web, la lecture d'URL et les sources.
 
 <p align="center">
@@ -58,7 +58,7 @@
 - Avant chaque appel au modèle, LogAssist recherche localement les passages utiles dans les bases de connaissances Markdown actives de la conversation, avec un classement lexical de type BM25. Les documents originaux restent conservés intégralement dans SQLite.
 - L'historique complet des messages reste lui aussi dans SQLite. Pour chaque tour, LogAssist sélectionne dynamiquement les échanges récents et les anciens échanges pertinents qui tiennent dans la fenêtre disponible.
 - Avec LM Studio, LogAssist détecte la fenêtre du modèle chargé ou, à défaut, celle annoncée par ses métadonnées ; pour les autres fournisseurs OpenAI-compatible, la fenêtre annoncée dans la liste des modèles est utilisée si elle existe. La fenêtre de contexte et la réserve de sortie peuvent être remplacées manuellement dans les réglages de chaque modèle.
-- Si le system prompt, le message en cours ou les résultats d'outils ne tiennent pas dans la fenêtre, l'appel est bloqué avec une erreur explicite. Cette version ne produit aucune synthèse automatique des documents ou de l'historique.
+- Si le system prompt, le message en cours ou les résultats d'outils ne tiennent pas dans la fenêtre, l'appel est bloqué avec une erreur explicite détaillant les compteurs de tokens (système, message, images, outils, réserve de sortie). Cette version ne produit aucune synthèse automatique des documents ou de l'historique.
 
 ## Prérequis
 

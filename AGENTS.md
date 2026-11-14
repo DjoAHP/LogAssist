@@ -232,6 +232,29 @@ Priorisés dans l'ordre du rapport d'audit :
 - Migrations V6 à V8 ; comportement éphémère des captures conservé.
 - 496 tests TypeScript validés dans le worktree de release ; build Vite Windows validé.
 
+### Livraison v3.3.1
+
+- **Moteur de contexte centralisé** (`src/lib/context/`) : planificateur de tour
+  (`contextPlanner.ts`), budget central, estimateur de tokens, sélecteur
+  d'historique, RAG Markdown (chunker + retrieval BM25, sélection de passages).
+  Les documents et l'historique restent intégralement en SQLite ; aucune synthèse
+  automatique. Tout appel de génération passe obligatoirement par le contexte
+  borné de `ContextSession` (invariant n°11).
+- **Fenêtre par modèle** : détection LM Studio (modèle chargé ou métadonnées),
+  fenêtre annoncée par la liste de modèles pour les autres fournisseurs ;
+  overrides manuels de contexte et de sortie par modèle (migration V11,
+  `ModelContextSettings`).
+- **Diagnostic d'échec de contexte** : rejet local de l'appel avec compteurs
+  structurés (`contextCounters`, 9 nombres) persistés dans `messages.error` ;
+  la phrase est reconstruite par l'i18n à l'affichage, jamais relue depuis le
+  texte arbitraire (invariant anti-legacy de `mapRow`).
+- **Bascule globale des outils MCP** : case « Tous les outils » dans « Parcourir
+  les outils », au-dessus de la recherche ; cible les outils affichés (filtre
+  vide = tout le serveur). À l'activation, le catalogue est validé
+  (64 outils / 256 Kio de schémas) AVANT toute persistance.
+- Gates validées : 905 tests TypeScript, TypeScript OK ; PR #3 mergée vers
+  `feat/m1-socle-chat`.
+
 ---
 
 ## 7. Workflow nouvelles fonctionnalités (depuis v3.2.0)
