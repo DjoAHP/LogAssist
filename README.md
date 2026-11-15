@@ -9,8 +9,12 @@
         <img src="https://img.shields.io/badge/Tauri-v2.0-1B4CDE?labelColor=C77B23&style=plastic&logo=tauri&logoColor=F0F0F0" />
         </a>
     <a href="https://github.com/DjoAHP/LogAssist" alt="LogAssist github">
-        <img src="https://img.shields.io/crates/v/package?label=LogAssist&color=2D90A4&labelColor=343943&style=flat&logo=github&logoColor=ffffff" /></a>
+        <img src="https://img.shields.io/package?label=LogAssist&color=2D90A4&labelColor=343943&style=flat&logo=github&logoColor=ffffff" /></a>
 </p>
+
+![Version](https://img.shields.io/github/package-json/v/DjoAHP/NOM_DU_DEPOT?label=version&logo=github)
+![Version](https://img.shields.io/github/package-json/v/DjoAHP/LogAssist?label=version&logo=github)
+DjoAHP/LogAssist/blob/feat/m1-socle-chat/package.json
 
 
 > LogAssist est un assistant IA de bureau pour Windows conçu pour apprendre des logiciels. Il combine conversations persistées, fournisseurs LLM configurables et accès Web contrôlé via MCP (galerie de serveurs importables, TinyFish intégré).
