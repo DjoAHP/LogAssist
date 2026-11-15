@@ -1,0 +1,49 @@
+# CI LogAssist — gates identiques au build local, sur runner Windows.
+# TypeScript : tsc + vitest + vite build (npm run build, gated par les tests).
+# Rust : clippy strict + tests complets (la CI lie logassist.exe sans app en cours).
+name: CI
+
+on:
+  pull_request:
+    branches: [feat/m1-socle-chat]
+  push:
+    branches: [feat/m1-socle-chat]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  typescript:
+    name: TypeScript (tsc + vitest + vite)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - name: Installation des dépendances (npm ci)
+        run: npm ci
+      - name: Gates TypeScript (test d'abord, build ensuite)
+        run: npm run build
+
+  rust:
+    name: Rust (clippy + tests)
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: src-tauri
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - name: Clippy strict
+        run: cargo clippy -- -D warnings
+      - name: Tests Rust complets
+        run: cargo test
