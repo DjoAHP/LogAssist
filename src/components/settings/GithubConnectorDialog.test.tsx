@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
+import "@testing-library/jest-dom"
 import { cleanup, render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
-import { afterEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { GithubConnectorDialog } from "./GithubConnectorDialog"
 import { t } from "@/i18n/fr"
 
@@ -45,7 +46,7 @@ describe("GithubConnectorDialog", () => {
     render(<GithubConnectorDialog {...defaultProps} />)
 
     expect(screen.getByRole("heading", { name: t.connectors.title })).toBeInTheDocument()
-    expect(screen.getByLabelText(t.connectors.tokenLabel)).toHaveValue("")
+    expect(screen.getByLabelText(t.connectors.tokenLabel)).toHaveAttribute("value", "")
     expect(screen.getByText(t.connectors.status.notConfigured)).toBeInTheDocument()
     expect(screen.getByRole("button", { name: t.connectors.testAndSave })).toBeInTheDocument()
     expect(screen.queryByText(t.connectors.replace)).not.toBeInTheDocument()
@@ -227,7 +228,7 @@ describe("GithubConnectorDialog", () => {
 
     render(<GithubConnectorDialog {...defaultProps} />)
 
-    expect(screen.getByLabelText(t.connectors.tokenLabel)).toHaveFocus()
+    expect(document.activeElement).toBe(screen.getByLabelText(t.connectors.tokenLabel))
   })
 
   it("affiche le lien de création du jeton", async () => {

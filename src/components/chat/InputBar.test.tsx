@@ -1,7 +1,30 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 import { render, screen, fireEvent, waitFor, cleanup } from "@testing-library/react"
-import { InputBar } from "./InputBar"
+import { t } from "@/i18n/fr"
+
+const mockInvoke = vi.hoisted(() => vi.fn())
+const mockOpenUrl = vi.hoisted(() => vi.fn())
+const mockConnectorGithub = vi.hoisted(() => ({
+  configure: vi.fn(),
+  status: vi.fn(),
+  delete: vi.fn(),
+  listRepos: vi.fn().mockResolvedValue({ repos: [], page: 1, hasMore: false }),
+  listBranches: vi.fn().mockResolvedValue([]),
+  callTool: vi.fn(),
+  cancelTurn: vi.fn(),
+}))
+vi.mock("@tauri-apps/api/core", () => ({ invoke: mockInvoke }))
+vi.mock("@tauri-apps/plugin-opener", () => ({ openUrl: mockOpenUrl }))
+vi.mock("@/lib/connectors/client", () => ({
+  connectorGithub: mockConnectorGithub,
+  connectorErrorKindToI18nKey: vi.fn(),
+}))
+vi.mock("@/lib/logger", () => ({
+  logger: { debug: vi.fn(), error: vi.fn(), warn: vi.fn(), info: vi.fn() },
+}))
+
+import { InputBar } from "@/components/chat/InputBar"
 
 const onSend = vi.fn().mockResolvedValue(true)
 const onInterrupt = vi.fn()
@@ -17,8 +40,91 @@ afterEach(() => {
 })
 
 function renderBar(props: Partial<Parameters<typeof InputBar>[0]> = {}) {
-  return render(<InputBar onSend={onSend} onInterrupt={onInterrupt} {...props} />)
+  return render(
+    <InputBar
+      onSend={onSend}
+      onInterrupt={onInterrupt}
+      githubAvailable={false}
+      githubAttached={null}
+      onOpenRepoPicker={vi.fn()}
+      onCloseRepoPicker={vi.fn()}
+      onAttachRepo={vi.fn()}
+      onDetachRepo={vi.fn()}
+      {...props}
+    />,
+  )
 }
+
+describe("InputBar — dépôt GitHub", () => {
+  it("utilise l’icône connecteur locale et ouvre le sélecteur quand GitHub est prêt", () => {
+    const onOpenRepoPicker = vi.fn()
+    renderBar({ githubAvailable: true, onOpenRepoPicker })
+
+    const button = screen.getByRole("button", { name: t.connectors.github })
+    expect(button.querySelector('[data-testid="github-connecteur-icon"]')).not.toBeNull()
+
+    fireEvent.click(button)
+    expect(onOpenRepoPicker).toHaveBeenCalledTimes(1)
+  })
+
+  it("reste désactivé et explique comment configurer GitHub", () => {
+    renderBar({ githubAvailable: false })
+
+    const button = screen.getByRole("button", { name: t.connectors.github }) as HTMLButtonElement
+    expect(button.disabled).toBe(true)
+    expect(button.title).toBe("Configurez GitHub dans Paramètres généraux › Connecteurs")
+  })
+
+  it("affiche la puce attachée et détache sans rouvrir le sélecteur", () => {
+    const onOpenRepoPicker = vi.fn()
+    const onDetachRepo = vi.fn()
+    renderBar({
+      githubAvailable: true,
+      githubAttached: { owner: "acme", name: "console", ref: "develop" },
+      onOpenRepoPicker,
+      onDetachRepo,
+    })
+
+    expect(screen.getByText("acme/console@develop")).toBeTruthy()
+    fireEvent.click(screen.getByRole("button", { name: t.chat.detachGitHubRepo }))
+
+    expect(onDetachRepo).toHaveBeenCalledTimes(1)
+    expect(onOpenRepoPicker).not.toHaveBeenCalled()
+  })
+
+  it("persiste la liaison choisie depuis le sélecteur", async () => {
+    const onAttachRepo = vi.fn().mockResolvedValue(undefined)
+    mockConnectorGithub.listRepos.mockResolvedValueOnce({
+      repos: [
+        {
+          fullName: "acme/console",
+          isPrivate: false,
+          defaultBranch: "main",
+          updatedAt: null,
+        },
+      ],
+      page: 1,
+      hasMore: false,
+    })
+    mockConnectorGithub.listBranches.mockResolvedValueOnce(["main", "develop"])
+
+    renderBar({
+      githubAvailable: true,
+      isRepoPickerOpen: true,
+      onAttachRepo,
+    })
+
+    await waitFor(() => expect(screen.getByText("acme/console")).toBeTruthy())
+    fireEvent.click(screen.getByText("acme/console"))
+    await waitFor(() => expect(mockConnectorGithub.listBranches).toHaveBeenCalledWith("acme", "console"))
+    fireEvent.change(screen.getByLabelText(t.connectors.repoPicker.branch), {
+      target: { value: "develop" },
+    })
+    fireEvent.click(screen.getByRole("button", { name: t.connectors.repoPicker.attach }))
+
+    expect(onAttachRepo).toHaveBeenCalledWith({ owner: "acme", name: "console", ref: "develop" })
+  })
+})
 
 describe("InputBar — fichiers texte", () => {
   it("import d'un .md : chip nommé, contenu lu via File.text", async () => {

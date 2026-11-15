@@ -67,6 +67,7 @@ export const fr = {
     selectModel: "Modèle",
     addImage: "Ajouter une image",
     addFile: "Ajouter un fichier texte (.md/.txt)",
+    detachGitHubRepo: "Retirer le dépôt GitHub attaché",
     systemPrompt: "System prompt",
     modelsSettings: "Models settings",
     darkMode: "Mode sombre",
@@ -322,7 +323,7 @@ export const fr = {
       searchOwner: "Recherche par propriétaire…",
     },
     errors: {
-      not_configured: "GitHub non configuré — allez dans Paramètres généraux › Connecteurs",
+      not_configured: "Configurez GitHub dans Paramètres généraux › Connecteurs",
       auth: "Authentification refusée — remplacez le jeton dans Paramètres généraux › Connecteurs",
       forbidden: "Accès interdit — le jeton n'a pas les droits nécessaires",
       rate_limit: "Limite de débit GitHub atteinte — réessayez dans quelques instants",

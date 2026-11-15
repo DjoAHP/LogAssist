@@ -10,6 +10,8 @@ import { t } from "@/i18n/fr"
 import { HEADER_TOOL_DIALOG_SIZE_CLASS } from "./headerToolDialog"
 import { LockPanel } from "./LockPanel"
 import { ConnectorsPanel } from "./ConnectorsPanel"
+import { GithubConnectorDialog } from "./GithubConnectorDialog"
+import { useGithubConnectorStatus } from "@/hooks/useGithubConnectorStatus"
 
 type Category = "lock" | "connectors"
 
@@ -27,67 +29,75 @@ interface Props {
 
 export function GeneralSettingsDialog({ onClose }: Props) {
   const [tab, setTab] = useState<Category>("lock")
+  const [githubDialogOpen, setGithubDialogOpen] = useState(false)
+  const { status: githubStatus, refresh: refreshGithubStatus } = useGithubConnectorStatus()
+
+  const closeGithubDialog = () => {
+    setGithubDialogOpen(false)
+    void refreshGithubStatus()
+  }
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
-      onClick={onClose}
-      data-testid="general-settings-dialog"
-    >
+    <>
       <div
-        role="dialog"
-        aria-modal="true"
-        aria-label={t.generalSettings.title}
-        className={`${HEADER_TOOL_DIALOG_SIZE_CLASS} flex flex-col overflow-hidden rounded-lg border border-border bg-background`}
-        onClick={(e) => e.stopPropagation()}
+        className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
+        onClick={onClose}
+        data-testid="general-settings-dialog"
       >
-        <header className="flex items-center justify-between border-b border-border px-4 py-3">
-          <div className="flex items-center gap-2">
-            <h2 className="text-base font-semibold">{t.generalSettings.title}</h2>
-            <ParaGenIcon className="size-4 text-muted-foreground opacity-70" />
-          </div>
-          <button
-            aria-label={t.generalSettings.close}
-            onClick={onClose}
-            className="rounded-md p-1 hover:bg-foreground/5"
-          >
-            <X className="size-4" />
-          </button>
-        </header>
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label={t.generalSettings.title}
+          className={`${HEADER_TOOL_DIALOG_SIZE_CLASS} flex flex-col overflow-hidden rounded-lg border border-border bg-background`}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <header className="flex items-center justify-between border-b border-border px-4 py-3">
+            <div className="flex items-center gap-2">
+              <h2 className="text-base font-semibold">{t.generalSettings.title}</h2>
+              <ParaGenIcon className="size-4 text-muted-foreground opacity-70" />
+            </div>
+            <button
+              aria-label={t.generalSettings.close}
+              onClick={onClose}
+              className="rounded-md p-1 hover:bg-foreground/5"
+            >
+              <X className="size-4" />
+            </button>
+          </header>
 
-        <div className="flex min-h-0 flex-1">
-          <nav aria-label={t.generalSettings.title} className="w-52 shrink-0 border-r border-border p-2">
-            {CATEGORIES.map((category) => (
-              <button
-                key={category.id}
-                onClick={() => setTab(category.id)}
-                aria-current={tab === category.id}
-                className={
-                  tab === category.id
-                    ? "flex w-full items-center gap-2 rounded-md bg-foreground/5 px-3 py-2 text-left text-sm font-medium"
-                    : "flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm text-muted-foreground hover:bg-foreground/5"
-                }
-              >
-                <category.icon className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
-                {category.label}
-              </button>
-            ))}
-          </nav>
-          <div className="min-h-0 flex-1 overflow-y-auto p-4">
-            {tab === "lock" && <LockPanel />}
-            {tab === "connectors" && (
-              <ConnectorsPanel
-                statuses={{ github: { configured: false, login: null } }}
-                onSelect={(connectorId) => {
-                  if (connectorId === "github") {
-                    // TODO: ouvrir le modal de configuration GitHub (phase 3)
+          <div className="flex min-h-0 flex-1">
+            <nav aria-label={t.generalSettings.title} className="w-52 shrink-0 border-r border-border p-2">
+              {CATEGORIES.map((category) => (
+                <button
+                  key={category.id}
+                  onClick={() => setTab(category.id)}
+                  aria-current={tab === category.id}
+                  className={
+                    tab === category.id
+                      ? "flex w-full items-center gap-2 rounded-md bg-foreground/5 px-3 py-2 text-left text-sm font-medium"
+                      : "flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm text-muted-foreground hover:bg-foreground/5"
                   }
-                }}
-              />
-            )}
+                >
+                  <category.icon className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+                  {category.label}
+                </button>
+              ))}
+            </nav>
+            <div className="min-h-0 flex-1 overflow-y-auto p-4">
+              {tab === "lock" && <LockPanel />}
+              {tab === "connectors" && (
+                <ConnectorsPanel
+                  statuses={{ github: githubStatus }}
+                  onSelect={(connectorId) => {
+                    if (connectorId === "github") setGithubDialogOpen(true)
+                  }}
+                />
+              )}
+            </div>
           </div>
         </div>
       </div>
-    </div>
+      <GithubConnectorDialog isOpen={githubDialogOpen} onClose={closeGithubDialog} />
+    </>
   )
 }

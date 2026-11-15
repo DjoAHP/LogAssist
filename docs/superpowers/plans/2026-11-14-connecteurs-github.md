@@ -376,14 +376,14 @@ export const SCHEMA_V12_STATEMENTS = [
 
 **Files:** Modify `src/components/chat/InputBar.tsx`, `src/i18n/fr.ts` ; Create `src/components/chat/GithubChip.tsx`, `GithubRepoPickerDialog.tsx` + tests jsdom ; Modify `src/App.tsx`
 
-- [ ] **Étape 1 : test rouge** (`InputBar.test.tsx` étendu) : bouton GitHub (`aria-label` i18n) entre le bouton fichier texte et le bouton Web, gabarit `h-[38px]` ; états :
+- [x] **Étape 1 : test rouge** (`InputBar.test.tsx` étendu) : bouton GitHub (`aria-label` i18n) entre le bouton fichier texte et le bouton Web, gabarit `h-[38px]` ; états :
   - `githubAvailable=false` → `disabled` + `title="Configurez GitHub dans Paramètres généraux › Connecteurs"` ;
   - prêt → activable ;
   - attaché → accent `text-[var(--brand-to)]` + puce `GithubChip` « owner/name@ref » avec bouton de retrait (aria-label i18n) ;
   - clic prêt → ouvre le picker.
-- [ ] **Étape 2 : picker.** Recherche filtrante client (sur les dépôts déjà chargés), badge « privé » (i18n), « Charger plus » (`listRepos(page+1)`) tant que le serveur renvoie une page pleine, select de branche (défaut présélectionnée, `listBranches` au besoin, max 100), bouton « Attacher » → `onAttach({owner, name, ref})`.
-- [ ] **Étape 3 : câblage App.tsx.** Nouvelles props `InputBar` (UI pure) : `githubAvailable`, `githubAttached: GithubBinding | null`, `onOpenRepoPicker`, `onDetachRepo`. `App.tsx` fournit valeurs issues de `useConversationConnectors(activeId)` + statut connecteur (hook léger `useGithubConnectorStatus` ou état chargé au montage).
-- [ ] **Étape 4 : vert + gardes-fous, commit** `feat: bouton GitHub et sélecteur de dépôt dans la barre de saisie`.
+- [x] **Étape 2 : picker.** Recherche filtrante client (sur les dépôts déjà chargés), badge « privé » (i18n), « Charger plus » (`listRepos(page+1)`) tant que le serveur renvoie une page pleine, select de branche (défaut présélectionnée, `listBranches` au besoin, max 100), bouton « Attacher » → `onAttach({owner, name, ref})`.
+- [x] **Étape 3 : câblage App.tsx.** Nouvelles props `InputBar` (UI pure) : `githubAvailable`, `githubAttached: GithubBinding | null`, `onOpenRepoPicker`, `onDetachRepo`. `App.tsx` fournit valeurs issues de `useConversationConnectors(activeId)` + statut connecteur (hook léger `useGithubConnectorStatus` ou état chargé au montage).
+- [x] **Étape 4 : vert + gardes-fous, commit** `feat: bouton GitHub et sélecteur de dépôt dans la barre de saisie`.
 
 **STOP Phase 7** (test manuel : attacher un dépôt public, un privé, changer de branche, détacher, puce visible/retirée).
 

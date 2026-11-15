@@ -1,6 +1,5 @@
 // Panneau « Connecteurs » : galerie de tuiles carrées (coins légèrement arrondis),
 // icône + nom dessous, badge d'état (texte + icône + couleur).
-import { type LucideIcon } from "lucide-react"
 import { GithubConnecteurIcon } from "@/icons"
 import { t } from "@/i18n/fr"
 

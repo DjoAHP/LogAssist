@@ -5,7 +5,7 @@
 // aria-live, focus initial, Échap ferme la sous-modale d'abord.
 
 import { useEffect, useRef, useState } from "react"
-import { X, AlertCircle, CheckCircle, Loader2 } from "lucide-react"
+import { X, CheckCircle, Loader2 } from "lucide-react"
 import { confirm as dialogConfirm } from "@tauri-apps/plugin-dialog"
 import { connectorGithub, type GithubConnectorStatus } from "@/lib/connectors/client"
 import { t } from "@/i18n/fr"

@@ -59,4 +59,11 @@ describe("App — runtime MCP et galerie", () => {
     expect(source).toContain("contextWindowOverride: activeModel.contextWindowOverride")
     expect(source).toContain("maxOutputTokensOverride: activeModel.maxOutputTokensOverride")
   })
+
+  it("rafraîchit le statut GitHub après la fermeture des paramètres généraux", () => {
+    const source = readFileSync(new URL("./App.tsx", import.meta.url), "utf8")
+    expect(source).toContain("useGithubConnectorStatus()")
+    expect(source).toContain("githubAvailable={githubStatus.configured}")
+    expect(source).toContain("void refreshGithubStatus()")
+  })
 })

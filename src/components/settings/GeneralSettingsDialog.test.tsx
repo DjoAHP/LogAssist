@@ -5,7 +5,36 @@ import { GeneralSettingsDialog } from "./GeneralSettingsDialog"
 
 // Les panneaux sont stubs : leur comportement est couvert par leurs propres tests.
 vi.mock("./LockPanel", () => ({ LockPanel: () => <div data-testid="lock-panel-stub" /> }))
-vi.mock("./ConnectorsPanel", () => ({ ConnectorsPanel: () => <div data-testid="connectors-panel-stub" /> }))
+vi.mock("./ConnectorsPanel", () => ({
+  ConnectorsPanel: ({ statuses, onSelect }: {
+    statuses: { github: { configured: boolean; login: string | null } }
+    onSelect: (connectorId: string) => void
+  }) => (
+    <div data-testid="connectors-panel-stub">
+      <span>{statuses.github.configured ? `@${statuses.github.login}` : "off"}</span>
+      <button onClick={() => onSelect("github")}>Configurer GitHub</button>
+    </div>
+  ),
+}))
+
+const mockRefreshGithubStatus = vi.hoisted(() => vi.fn().mockResolvedValue(undefined))
+vi.mock("@/hooks/useGithubConnectorStatus", () => ({
+  useGithubConnectorStatus: () => ({
+    status: { configured: true, login: "octocat" },
+    loading: false,
+    refresh: mockRefreshGithubStatus,
+  }),
+}))
+
+vi.mock("./GithubConnectorDialog", () => ({
+  GithubConnectorDialog: ({ isOpen, onClose }: { isOpen: boolean; onClose: () => void }) => (
+    isOpen ? (
+      <div data-testid="github-connector-dialog-stub">
+        <button onClick={onClose}>Fermer GitHub</button>
+      </div>
+    ) : null
+  ),
+}))
 
 import { t } from "@/i18n/fr"
 
@@ -34,6 +63,19 @@ describe("GeneralSettingsDialog — squelette miniature", () => {
     expect(connectorsButton).not.toBeNull()
     fireEvent.click(connectorsButton)
     expect(screen.getByTestId("connectors-panel-stub")).not.toBeNull()
+    expect(screen.getByText("@octocat")).not.toBeNull()
+  })
+
+  it("ouvre le dialogue GitHub puis rafraîchit son statut à la fermeture", () => {
+    render(<GeneralSettingsDialog onClose={() => {}} />)
+    fireEvent.click(screen.getByRole("button", { name: t.generalSettings.categories.connectors }))
+
+    fireEvent.click(screen.getByRole("button", { name: "Configurer GitHub" }))
+    expect(screen.getByTestId("github-connector-dialog-stub")).not.toBeNull()
+
+    fireEvent.click(screen.getByRole("button", { name: "Fermer GitHub" }))
+    expect(mockRefreshGithubStatus).toHaveBeenCalledTimes(1)
+    expect(screen.queryByTestId("github-connector-dialog-stub")).toBeNull()
   })
 
   it("ferme au clic sur la croix", () => {

@@ -1,16 +1,27 @@
 import { useCallback, useMemo, useRef, useState } from "react"
 import { Send, Square, Image, X, FileText, Globe2, Link2 } from "lucide-react"
+import { GithubConnecteurIcon } from "@/icons"
 import { t } from "@/i18n/fr"
 import type { Attachment, SendOptions } from "@/hooks/useChat"
+import type { GithubBinding } from "@/lib/connectors/client"
 import { TauriLink } from "./TauriLink"
+import { GithubChip } from "./GithubChip"
+import { GithubRepoPickerDialog } from "./GithubRepoPickerDialog"
 
 interface Props {
   disabled?: boolean
   busy?: boolean
   webAvailable?: boolean
   webUnavailableReason?: string
+  githubAvailable?: boolean
+  githubAttached?: GithubBinding | null
+  isRepoPickerOpen?: boolean
   onSend: (text: string, attachments: Attachment[], options: SendOptions) => Promise<boolean>
   onInterrupt: () => void
+  onOpenRepoPicker?: () => void
+  onCloseRepoPicker?: () => void
+  onAttachRepo?: (binding: GithubBinding) => void
+  onDetachRepo?: () => void
 }
 
 const MAX_IMAGE_SIZE = 10 * 1024 * 1024 // 10MB
@@ -102,8 +113,15 @@ export function InputBar({
   busy = false,
   webAvailable = false,
   webUnavailableReason = t.chat.webUnavailable,
+  githubAvailable = false,
+  githubAttached = null,
+  isRepoPickerOpen = false,
   onSend,
   onInterrupt,
+  onOpenRepoPicker,
+  onCloseRepoPicker,
+  onAttachRepo,
+  onDetachRepo,
 }: Props) {
   const [text, setText] = useState("")
   const [attachments, setAttachments] = useState<Attachment[]>([])
@@ -219,9 +237,22 @@ export function InputBar({
     }
   }, [submit])
 
+  // Compute GitHub button className to avoid parser issues with complex template literal in JSX
+  const githubButtonClassName = githubAttached
+    ? "flex h-[38px] items-center gap-1.5 rounded-md border px-3 transition-colors disabled:cursor-not-allowed disabled:opacity-40 border-[var(--brand-to)] bg-[var(--brand-to)]/10 text-[var(--brand-to)]"
+    : githubAvailable
+      ? "flex h-[38px] items-center gap-1.5 rounded-md border px-3 transition-colors disabled:cursor-not-allowed disabled:opacity-40 border-border bg-background hover:bg-foreground/5"
+      : "flex h-[38px] items-center gap-1.5 rounded-md border px-3 transition-colors disabled:cursor-not-allowed disabled:opacity-40 border-border bg-background opacity-50"
+
+  // Compute Web button className
+  const webButtonClassName = forceWeb
+    ? "flex h-[38px] items-center rounded-md border px-3 transition-colors disabled:cursor-not-allowed disabled:opacity-40 border-[var(--brand-to)] bg-[var(--brand-to)]/10 text-[var(--brand-to)]"
+    : "flex h-[38px] items-center rounded-md border px-3 transition-colors disabled:cursor-not-allowed disabled:opacity-40 border-border bg-background hover:bg-foreground/5"
+
   return (
-    <div className="flex items-end gap-2 border-t border-border bg-background p-3">
-      <div className="flex-1 flex flex-col gap-1">
+    <div>
+      <div className="flex items-end gap-2 border-t border-border bg-background p-3">
+        <div className="flex-1 flex flex-col gap-1">
         {attachments.length > 0 && (
           <div className="flex flex-wrap gap-1.5">
             {attachments.map((a) => (
@@ -310,6 +341,30 @@ export function InputBar({
           >
             <FileText className="size-4" />
           </label>
+          {/* Bouton GitHub : entre fichier texte et Web */}
+          <button
+            type="button"
+            aria-label={t.connectors.github}
+            title={githubAttached
+              ? t.connectors.repoPicker.title
+              : githubAvailable
+              ? t.connectors.github
+              : t.connectors.errors.not_configured}
+            disabled={disabled || (!githubAvailable && !githubAttached) || busy}
+            onClick={onOpenRepoPicker}
+            className={githubButtonClassName}
+          >
+            <GithubConnecteurIcon data-testid="github-connecteur-icon" className="size-4" />
+          </button>
+          {githubAttached && (
+            <GithubChip
+              owner={githubAttached.owner}
+              name={githubAttached.name}
+              ref={githubAttached.ref}
+              onDetach={onDetachRepo ?? (() => {})}
+              disabled={disabled || busy}
+            />
+          )}
           <button
             type="button"
             aria-label={t.chat.forceWeb}
@@ -317,11 +372,7 @@ export function InputBar({
             title={!webAvailable ? webUnavailableReason : forceWeb ? t.chat.forceWebActive : t.chat.forceWeb}
             disabled={!webAvailable || busy || disabled}
             onClick={() => setForceWeb((active) => !active)}
-            className={`flex h-[38px] items-center rounded-md border px-3 transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
-              forceWeb
-                ? "border-[var(--brand-to)] bg-[var(--brand-to)]/10 text-[var(--brand-to)]"
-                : "border-border bg-background hover:bg-foreground/5"
-            }`}
+            className={webButtonClassName}
           >
             <Globe2 className="size-4" />
           </button>
@@ -343,6 +394,14 @@ export function InputBar({
           )}
         </div>
       </div>
+      {isRepoPickerOpen ? (
+        <GithubRepoPickerDialog
+          isOpen={isRepoPickerOpen}
+          onClose={onCloseRepoPicker ?? (() => {})}
+          onAttach={(binding) => onAttachRepo?.(binding)}
+        />
+      ) : null}
     </div>
+  </div>
   )
 }

@@ -16,6 +16,7 @@ describe("GithubConnecteurIcon", () => {
     expect(svg?.getAttribute("aria-hidden")).toBe("true")
     expect(svg?.classList.contains("size-5")).toBe(true)
     expect(svg?.querySelector("path")).not.toBeNull()
+    expect(svg?.querySelector('g[transform="scale(0.1)"]')).not.toBeNull()
     expect(svg?.querySelector("image")).toBeNull()
     expect(svg?.querySelector("[id]")).toBeNull()
   })
