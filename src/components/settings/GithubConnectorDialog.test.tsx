@@ -70,6 +70,36 @@ describe("GithubConnectorDialog", () => {
     expect(screen.queryByRole("button", { name: t.connectors.testAndSave })).not.toBeInTheDocument()
   })
 
+  it("déverrouille le champ et enregistre un nouveau jeton après Remplacer", async () => {
+    const { connectorGithub } = await import("@/lib/connectors/client")
+    vi.mocked(connectorGithub.status).mockResolvedValue({
+      configured: true,
+      login: "octocat",
+    })
+    vi.mocked(connectorGithub.configure).mockResolvedValue({
+      configured: true,
+      login: "octocat-new",
+    })
+    render(<GithubConnectorDialog {...defaultProps} />)
+
+    await vi.waitFor(() => expect(screen.getByRole("button", { name: t.connectors.replace })).toBeInTheDocument())
+    const input = screen.getByLabelText(t.connectors.tokenLabel) as HTMLInputElement
+    expect(input.disabled).toBe(true)
+
+    await userEvent.click(screen.getByRole("button", { name: t.connectors.replace }))
+
+    expect(input.disabled).toBe(false)
+    expect(document.activeElement).toBe(input)
+    expect(screen.getByRole("button", { name: t.connectors.testAndSave })).toBeInTheDocument()
+
+    await userEvent.type(input, "github_pat_new_token")
+    await userEvent.click(screen.getByRole("button", { name: t.connectors.testAndSave }))
+
+    expect(connectorGithub.configure).toHaveBeenCalledWith("github_pat_new_token")
+    await vi.waitFor(() => expect(input.disabled).toBe(true))
+    expect(screen.getByTestId("connected-text")).toHaveTextContent("Connecté (@octocat-new)")
+  })
+
   it("appelle configure au clic sur 'Tester et enregistrer' et affiche le résultat en aria-live", async () => {
     const { connectorGithub } = await import("@/lib/connectors/client")
     vi.mocked(connectorGithub.status).mockResolvedValue({

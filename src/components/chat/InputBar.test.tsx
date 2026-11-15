@@ -61,7 +61,13 @@ describe("InputBar — dépôt GitHub", () => {
     renderBar({ githubAvailable: true, onOpenRepoPicker })
 
     const button = screen.getByRole("button", { name: t.connectors.github })
-    expect(button.querySelector('[data-testid="github-connecteur-icon"]')).not.toBeNull()
+    const icon = button.querySelector('[data-testid="github-connecteur-icon"]')
+    expect(icon).not.toBeNull()
+    expect(icon?.classList.contains("size-7")).toBe(true)
+    expect(icon?.classList.contains("text-[var(--brand-to)]")).toBe(true)
+
+    const textarea = screen.getByPlaceholderText(t.chat.placeholder)
+    expect(button.compareDocumentPosition(textarea) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0)
 
     fireEvent.click(button)
     expect(onOpenRepoPicker).toHaveBeenCalledTimes(1)
@@ -73,6 +79,7 @@ describe("InputBar — dépôt GitHub", () => {
     const button = screen.getByRole("button", { name: t.connectors.github }) as HTMLButtonElement
     expect(button.disabled).toBe(true)
     expect(button.title).toBe("Configurez GitHub dans Paramètres généraux › Connecteurs")
+    expect(button.querySelector("svg")).toHaveClass("text-[var(--brand-to)]")
   })
 
   it("affiche la puce attachée et détache sans rouvrir le sélecteur", () => {

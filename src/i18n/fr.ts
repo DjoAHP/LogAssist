@@ -312,6 +312,8 @@ export const fr = {
     testing: "Test en cours…",
     connectedAs: "Connecté en tant que <strong>@{login}</strong>",
     replace: "Remplacer",
+    replacing: "Nouveau jeton",
+    cancelReplace: "Annuler",
     disconnect: "Déconnecter",
     disconnectConfirm: "Déconnecter GitHub ? La liaison vers le dépôt attaché sera indisponible jusqu'à une nouvelle configuration.",
     classicTokenWarning: "Jeton classique détecté — portée plus large que nécessaire. Préférez un jeton fine-grained (Contents : lecture seule).",

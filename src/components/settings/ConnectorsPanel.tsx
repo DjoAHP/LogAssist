@@ -61,7 +61,12 @@ export function ConnectorsPanel({ statuses, onSelect }: ConnectorsPanelProps) {
             "transition-colors",
           ].join(" ")}
         >
-          <connector.icon className="size-8 text-foreground group-hover:text-brand-from transition-colors" aria-hidden="true" />
+          <span className="flex size-14 items-center justify-center rounded-xl border border-[var(--brand-to)]/25 bg-[var(--brand-to)]/10">
+            <connector.icon
+              className="size-10 text-[var(--brand-to)] transition-transform group-hover:scale-105"
+              aria-hidden="true"
+            />
+          </span>
           <span className="text-sm font-medium text-center">{connector.name}</span>
           {statusBadge(statuses[connector.id])}
         </button>

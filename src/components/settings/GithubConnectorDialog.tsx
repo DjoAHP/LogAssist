@@ -22,6 +22,7 @@ export function GithubConnectorDialog({ isOpen, onClose }: Props) {
   const [liveMessage, setLiveMessage] = useState("")
   const [busy, setBusy] = useState(false)
   const [showClassicWarning, setShowClassicWarning] = useState(false)
+  const [isReplacing, setIsReplacing] = useState(false)
   const dialogRef = useRef<HTMLDivElement>(null)
   const tokenInputRef = useRef<HTMLInputElement>(null)
   const previousActiveElement = useRef<HTMLElement | null>(null)
@@ -33,17 +34,18 @@ export function GithubConnectorDialog({ isOpen, onClose }: Props) {
     setToken("")
     setLiveMessage("")
     setShowClassicWarning(false)
+    setIsReplacing(false)
     loadStatus()
   }, [isOpen])
 
   // Focus initial sur le champ token
   useEffect(() => {
     if (isOpen) {
-      tokenInputRef.current?.focus()
+      if (!status.configured || isReplacing) tokenInputRef.current?.focus()
     } else if (previousActiveElement.current) {
       previousActiveElement.current.focus()
     }
-  }, [isOpen])
+  }, [isOpen, isReplacing, status.configured])
 
   // Gestion Échap : ferme la sous-modale d'abord
   useEffect(() => {
@@ -62,6 +64,7 @@ export function GithubConnectorDialog({ isOpen, onClose }: Props) {
     try {
       const res = await connectorGithub.status()
       setStatus(res)
+      setIsReplacing(false)
       setShowClassicWarning(false)
     } catch {
       setStatus({ configured: false, login: null })
@@ -75,6 +78,7 @@ export function GithubConnectorDialog({ isOpen, onClose }: Props) {
     try {
       const res = await connectorGithub.configure(token)
       setStatus(res)
+      setIsReplacing(false)
       // connectedAs contient des balises <strong>, on veut le texte simple pour aria-live
       setLiveMessage(t.connectors.status.connected.replace("{login}", res.login))
       setShowClassicWarning(token.startsWith("ghp_"))
@@ -92,11 +96,18 @@ export function GithubConnectorDialog({ isOpen, onClose }: Props) {
     }
   }
 
-  const handleReplace = async () => {
+  const handleReplace = () => {
     setToken("")
     setLiveMessage("")
     setShowClassicWarning(false)
-    tokenInputRef.current?.focus()
+    setIsReplacing(true)
+  }
+
+  const handleCancelReplace = () => {
+    setToken("")
+    setLiveMessage("")
+    setShowClassicWarning(false)
+    setIsReplacing(false)
   }
 
   const handleDisconnect = async () => {
@@ -108,6 +119,7 @@ export function GithubConnectorDialog({ isOpen, onClose }: Props) {
     try {
       await connectorGithub.delete()
       setStatus({ configured: false, login: null })
+      setIsReplacing(false)
       setShowClassicWarning(false)
       setLiveMessage("")
       tokenInputRef.current?.focus()
@@ -185,7 +197,7 @@ export function GithubConnectorDialog({ isOpen, onClose }: Props) {
             type="password"
             value={token}
             onChange={(e) => setToken(e.target.value)}
-            disabled={busy || status.configured}
+            disabled={busy || (status.configured && !isReplacing)}
             placeholder={t.connectors.tokenPlaceholder}
             className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-brand-to disabled:opacity-50"
             aria-describedby="token-hint"
@@ -205,7 +217,7 @@ export function GithubConnectorDialog({ isOpen, onClose }: Props) {
 
         {/* État connecté / Bouton principal */}
         <div className="flex items-center gap-2">
-          {status.configured ? (
+          {status.configured && !isReplacing ? (
             <>
               <span
                 className="flex-1 flex items-center gap-2 text-sm text-green-600 dark:text-green-400"
@@ -237,8 +249,18 @@ export function GithubConnectorDialog({ isOpen, onClose }: Props) {
                 className="flex-1 flex items-center gap-2 text-sm text-muted-foreground"
                 data-testid="connector-status"
               >
-                {t.connectors.status.notConfigured}
+                {isReplacing ? t.connectors.replacing : t.connectors.status.notConfigured}
               </span>
+              {isReplacing && (
+                <button
+                  type="button"
+                  onClick={handleCancelReplace}
+                  disabled={busy}
+                  className="rounded-md border border-border px-3 py-1.5 text-sm hover:bg-foreground/5 disabled:opacity-50"
+                >
+                  {t.connectors.cancelReplace}
+                </button>
+              )}
               <button
                 type="button"
                 onClick={handleTestAndSave}

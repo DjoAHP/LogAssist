@@ -28,6 +28,9 @@ describe("ConnectorsPanel", () => {
     expect(badge).not.toBeNull()
     expect(badge?.textContent).toBe(t.connectors.status.notConfigured)
     expect(badge).toHaveClass("text-muted-foreground")
+    const icon = screen.getByTestId("github-icon")
+    expect(icon).toHaveClass("size-10")
+    expect(icon).toHaveClass("text-[var(--brand-to)]")
   })
 
   it("affiche le badge Connecté avec @login quand configuré", () => {

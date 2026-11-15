@@ -239,10 +239,10 @@ export function InputBar({
 
   // Compute GitHub button className to avoid parser issues with complex template literal in JSX
   const githubButtonClassName = !githubAvailable
-    ? "flex h-[38px] items-center gap-1.5 rounded-md border px-3 transition-colors disabled:cursor-not-allowed disabled:opacity-40 border-border bg-background opacity-50"
+    ? "flex size-[38px] shrink-0 items-center justify-center rounded-md border border-[var(--brand-to)]/20 bg-[var(--brand-to)]/5 transition-colors disabled:cursor-not-allowed disabled:opacity-75"
     : githubAttached
-      ? "flex h-[38px] items-center gap-1.5 rounded-md border px-3 transition-colors disabled:cursor-not-allowed disabled:opacity-40 border-[var(--brand-to)] bg-[var(--brand-to)]/10 text-[var(--brand-to)]"
-      : "flex h-[38px] items-center gap-1.5 rounded-md border px-3 transition-colors disabled:cursor-not-allowed disabled:opacity-40 border-border bg-background hover:bg-foreground/5"
+      ? "flex size-[38px] shrink-0 items-center justify-center rounded-md border border-[var(--brand-to)] bg-[var(--brand-to)]/15 transition-colors hover:bg-[var(--brand-to)]/25 disabled:cursor-not-allowed disabled:opacity-40"
+      : "flex size-[38px] shrink-0 items-center justify-center rounded-md border border-[var(--brand-to)]/40 bg-[var(--brand-to)]/5 transition-colors hover:bg-[var(--brand-to)]/15 disabled:cursor-not-allowed disabled:opacity-40"
 
   // Compute Web button className
   const webButtonClassName = forceWeb
@@ -276,6 +276,19 @@ export function InputBar({
           </div>
         )}
 
+        {githubAttached && (
+          <div className="flex flex-wrap gap-1.5">
+            <GithubChip
+              owner={githubAttached.owner}
+              name={githubAttached.name}
+              ref={githubAttached.ref}
+              onDetach={onDetachRepo ?? (() => {})}
+              disabled={disabled || busy}
+              available={githubAvailable}
+            />
+          </div>
+        )}
+
         {/* URLs détectées : affichage visuel style chatbot */}
         {detectedUrls.length > 0 && (
           <div className="flex flex-wrap gap-1.5 text-xs" role="list" aria-label="Liens détectés">
@@ -294,6 +307,24 @@ export function InputBar({
         )}
 
         <div className="flex items-end gap-2">
+          {/* Le connecteur précède le champ principal pour rester visible. */}
+          <button
+            type="button"
+            aria-label={t.connectors.github}
+            title={!githubAvailable
+              ? t.connectors.errors.not_configured
+              : githubAttached
+                ? t.connectors.repoPicker.title
+                : t.connectors.github}
+            disabled={disabled || !githubAvailable || busy}
+            onClick={onOpenRepoPicker}
+            className={githubButtonClassName}
+          >
+            <GithubConnecteurIcon
+              data-testid="github-connecteur-icon"
+              className="size-7 text-[var(--brand-to)]"
+            />
+          </button>
           <textarea
             ref={textareaRef}
             value={text}
@@ -341,31 +372,6 @@ export function InputBar({
           >
             <FileText className="size-4" />
           </label>
-          {/* Bouton GitHub : entre fichier texte et Web */}
-          <button
-            type="button"
-            aria-label={t.connectors.github}
-            title={!githubAvailable
-              ? t.connectors.errors.not_configured
-              : githubAttached
-                ? t.connectors.repoPicker.title
-                : t.connectors.github}
-            disabled={disabled || !githubAvailable || busy}
-            onClick={onOpenRepoPicker}
-            className={githubButtonClassName}
-          >
-            <GithubConnecteurIcon data-testid="github-connecteur-icon" className="size-4" />
-          </button>
-          {githubAttached && (
-            <GithubChip
-              owner={githubAttached.owner}
-              name={githubAttached.name}
-              ref={githubAttached.ref}
-              onDetach={onDetachRepo ?? (() => {})}
-              disabled={disabled || busy}
-              available={githubAvailable}
-            />
-          )}
           <button
             type="button"
             aria-label={t.chat.forceWeb}
