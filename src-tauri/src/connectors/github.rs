@@ -324,18 +324,22 @@ impl GithubClient {
         validate_owner(owner).map_err(|e| ConnectorError::InvalidArguments(e.to_string()))?;
         validate_name(name).map_err(|e| ConnectorError::InvalidArguments(e.to_string()))?;
         validate_ref(ref_).map_err(|e| ConnectorError::InvalidArguments(e.to_string()))?;
+
+        // Conventions « racine » des LLM : "", ".", "/", "./" désignent la
+        // racine du dépôt, pas un chemin. Normaliser AVANT validate_path.
+        let path_prefix = path_prefix
+            .map(|p| p.trim_matches('/'))
+            .filter(|p| !p.is_empty() && *p != ".");
+
         if let Some(p) = path_prefix {
             validate_path(p).map_err(|e| ConnectorError::InvalidArguments(e.to_string()))?;
         }
 
         let encoded_ref = urlencoding::encode(ref_);
-        let mut url = format!(
+        let url = format!(
             "{}/repos/{}/{}/git/trees/{}?recursive=1",
             self.base_url, owner, name, encoded_ref
         );
-        if let Some(p) = path_prefix {
-            url.push_str(&format!("&path={}", p));
-        }
         let body = self.get_bounded(&url, token, MAX_TREE_SIZE).await?;
         let resp: TreeResponse = serde_json::from_slice(&body)
             .map_err(|e| ConnectorError::InvalidArguments(format!("JSON invalide tree: {e}")))?;
@@ -350,7 +354,10 @@ impl GithubClient {
             entries.retain(|e| e.path.matches('/').count() < d);
         }
         if let Some(p) = path_prefix {
-            entries.retain(|e| e.path.starts_with(p));
+            // Filtre par segment : "icons" garde "icons" et "icons/logo.png",
+            // pas un fichier "icons.md" à la racine.
+            let dir_prefix = format!("{}/", p);
+            entries.retain(|e| e.path == p || e.path.starts_with(&dir_prefix));
         }
 
         const MAX_ENTRIES: usize = 400;
@@ -613,6 +620,64 @@ mod tests {
         assert!(!truncated);
         assert!(!entries.iter().any(|e| e.path.starts_with(".git/")));
         assert!(entries.iter().any(|e| e.path == "src/main.rs"));
+    }
+
+    #[tokio::test]
+    async fn test_get_tree_root_conventions_and_path_boundaries() {
+        // Bug constaté : un LLM qui veut la racine passe path="." ou "" ou "/".
+        // "." faisait un starts_with(".") → seul .gitignore restait ; "" et "/"
+        // étaient rejetés par validate_path → échec de l'appel. De plus le
+        // préfixe brut ignorait la frontière de segment (path="icons" pouvait
+        // garder "icons.md" fictif).
+        let tree = serde_json::json!({
+            "tree": [
+                { "path": ".gitignore", "mode": "100644", "type": "blob", "sha": "a", "size": 10 },
+                { "path": "LICENSE", "mode": "100644", "type": "blob", "sha": "b", "size": 10 },
+                { "path": "README.md", "mode": "100644", "type": "blob", "sha": "c", "size": 10 },
+                { "path": "icons", "mode": "040000", "type": "tree", "sha": "d" },
+                { "path": "icons/logo.png", "mode": "100644", "type": "blob", "sha": "e", "size": 10 },
+                { "path": "index.html", "mode": "100644", "type": "blob", "sha": "f", "size": 10 },
+                { "path": "src.md", "mode": "100644", "type": "blob", "sha": "g", "size": 10 },
+                { "path": "sw.js", "mode": "100644", "type": "blob", "sha": "h", "size": 10 }
+            ],
+            "truncated": false
+        });
+        let app = Router::new().route(
+            "/repos/octocat/Hello-World/git/trees/main",
+            get(|| async move { Json(tree) }),
+        );
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let handle = tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        let client = GithubClient::for_test(format!("http://{}", addr));
+
+        // 1) Toutes les conventions « racine » listent TOUT, comme None.
+        for prefix in ["", ".", "/", "./"] {
+            let (entries, truncated) = client
+                .get_tree("fake-token", "octocat", "Hello-World", "main", Some(prefix), None)
+                .await
+                .unwrap_or_else(|e| panic!("préfixe {prefix:?} accepté, erreur : {e:?}"));
+            assert!(!truncated);
+            assert_eq!(
+                entries.len(),
+                8,
+                "préfixe {prefix:?} doit lister toute la racine"
+            );
+            assert!(entries.iter().any(|e| e.path == "src.md"));
+        }
+
+        // 2) Un sous-dossier est filtré par segment de chemin.
+        let (entries, _) = client
+            .get_tree("fake-token", "octocat", "Hello-World", "main", Some("icons"), None)
+            .await
+            .unwrap();
+        assert_eq!(entries.len(), 2, "le dossier et son contenu");
+        assert!(entries.iter().all(|e| e.path == "icons" || e.path.starts_with("icons/")));
+
+        handle.abort();
     }
 
     #[tokio::test]

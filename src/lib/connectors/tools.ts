@@ -24,7 +24,7 @@ export function buildConnectorTools(
       nativeName: "repo_map",
       llmName: "connector_github__repo_map",
       title: "Cartographie du dépôt GitHub",
-      description: "Liste l’arborescence bornée du dépôt attaché, éventuellement sous un chemin et à une profondeur donnée.",
+      description: "Liste l’arborescence bornée du dépôt attaché. Pour la racine, appelle l’outil sans arguments ; fournis path uniquement pour un sous-dossier (ex. \"icons\"), et depth pour limiter la profondeur.",
       inputSchema: {
         type: "object",
         additionalProperties: false,
