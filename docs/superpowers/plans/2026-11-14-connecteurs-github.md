@@ -395,33 +395,33 @@ export const SCHEMA_V12_STATEMENTS = [
 
 **Files:** Modify `src/lib/mcp/types.ts`, `src/lib/mcp/runtime.ts` ; Create `src/lib/connectors/tools.ts` + tests
 
-- [ ] **Étape 1 : test rouge** : `McpAgentTool.kind` accepte `"connector"` ; `buildConnectorTools(binding)` (binding + jeton configuré) produit **3** `McpAgentTool` : `serverId: "connector_github"`, `llmName: "connector_github__repo_map|read_file|search_code"`, `approvalMode: "auto"`, `kind: "connector"`, `inputSchema` bornés (propriétés `path`, `start_line`, `end_line` / `query` / `path`, `depth` — `additionalProperties: false`) ; sans liaison ou sans jeton → tableau vide ; plafond catalogue 64 outils / 256 Kio respecté (les 3 schémas ≪ limites).
-- [ ] **Étape 2 : implémentation** — `loadMcpRuntime()` fusionne `listAgentTools()` + `buildConnectorTools(binding)` ; `runtime.ts` reçoit la liaison en paramètre (le hook la lui fournit) ; `useChat` consomme le runtime étendu sans connaître GitHub.
-- [ ] **Étape 3 : vert (non-régression MCP incluse), commit** `feat: outils connecteur dans le runtime`.
+- [x] **Étape 1 : test rouge** : `McpAgentTool.kind` accepte `"connector"` ; `buildConnectorTools(binding)` (binding + jeton configuré) produit **3** `McpAgentTool` : `serverId: "connector_github"`, `llmName: "connector_github__repo_map|read_file|search_code"`, `approvalMode: "auto"`, `kind: "connector"`, `inputSchema` bornés (propriétés `path`, `start_line`, `end_line` / `query` / `path`, `depth` — `additionalProperties: false`) ; sans liaison ou sans jeton → tableau vide ; plafond catalogue 64 outils / 256 Kio respecté (les 3 schémas ≪ limites).
+- [x] **Étape 2 : implémentation** — `loadMcpRuntime()` fusionne `listAgentTools()` + `buildConnectorTools(binding)` ; `runtime.ts` reçoit la liaison en paramètre (le hook la lui fournit) ; `useChat` consomme le runtime étendu sans connaître GitHub.
+- [x] **Étape 3 : vert (non-régression MCP incluse), commit** `feat: outils connecteur dans le runtime`.
 
 ### Task 18 : routage composite + limites paramétrables
 
 **Files:** Modify `src/lib/mcp/toolAgent.ts`, `useChat.ts` (lignes 610-624 ET 771-785)
 
-- [ ] **Étape 1 : test rouge** : client composite — appel `llmName` préfixé `connector_github__` → `connectorGithub.callTool(binding, nativeName, args, turnId)` ; tout autre → client MCP actuel ; défauts `MAX_TOOL_ROUNDS=2` / `MAX_MCP_CALLS=4` **inchangés sans dépôt** (tests MCP existants intacts) ; avec dépôt attaché → 6 tours / 12 appels ; les deux sites `useChat` passent les outils étendus et un `turnId` identique pour l'annulation.
-- [ ] **Étape 2 : implémentation.** `toolAgent.ts` : `MAX_TOOL_ROUNDS`/`MAX_MCP_CALLS` deviennent options d'entrée (`input.limits?`), constantes 2/4 par défaut ; dépôt attaché ⇒ `{ toolRounds: 6, mcpCalls: 12 }`.
-- [ ] **Étape 3 : vert, commit** `feat: routage connecteur et limites de tour paramétrables`.
+- [x] **Étape 1 : test rouge** : client composite — appel `llmName` préfixé `connector_github__` → `connectorGithub.callTool(binding, nativeName, args, turnId)` ; tout autre → client MCP actuel ; défauts `MAX_TOOL_ROUNDS=2` / `MAX_MCP_CALLS=4` **inchangés sans dépôt** (tests MCP existants intacts) ; avec dépôt attaché → 6 tours / 12 appels ; les deux sites `useChat` passent les outils étendus et un `turnId` identique pour l'annulation.
+- [x] **Étape 2 : implémentation.** `toolAgent.ts` : `MAX_TOOL_ROUNDS`/`MAX_MCP_CALLS` deviennent options d'entrée (`input.limits?`), constantes 2/4 par défaut ; dépôt attaché ⇒ `{ toolRounds: 6, mcpCalls: 12 }`.
+- [x] **Étape 3 : vert, commit** `feat: routage connecteur et limites de tour paramétrables`.
 
 ### Task 19 : annulation + system prompt + modèle sans outils
 
 **Files:** Modify `src/hooks/useChat.ts` (chemin d'interruption — rechercher l'appel `mcp_cancel_turn`/client MCP), `src/lib/prompts/compose.ts`, `src/lib/chat/prepareConversationContext.ts`, `src/i18n/fr.ts`
 
-- [ ] **Étape 1 : test rouge** : interruption appelle `connectorGithub.cancelTurn(turnId)` en plus du cancel MCP ; `buildSystemPrompt({..., repoBinding})` ajoute la section « Dépôt GitHub attaché : owner/name@ref » + sécurité (contenu non fiable, citer les chemins, ne pas deviner) ; sans `repoBinding` → aucune section (test snapshot du prompt) ; repli sans outils avec dépôt attaché → variante d'avertissement « le dépôt est inaccessible » (clé i18n dédiée).
-- [ ] **Étape 2 : implémentation.** `prepareConversationContext` transmet `repoBinding` depuis la liaison chargée ; le plafond 64 outils/256 Kio (`buildActiveToolCatalog`) couvre aussi les outils connecteur — en cas de dépassement, erreur explicite (jamais d'éviction silencieuse).
-- [ ] **Étape 3 : vert, commit** `feat: intégration chat du dépôt attaché`.
+- [x] **Étape 1 : test rouge** : interruption appelle `connectorGithub.cancelTurn(turnId)` en plus du cancel MCP ; `buildSystemPrompt({..., repoBinding})` ajoute la section « Dépôt GitHub attaché : owner/name@ref » + sécurité (contenu non fiable, citer les chemins, ne pas deviner) ; sans `repoBinding` → aucune section (test snapshot du prompt) ; repli sans outils avec dépôt attaché → variante d'avertissement « le dépôt est inaccessible » (clé i18n dédiée).
+- [x] **Étape 2 : implémentation.** `prepareConversationContext` transmet `repoBinding` depuis la liaison chargée ; le plafond 64 outils/256 Kio (`buildActiveToolCatalog`) couvre aussi les outils connecteur — en cas de dépassement, erreur explicite (jamais d'éviction silencieuse).
+- [x] **Étape 3 : vert, commit** `feat: intégration chat du dépôt attaché`.
 
 ### Task 20 : docs + version + gates
 
 **Files:** Modify `README.md`, `AGENTS.md` (invariants, structure, schéma V12, livraison v3.4.0), `DESIGN_SYSTEM.md` (tuiles connecteurs + `GithubConnecteurIcon`), `package.json` (3.4.0)
 
-- [ ] **Étape 1 :** `npm run sync:version` après passage de `package.json` à `3.4.0` ; vérifier Cargo.toml + tauri.conf.json alignés.
-- [ ] **Étape 2 :** mettre à jour les 3 docs (sections : notion Connecteur, lecture seule, un dépôt par conversation, jeton Credential Manager, schéma V12, livraison).
-- [ ] **Étape 3 :** gates PowerShell : `npm run build`, `cargo test`, `cargo clippy --all-targets -- -D warnings` → verts.
+- [x] **Étape 1 :** `npm run sync:version` après passage de `package.json` à `3.4.0` ; vérifier Cargo.toml + tauri.conf.json alignés.
+- [x] **Étape 2 :** mettre à jour les 3 docs (sections : notion Connecteur, lecture seule, un dépôt par conversation, jeton Credential Manager, schéma V12, livraison).
+- [x] **Étape 3 :** gates PowerShell : `npm run build`, `cargo test`, `cargo clippy --all-targets -- -D warnings` → verts.
 - [ ] **Étape 4 :** commit `chore: v3.4.0 connecteurs GitHub`, push, **PR vers `feat/m1-socle-chat` sans merger**.
 
 **STOP Phase 8** — checklist de test manuel :

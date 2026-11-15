@@ -32,6 +32,7 @@ titre :
 | MCP | MCP | MCP | `McpIcon` |
 | System Prompt | Assistant | Assistant | `BookIcon` |
 | Models settings | Fournisseurs | Fournisseur | `ReglageIcon` |
+| Paramètres généraux | Paramètres généraux | Paramètres généraux | `ParaGenIcon` |
 
 Ce standard s’applique aux modales principales, notamment :
 
@@ -41,6 +42,25 @@ Ce standard s’applique aux modales principales, notamment :
 
 Les sous-modales contextuelles, comme le sélecteur de modèles ou le formulaire
 d’une connaissance, conservent une taille adaptée à leur contenu.
+
+## Galerie des connecteurs
+
+La catégorie **Connecteurs** se trouve dans Paramètres généraux. Elle utilise une
+grille responsive de tuiles carrées `2 → 3 → 4` colonnes :
+
+- tuile : `aspect-square`, `rounded-lg`, bordure `border-border` ;
+- icône : `size-8`, couleur héritée, accent `brand-from` au survol ;
+- statut : texte obligatoire sous le nom, vert si connecté et neutre sinon ;
+- focus : `focus-visible:ring-2 focus-visible:ring-brand-to`.
+
+GitHub utilise `GithubConnecteurIcon`, générée depuis
+`src/icons/svg/github_connecteur.svg`. Les coordonnées Illustrator sont ramenées
+dans le `viewBox="0 0 24 24"` par `transform="scale(0.1)"`.
+
+La configuration GitHub et le sélecteur de dépôt sont des sous-modales. Le bouton
+GitHub de l'InputBar conserve la hauteur `h-[38px]`. Une liaison active affiche une
+puce `owner/repo@ref` séparée du bouton afin d'éviter tout bouton HTML imbriqué.
+Si le jeton manque, la puce affiche **Dépôt indisponible** et reste détachable.
 
 ## Galerie des fournisseurs
 
