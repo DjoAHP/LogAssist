@@ -11,6 +11,8 @@ import {
   SCHEMA_V8_STATEMENTS,
   SCHEMA_V9_STATEMENTS,
   SCHEMA_V10_STATEMENTS,
+  SCHEMA_V11_STATEMENTS,
+  SCHEMA_V12_STATEMENTS,
   SCHEMA_VERSION,
 } from "./migrations"
 import * as migrations from "./migrations"
@@ -44,7 +46,7 @@ describe("SCHEMA_V1_STATEMENTS", () => {
     expect(SCHEMA_V1).toBe(SCHEMA_V1_STATEMENTS.join(";\n"))
   })
   it("SCHEMA_VERSION correspond à la dernière migration", () => {
-    expect(SCHEMA_VERSION).toBe(11)
+    expect(SCHEMA_VERSION).toBe(12)
     expect(SCHEMA_V1).toContain("CREATE TABLE IF NOT EXISTS conversations")
     expect(SCHEMA_V1).toContain("idx_conversations_project")
   })
@@ -120,7 +122,7 @@ describe("SCHEMA_V7_STATEMENTS", () => {
     expect(SCHEMA_V7_STATEMENTS).toEqual([ERROR_CLEANUP_STATEMENT])
   })
 
-  it("applique V7 à V9 à une base déjà en V6", async () => {
+  it("applique V7 à V12 à une base déjà en V6", async () => {
     const { db, execute } = createMigrationDbMock()
 
     await executeSchema(db, 6)
@@ -131,10 +133,11 @@ describe("SCHEMA_V7_STATEMENTS", () => {
       ...SCHEMA_V9_STATEMENTS,
       ...SCHEMA_V10_STATEMENTS,
       ...MODEL_CONTEXT_STATEMENTS,
+      ...SCHEMA_V12_STATEMENTS,
     ])
   })
 
-  it("applique V6 à V10 à une base en V5", async () => {
+  it("applique V6 à V12 à une base en V5", async () => {
     const { db, execute } = createMigrationDbMock()
 
     await executeSchema(db, 5)
@@ -146,6 +149,7 @@ describe("SCHEMA_V7_STATEMENTS", () => {
       ...SCHEMA_V9_STATEMENTS,
       ...SCHEMA_V10_STATEMENTS,
       ...MODEL_CONTEXT_STATEMENTS,
+      ...SCHEMA_V12_STATEMENTS,
     ])
   })
 })
@@ -155,7 +159,7 @@ describe("SCHEMA_V8_STATEMENTS", () => {
     expect(SCHEMA_V8_STATEMENTS).toEqual([EMPTY_ASSISTANT_REPAIR_STATEMENT])
   })
 
-  it("applique V8, V9 puis V10 à une base déjà en V7", async () => {
+  it("applique V8 à V12 à une base déjà en V7", async () => {
     const { db, execute } = createMigrationDbMock()
 
     await executeSchema(db, 7)
@@ -165,6 +169,7 @@ describe("SCHEMA_V8_STATEMENTS", () => {
       ...SCHEMA_V9_STATEMENTS,
       ...SCHEMA_V10_STATEMENTS,
       ...MODEL_CONTEXT_STATEMENTS,
+      ...SCHEMA_V12_STATEMENTS,
     ])
   })
 })
@@ -188,13 +193,14 @@ describe("SCHEMA_V9_STATEMENTS", () => {
     expect(schema).toContain("WHERE key = 'web.enabled'")
   })
 
-  it("applique V9 puis V10 à une base V8", async () => {
+  it("applique V9 à V12 à une base V8", async () => {
     const { db, execute } = createMigrationDbMock()
     await executeSchema(db, 8)
     expect(execute.mock.calls.map(([statement]) => statement)).toEqual([
       ...SCHEMA_V9_STATEMENTS,
       ...SCHEMA_V10_STATEMENTS,
       ...MODEL_CONTEXT_STATEMENTS,
+      ...SCHEMA_V12_STATEMENTS,
     ])
   })
 })
@@ -212,12 +218,13 @@ describe("SCHEMA_V10_STATEMENTS", () => {
     expect(text).toContain("ALTER TABLE messages ADD COLUMN media TEXT NOT NULL DEFAULT '[]'")
   })
 
-  it("applique V10 puis V11 à une base V9", async () => {
+  it("applique V10 à V12 à une base V9", async () => {
     const { db, execute } = createMigrationDbMock()
     await executeSchema(db, 9)
     expect(execute.mock.calls.map(([statement]) => statement)).toEqual([
       ...SCHEMA_V10_STATEMENTS,
       ...MODEL_CONTEXT_STATEMENTS,
+      ...SCHEMA_V12_STATEMENTS,
     ])
   })
 })
@@ -229,9 +236,31 @@ describe("SCHEMA_V11_STATEMENTS", () => {
     }).SCHEMA_V11_STATEMENTS).toEqual(MODEL_CONTEXT_STATEMENTS)
   })
 
-  it("applique uniquement V11 à une base V10", async () => {
+  it("applique V11 puis V12 à une base V10", async () => {
     const { db, execute } = createMigrationDbMock()
     await executeSchema(db, 10)
-    expect(execute.mock.calls.map(([statement]) => statement)).toEqual(MODEL_CONTEXT_STATEMENTS)
+    const expected = [...MODEL_CONTEXT_STATEMENTS, ...SCHEMA_V12_STATEMENTS]
+    expect(execute.mock.calls.map(([statement]) => statement)).toEqual(expected)
+  })
+})
+
+describe("SCHEMA_V12_STATEMENTS", () => {
+  it("crée la table conversation_connectors avec FK cascade et PK composite", () => {
+    const joined = SCHEMA_V12_STATEMENTS.join(";\n")
+    expect(joined).toContain("CREATE TABLE IF NOT EXISTS conversation_connectors")
+    expect(joined).toContain("conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE")
+    expect(joined).toContain("connector_id TEXT NOT NULL")
+    expect(joined).toContain("resource_owner TEXT NOT NULL")
+    expect(joined).toContain("resource_name TEXT NOT NULL")
+    expect(joined).toContain("resource_ref TEXT")
+    expect(joined).toContain("PRIMARY KEY (conversation_id, connector_id)")
+    // Pas de CHECK sur connector_id
+    expect(joined).not.toContain("CHECK (connector_id")
+  })
+
+  it("applique V12 à une base V11", async () => {
+    const { db, execute } = createMigrationDbMock()
+    await executeSchema(db, 11)
+    expect(execute.mock.calls.map(([statement]) => statement)).toEqual(SCHEMA_V12_STATEMENTS)
   })
 })
