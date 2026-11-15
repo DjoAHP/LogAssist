@@ -106,11 +106,16 @@ describe("GithubConnectorDialog", () => {
       configured: false,
       login: null,
     })
-    // Ajouter un délai pour que le message "testing" soit visible
-    vi.mocked(connectorGithub.configure).mockImplementation(async () => {
-      await new Promise((r) => setTimeout(r, 50))
-      return { configured: true, login: "octocat" }
-    })
+    // Promesse différée : le test contrôle la résolution. Un mock à délai
+    // fixe (50 ms) laissait une course — sous charge, vi.waitFor pouvait
+    // rater l'état intermédiaire "testing" (échec observé en gate v3.4.0).
+    let resolveConfigure!: (value: { configured: boolean; login: string }) => void
+    vi.mocked(connectorGithub.configure).mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveConfigure = resolve
+        }),
+    )
 
     render(<GithubConnectorDialog {...defaultProps} />)
 
@@ -123,11 +128,12 @@ describe("GithubConnectorDialog", () => {
     await userEvent.click(screen.getByRole("button", { name: t.connectors.testAndSave }))
 
     expect(connectorGithub.configure).toHaveBeenCalledWith("ghp_fake_token_123")
-    // Attendre que le message "testing" apparaisse
+    // Pendant l'attente : l'état intermédiaire est affiché, de façon stable
+    // (la promesse n'est pas encore résolue).
     await vi.waitFor(() => expect(liveRegion.textContent).toBe(t.connectors.testing))
-    // Attendre la résolution
-    await vi.waitFor(() => expect(liveRegion.textContent).not.toBe(t.connectors.testing))
-    expect(liveRegion.textContent).toContain("octocat")
+    // Résoudre, puis vérifier l'état final.
+    resolveConfigure({ configured: true, login: "octocat" })
+    await vi.waitFor(() => expect(liveRegion.textContent).toContain("octocat"))
   })
 
   it("affiche l'erreur i18n si configure échoue", async () => {
