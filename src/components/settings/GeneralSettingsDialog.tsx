@@ -1,22 +1,24 @@
 // Modale « Paramètres généraux » : miniature de l'interface principale —
 // en-tête (icône à droite du titre), sidebar de catégories (icône lucide +
-// libellé, aujourd'hui : Mot de passe uniquement) et panneau de réglages de
+// libellé, aujourd'hui : Mot de passe + Connecteurs) et panneau de réglages de
 // la catégorie active, à la place du chat. Pas de zone de saisie. Taille
 // standard HEADER_TOOL_DIALOG_SIZE_CLASS.
 import { useState } from "react"
-import { KeyRound, X, type LucideIcon } from "lucide-react"
+import { KeyRound, Plug, X, type LucideIcon } from "lucide-react"
 import { ParaGenIcon } from "@/icons"
 import { t } from "@/i18n/fr"
 import { HEADER_TOOL_DIALOG_SIZE_CLASS } from "./headerToolDialog"
 import { LockPanel } from "./LockPanel"
+import { ConnectorsPanel } from "./ConnectorsPanel"
 
-type Category = "lock"
+type Category = "lock" | "connectors"
 
 // La liste est déclarée au niveau module : ajouter une catégorie = ajouter
 // un objet ici (icône lucide cohérente avec le thème) + un bloc dans le
 // panneau ci-dessous.
 const CATEGORIES: { id: Category; label: string; icon: LucideIcon }[] = [
   { id: "lock", label: t.generalSettings.categories.lock, icon: KeyRound },
+  { id: "connectors", label: t.generalSettings.categories.connectors, icon: Plug },
 ]
 
 interface Props {
@@ -73,6 +75,16 @@ export function GeneralSettingsDialog({ onClose }: Props) {
           </nav>
           <div className="min-h-0 flex-1 overflow-y-auto p-4">
             {tab === "lock" && <LockPanel />}
+            {tab === "connectors" && (
+              <ConnectorsPanel
+                statuses={{ github: { configured: false, login: null } }}
+                onSelect={(connectorId) => {
+                  if (connectorId === "github") {
+                    // TODO: ouvrir le modal de configuration GitHub (phase 3)
+                  }
+                }}
+              />
+            )}
           </div>
         </div>
       </div>

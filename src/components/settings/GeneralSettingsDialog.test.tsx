@@ -3,8 +3,9 @@ import { describe, it, expect, vi, afterEach } from "vitest"
 import { render, screen, fireEvent, cleanup } from "@testing-library/react"
 import { GeneralSettingsDialog } from "./GeneralSettingsDialog"
 
-// Le panneau est stub : son comportement est couvert par LockPanel.test.tsx.
+// Les panneaux sont stubs : leur comportement est couvert par leurs propres tests.
 vi.mock("./LockPanel", () => ({ LockPanel: () => <div data-testid="lock-panel-stub" /> }))
+vi.mock("./ConnectorsPanel", () => ({ ConnectorsPanel: () => <div data-testid="connectors-panel-stub" /> }))
 
 import { t } from "@/i18n/fr"
 
@@ -25,6 +26,14 @@ describe("GeneralSettingsDialog — squelette miniature", () => {
     expect(firstIcon).not.toBeNull()
     expect(categoryButton.textContent).toContain(t.generalSettings.categories.lock)
     expect(screen.getByTestId("lock-panel-stub")).not.toBeNull()
+  })
+
+  it("affiche la catégorie Connecteurs et son panneau quand on clique dessus", () => {
+    render(<GeneralSettingsDialog onClose={() => {}} />)
+    const connectorsButton = screen.getByRole("button", { name: t.generalSettings.categories.connectors })
+    expect(connectorsButton).not.toBeNull()
+    fireEvent.click(connectorsButton)
+    expect(screen.getByTestId("connectors-panel-stub")).not.toBeNull()
   })
 
   it("ferme au clic sur la croix", () => {
