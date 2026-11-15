@@ -60,6 +60,16 @@ pub struct ConnectorGithubService {
     github: GithubClient,
     // turn_id -> liste de canaux d'annulation
     cancellations: Arc<Mutex<HashMap<String, Vec<oneshot::Sender<()>>>>>,
+    // Mode test : stockage en mémoire au lieu du Credential Manager
+    #[cfg(test)]
+    test_storage: Option<Arc<Mutex<TestStorage>>>,
+}
+
+#[cfg(test)]
+#[derive(Default)]
+struct TestStorage {
+    token: Option<String>,
+    login: Option<String>,
 }
 
 impl ConnectorGithubService {
@@ -67,11 +77,38 @@ impl ConnectorGithubService {
         Self {
             github: GithubClient::production(),
             cancellations: Arc::new(Mutex::new(HashMap::new())),
+            #[cfg(test)]
+            test_storage: None,
+        }
+    }
+
+    /// Constructeur pour tests — injecte un client GitHub (ex: faux serveur axum)
+    #[cfg(test)]
+    pub fn for_test(github: GithubClient) -> Self {
+        Self {
+            github,
+            cancellations: Arc::new(Mutex::new(HashMap::new())),
+            test_storage: Some(Arc::new(Mutex::new(TestStorage::default()))),
+        }
+    }
+
+    /// Constructeur pour tests sans client (utilise le client de production)
+    #[cfg(test)]
+    pub fn for_test_default() -> Self {
+        Self {
+            github: GithubClient::production(),
+            cancellations: Arc::new(Mutex::new(HashMap::new())),
+            test_storage: Some(Arc::new(Mutex::new(TestStorage::default()))),
         }
     }
 
     // Lecture du secret (Credential Manager) — appelle keyring directement pour éviter les problèmes d'inférence de type.
     fn read_token(&self) -> Result<Option<String>, ConnectorError> {
+        #[cfg(test)]
+        if let Some(storage) = &self.test_storage {
+            let storage = storage.lock().unwrap();
+            return Ok(storage.token.clone());
+        }
         use keyring::Entry;
         const SERVICE: &str = "LogAssist";
         let entry = Entry::new(SERVICE, GITHUB_SECRET_REF).map_err(|e| ConnectorError::Unknown(e.to_string()))?;
@@ -88,6 +125,12 @@ impl ConnectorGithubService {
 
     // Écriture du secret (Credential Manager)
     fn write_token(&self, token: &str) -> Result<(), ConnectorError> {
+        #[cfg(test)]
+        if let Some(storage) = &self.test_storage {
+            let mut storage = storage.lock().unwrap();
+            storage.token = Some(token.to_string());
+            return Ok(());
+        }
         use keyring::Entry;
         const SERVICE: &str = "LogAssist";
         let env = SecretEnvelope { version: 1, token: token.to_string() };
@@ -99,6 +142,12 @@ impl ConnectorGithubService {
 
     // Suppression du secret
     fn delete_token(&self) -> Result<(), ConnectorError> {
+        #[cfg(test)]
+        if let Some(storage) = &self.test_storage {
+            let mut storage = storage.lock().unwrap();
+            storage.token = None;
+            return Ok(());
+        }
         use keyring::Entry;
         const SERVICE: &str = "LogAssist";
         let entry = Entry::new(SERVICE, GITHUB_SECRET_REF).map_err(|e| ConnectorError::Unknown(e.to_string()))?;
@@ -111,6 +160,11 @@ impl ConnectorGithubService {
 
     // Lecture du login stocké (table settings)
     async fn read_login(&self) -> Result<Option<String>, ConnectorError> {
+        #[cfg(test)]
+        if let Some(storage) = &self.test_storage {
+            let storage = storage.lock().unwrap();
+            return Ok(storage.login.clone());
+        }
         // Utiliser le pool SQL via tauri_plugin_sql
         // Pour l'instant, on passe par une commande Rust existante si dispo
         // TODO: implémenter la lecture directe via le pool SQLite
@@ -119,12 +173,24 @@ impl ConnectorGithubService {
 
     // Écriture du login
     async fn write_login(&self, login: &str) -> Result<(), ConnectorError> {
+        #[cfg(test)]
+        if let Some(storage) = &self.test_storage {
+            let mut storage = storage.lock().unwrap();
+            storage.login = Some(login.to_string());
+            return Ok(());
+        }
         // TODO: implémenter via pool SQLite
         Ok(())
     }
 
     // Suppression du login
     async fn delete_login(&self) -> Result<(), ConnectorError> {
+        #[cfg(test)]
+        if let Some(storage) = &self.test_storage {
+            let mut storage = storage.lock().unwrap();
+            storage.login = None;
+            return Ok(());
+        }
         // TODO: implémenter via pool SQLite
         Ok(())
     }
