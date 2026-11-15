@@ -415,7 +415,12 @@ impl GithubClient {
             ));
         }
         let raw = content.content.unwrap_or_default();
-        let decoded = base64::Engine::decode(&base64::engine::general_purpose::STANDARD, raw)
+        // GitHub REST renvoie le base64 enroulé avec des retours à la ligne
+        // (~60 caractères/ligne) : base64 0.22 STANDARD rejette tout blanc,
+        // on les retire avant le décodage (bug : tout fichier réel > 45
+        // octets échouait en "base64 invalide").
+        let compact: String = raw.chars().filter(|c| !c.is_whitespace()).collect();
+        let decoded = base64::Engine::decode(&base64::engine::general_purpose::STANDARD, compact)
             .map_err(|e| ConnectorError::InvalidArguments(format!("base64 invalide: {e}")))?;
 
         let check_len = decoded.len().min(8192);
@@ -677,6 +682,66 @@ mod tests {
         assert_eq!(entries.len(), 2, "le dossier et son contenu");
         assert!(entries.iter().all(|e| e.path == "icons" || e.path.starts_with("icons/")));
 
+        handle.abort();
+    }
+
+    #[tokio::test]
+    async fn test_get_file_content_accepts_newline_wrapped_base64() {
+        // GitHub REST renvoie le base64 du contents API avec des retours à la
+        // ligne (~60 caractères par ligne). base64 0.22 STANDARD rejette \n :
+        // tout fichier réel > ~45 octets échouait en "base64 invalide" alors
+        // que le faux serveur de test (fichier court) ne le révélait jamais.
+        let body = vec![
+            "Ceci est un vrai README avec plus de soixante octets pour forcer l'enroulement base64 de GitHub.",
+            "Deuxième ligne du README pour vérifier la numérotation après décodage.",
+            "Troisième ligne du README pour vérifier la numérotation après décodage.",
+        ]
+        .join("\n");
+        let wrapped = base64::engine::general_purpose::STANDARD
+            .encode(body.as_bytes())
+            // Simule l'enroulement GitHub : \n tous les 60 caractères.
+            .as_bytes()
+            .chunks(60)
+            .map(|c| std::str::from_utf8(c).unwrap())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(wrapped.contains('\n'), "la charge de test doit être enroulée");
+
+        let app = Router::new().route(
+            "/repos/octocat/Hello-World/contents/README.md",
+            get(|| async move {
+                Json(serde_json::json!({
+                    "content": wrapped,
+                    "encoding": "base64",
+                    "size": body.len(),
+                    "download_url": "https://raw.githubusercontent.com/octocat/Hello-World/main/README.md"
+                }))
+            }),
+        );
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let handle = tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        let client = GithubClient::for_test(format!("http://{}", addr));
+
+        let (content, truncated) = client
+            .get_file_content(
+                "fake-token",
+                "octocat",
+                "Hello-World",
+                "README.md",
+                "main",
+                LineRange { start: None, end: None },
+            )
+            .await
+            .unwrap_or_else(|e| panic!("lecture README enroulée acceptée, erreur : {e:?}"));
+
+        assert!(!truncated);
+        assert!(content.contains("1|Ceci est un vrai README"));
+        assert!(content.contains("2|Deuxième ligne"));
+        assert!(content.contains("3|Troisième ligne"));
         handle.abort();
     }
 
