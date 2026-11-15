@@ -48,6 +48,7 @@ vi.mock("@/lib/chat/prepareConversationContext", () => ({
 }))
 vi.mock("@/lib/context/modelCapabilities", () => ({
   invalidateModelContextProfile: vi.fn(),
+  learnFromContextError: vi.fn(),
 }))
 
 import { useChat } from "@/hooks/useChat"

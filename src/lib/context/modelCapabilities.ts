@@ -1,10 +1,20 @@
 import type { ProviderModelContext } from "@/lib/ai/types"
+import { ApiError } from "@/lib/ai/errors"
 import { isOfficialOpenAiBaseUrl } from "@/lib/ai/url"
+import { ContextLengthDiagnosticError } from "./diagnostics"
 import type { ModelContextProfile } from "./types"
 
-const FALLBACK_CONTEXT_WINDOW = 4_096
+// Fenêtre optimiste : presque tous les modèles distants actuels offrent ≥ 16k.
+// Une erreur context_length RÉELLE du fournisseur apprend une borne moitié,
+// plancher 4096 (voir learnFromContextError) — le rejet local mandatory_overflow
+// n'apprend rien : il vient de notre estimation, pas du modèle.
+const FALLBACK_CONTEXT_WINDOW = 16_384
+const LEARNED_CAP_FLOOR = 4_096
 const CACHE_TTL_MS = 30_000
 const cache = new Map<string, { expiresAt: number; value: ProviderModelContext | null }>()
+// Dernière fenêtre EFFECTIVE résolue par clé (fournisseur/modèle) + borne apprise
+// après une vraie erreur fournisseur. Survit à l'invalidation du cache d'inspection.
+const lastResolved = new Map<string, { window: number; learnedCap: number | null }>()
 const VERIFIED_OPENAI_WINDOWS: Record<string, number> = {
   "gpt-4o": 128_000,
   "gpt-4o-2024-11-20": 128_000,
@@ -64,7 +74,12 @@ export async function resolveModelContextProfile(input: {
   const registryWindow = isValidWindow(input.registryContextWindow)
     ? input.registryContextWindow
     : null
-  const windowTokens = inspected.value?.contextWindowTokens ?? registryWindow ?? FALLBACK_CONTEXT_WINDOW
+  const learned = lastResolved.get(input.cacheKey)
+  const detected = inspected.value?.contextWindowTokens ?? registryWindow ?? FALLBACK_CONTEXT_WINDOW
+  const windowTokens = learned?.learnedCap != null
+    ? Math.min(detected, learned.learnedCap)
+    : detected
+  lastResolved.set(input.cacheKey, { window: windowTokens, learnedCap: learned?.learnedCap ?? null })
   return {
     contextWindowTokens: windowTokens,
     maxOutputTokens: outputReserve(windowTokens, input.maxOutputTokensOverride),
@@ -81,4 +96,23 @@ export async function resolveModelContextProfile(input: {
 
 export function invalidateModelContextProfile(cacheKey: string): void {
   cache.delete(cacheKey)
+}
+
+/**
+ * Apprend une borne de fenêtre après une VRAIE erreur context_length du
+ * fournisseur (rejet du modèle, pas notre contrôle local). La borne vaut la
+ * moitié de la dernière fenêtre effective, plancher 4096. Les rejets locaux
+ * (ContextLengthDiagnosticError, mandatory_overflow) et les erreurs d'une
+ * autre nature sont ignorés : ils ne prouvent rien sur la fenêtre du modèle.
+ */
+export function learnFromContextError(cacheKey: string, error: unknown): void {
+  if (!(error instanceof ApiError) || error.kind !== "context_length") return
+  if (error instanceof ContextLengthDiagnosticError) return
+
+  const previous = lastResolved.get(cacheKey)
+  const usedWindow = previous?.window ?? FALLBACK_CONTEXT_WINDOW
+  const cap = Math.max(LEARNED_CAP_FLOOR, Math.floor(usedWindow / 2))
+  const previousCap = previous?.learnedCap
+  const learnedCap = previousCap != null ? Math.min(previousCap, cap) : cap
+  lastResolved.set(cacheKey, { window: learnedCap, learnedCap })
 }

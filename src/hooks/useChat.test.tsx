@@ -65,6 +65,7 @@ const connectorCancelTurnMock = vi.hoisted(() => vi.fn())
 const resolveWebIntentMock = vi.hoisted(() => vi.fn(() => "auto"))
 const prepareConversationContextMock = vi.hoisted(() => vi.fn())
 const invalidateModelContextProfileMock = vi.hoisted(() => vi.fn())
+const learnFromContextErrorMock = vi.hoisted(() => vi.fn())
 
 const runtimeWithTools = (): McpRuntimeSnapshot => snapshot({
   activeTools: [genericTool("db", "delete", "db__delete", "confirm")],
@@ -175,6 +176,7 @@ vi.mock("@/lib/chat/prepareConversationContext", () => ({
 }))
 vi.mock("@/lib/context/modelCapabilities", () => ({
   invalidateModelContextProfile: invalidateModelContextProfileMock,
+  learnFromContextError: learnFromContextErrorMock,
   getVerifiedContextWindow: vi.fn(() => null),
   resolveModelContextProfile: vi.fn(),
 }))
@@ -261,6 +263,7 @@ beforeEach(() => {
     return context
   })
   invalidateModelContextProfileMock.mockReset()
+  learnFromContextErrorMock.mockReset()
   systemPromptMock.mockReturnValue("")
   resolveWebIntentMock.mockReturnValue("auto")
   vi.mocked(messagesDb.insert).mockReset().mockResolvedValue("row-1")
@@ -566,18 +569,52 @@ describe("useChat.send — contract anti-perte", () => {
     expect(loggedWithDiagnostic.every((entry) => entry.diagnostic?.contextWindowTokens === 16_384)).toBe(true)
   })
 
-  it("invalide la fenêtre en cache après un rejet de contexte du fournisseur", async () => {
+  it("apprend une borne de fenêtre après un rejet de contexte du fournisseur", async () => {
     const context = preparedContext()
     prepareConversationContextMock.mockResolvedValueOnce(context)
-    runAssistantTurnMock.mockRejectedValueOnce(
-      new ApiError("context_length", "n_keep: 9000 >= n_ctx: 8192"),
-    )
+    const providerError = new ApiError("context_length", "n_keep: 9000 >= n_ctx: 8192")
+    runAssistantTurnMock.mockRejectedValueOnce(providerError)
     const { result } = renderHook(() => useChat(modelSelection))
 
     await act(async () => expect(await result.current.send("conv-1", "Salut")).toBe(true))
 
-    expect(invalidateModelContextProfileMock).toHaveBeenCalledWith("p1/m1")
+    expect(learnFromContextErrorMock).toHaveBeenCalledWith("p1/m1", providerError)
+    expect(invalidateModelContextProfileMock).not.toHaveBeenCalled()
     expect(context.dispose).toHaveBeenCalledTimes(1)
+  })
+
+  it("n’apprend rien d’un rejet local mandatory_overflow", async () => {
+    const diagnostic = toFailedRoundDiagnostic({
+      modelId: "m1",
+      profile: {
+        contextWindowTokens: 16_384,
+        maxOutputTokens: 3_276,
+        source: "fallback",
+        tokenizer: "conservative",
+      },
+      categories: {
+        system: 1_383,
+        knowledge: 0,
+        history: 0,
+        currentUser: 120,
+        images: 0,
+        tools: 24_189,
+        mcpResults: 0,
+        outputReserve: 4_096,
+        safetyMargin: 1_310,
+      },
+      inputTokens: 25_692,
+      totalWithReserve: 31_102,
+    })
+    prepareConversationContextMock.mockRejectedValueOnce(
+      new ContextLengthDiagnosticError(diagnostic),
+    )
+    const { result } = renderHook(() => useChat(modelSelection))
+
+    await act(async () => expect(await result.current.send("conv-1", "Question immense")).toBe(true))
+
+    expect(learnFromContextErrorMock).not.toHaveBeenCalled()
+    expect(invalidateModelContextProfileMock).not.toHaveBeenCalled()
   })
 
   it("persiste les métriques fournisseur et résout true après le tour", async () => {
@@ -1775,7 +1812,8 @@ describe("useChat — récupération de la dernière réponse", () => {
 
     expect(runAssistantTurnMock).not.toHaveBeenCalled()
     expect(messagesDb.updateAssistant).not.toHaveBeenCalled()
-    expect(invalidateModelContextProfileMock).toHaveBeenCalledWith("p1/m1")
+    expect(learnFromContextErrorMock).toHaveBeenCalledWith("p1/m1", expect.any(ApiError))
+    expect(invalidateModelContextProfileMock).not.toHaveBeenCalled()
     expect(result.current.vm.find((message) => message.id === answeredRow.id)).toMatchObject({
       content: "Ancienne réponse",
       recoveryFailed: true,

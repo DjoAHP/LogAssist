@@ -29,7 +29,7 @@ import type {
 import { prepareConversationContext } from "@/lib/chat/prepareConversationContext"
 import { createRecoveryPlan, type RecoveryMode } from "@/lib/chat/recoveryPolicy"
 import { runAssistantTurn, type AssistantTurnResult } from "@/lib/chat/turnRunner"
-import { invalidateModelContextProfile } from "@/lib/context/modelCapabilities"
+import { learnFromContextError } from "@/lib/context/modelCapabilities"
 import { ContextLengthDiagnosticError } from "@/lib/context/diagnostics"
 import type { SafeContextDiagnostic } from "@/lib/context/types"
 import type { ContextSession } from "@/lib/context"
@@ -548,11 +548,13 @@ export function useChat(
             }
             const api = e as Partial<ApiError>
             const kind = normalizeApiErrorKind(api.kind)
-            if (kind === "context_length") {
-              invalidateModelContextProfile(`${provider.id}/${modelId}`)
-            }
             // Échec de contexte : journal avec diagnostic sûr + compteurs visibles.
             const failureDiagnostic = contextCountersOf(e)
+            if (kind === "context_length" && !failureDiagnostic) {
+              // Vraie erreur fournisseur : la fenêtre estimée était trop grande.
+              // Un rejet local (diagnostic interne) ne prouve rien sur le modèle.
+              learnFromContextError(`${provider.id}/${modelId}`, e)
+            }
             if (failureDiagnostic) {
               logger.error({
                 kind: "chat_context_failure",
@@ -900,10 +902,10 @@ export function useChat(
         return true
       } catch (error) {
         const kind = normalizeApiErrorKind((error as Partial<ApiError>).kind)
-        if (kind === "context_length") {
-          invalidateModelContextProfile(`${modelSelection.provider.id}/${modelSelection.modelId}`)
-        }
         const failureDiagnostic = contextCountersOf(error)
+        if (kind === "context_length" && !failureDiagnostic) {
+          learnFromContextError(`${modelSelection.provider.id}/${modelSelection.modelId}`, error)
+        }
         logger.error({
           kind: "chat_recovery",
           message: safeRecoveryError(error),
