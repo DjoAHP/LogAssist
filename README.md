@@ -9,7 +9,7 @@
         <img src="https://img.shields.io/badge/Tauri-v2.0-1B4CDE?labelColor=C77B23&style=plastic&logo=tauri&logoColor=F0F0F0" />
         </a>
     <a href="https://github.com/DjoAHP/LogAssist" alt="LogAssist github">
-        <img src="https://img.shields.io/crates/v/logassist?label=LogAssist&color=2D90A4&labelColor=343943&style=flat&logo=github&logoColor=ffffff" /></a>
+        <img src="https://img.shields.io/crates/v/package?label=LogAssist&color=2D90A4&labelColor=343943&style=flat&logo=github&logoColor=ffffff" /></a>
 </p>
 
 
