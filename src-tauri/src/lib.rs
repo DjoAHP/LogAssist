@@ -1,5 +1,6 @@
 mod commands;
 pub mod mcp;
+pub mod connectors;
 
 use std::sync::Arc;
 
