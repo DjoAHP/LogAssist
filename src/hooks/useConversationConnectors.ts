@@ -1,15 +1,22 @@
 // Hook pour gérer les liaisons connecteur ↔ conversation.
 // Une seule liaison par (conversation, connecteur).
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { conversationConnectors, type ConversationConnectorBinding } from "@/lib/db/conversationConnectors"
 
 export function useConversationConnectors(conversationId: string | null) {
-  const [bindings, setBindings] = useState<Record<string, ConversationConnectorBinding>>({})
+  const [state, setState] = useState<{
+    conversationId: string | null
+    bindings: Record<string, ConversationConnectorBinding>
+  }>({ conversationId: null, bindings: {} })
   const [loading, setLoading] = useState(false)
+  const requestSequence = useRef(0)
+  const bindings = state.conversationId === conversationId ? state.bindings : {}
 
   const load = useCallback(async () => {
+    const sequence = ++requestSequence.current
     if (!conversationId) {
-      setBindings({})
+      setState({ conversationId: null, bindings: {} })
+      setLoading(false)
       return
     }
     setLoading(true)
@@ -19,14 +26,19 @@ export function useConversationConnectors(conversationId: string | null) {
       for (const b of list) {
         map[b.connectorId] = b
       }
-      setBindings(map)
+      if (sequence === requestSequence.current) {
+        setState({ conversationId, bindings: map })
+      }
     } finally {
-      setLoading(false)
+      if (sequence === requestSequence.current) setLoading(false)
     }
   }, [conversationId])
 
   useEffect(() => {
-    load()
+    void load()
+    return () => {
+      requestSequence.current += 1
+    }
   }, [load])
 
   const attach = useCallback(

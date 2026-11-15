@@ -137,6 +137,7 @@ function snapshot(overrides: Partial<{ authStatuses: Record<string, McpAuthStatu
     activeTools: overrides.activeTools ?? [],
     authStatuses: overrides.authStatuses ?? { tinyfish: "not_required" as McpAuthStatus },
     webAccess: { enabled: false, configured: false },
+    connectors: { github: { binding: null, configured: false } },
   }
 }
 

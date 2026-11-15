@@ -92,6 +92,20 @@ describe("InputBar — dépôt GitHub", () => {
     expect(onOpenRepoPicker).not.toHaveBeenCalled()
   })
 
+  it("marque la puce indisponible si le jeton a été retiré", () => {
+    const onDetachRepo = vi.fn()
+    renderBar({
+      githubAvailable: false,
+      githubAttached: { owner: "acme", name: "console", ref: "main" },
+      onDetachRepo,
+    })
+
+    expect(screen.getByText(t.chat.githubRepoUnavailable)).toBeTruthy()
+    expect((screen.getByRole("button", { name: t.connectors.github }) as HTMLButtonElement).disabled).toBe(true)
+    fireEvent.click(screen.getByRole("button", { name: t.chat.detachGitHubRepo }))
+    expect(onDetachRepo).toHaveBeenCalledTimes(1)
+  })
+
   it("persiste la liaison choisie depuis le sélecteur", async () => {
     const onAttachRepo = vi.fn().mockResolvedValue(undefined)
     mockConnectorGithub.listRepos.mockResolvedValueOnce({

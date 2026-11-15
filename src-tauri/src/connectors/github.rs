@@ -1,10 +1,9 @@
 // Client HTTP GitHub — hôte fixe, timeouts, tailles bornées, headers obligatoires.
 // Redirections désactivées (Policy::none()), lecture bornée, classification d'erreurs.
 
-use super::error::{classify_reqwest_error, ConnectorError, ConnectorErrorKind};
-use super::validation::{validate_owner, validate_name, validate_ref, validate_path};
+use super::error::{ConnectorError, ConnectorErrorKind, classify_reqwest_error};
+use super::validation::{validate_name, validate_owner, validate_path, validate_ref};
 use crate::connectors::validation::validate_query;
-use base64::Engine;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
@@ -74,7 +73,14 @@ pub struct TreeEntry {
 }
 
 const FILTERED_DIRS: &[&str] = &[
-    ".git", "node_modules", "dist", "build", "target", "vendor", ".venv", "__pycache__"
+    ".git",
+    "node_modules",
+    "dist",
+    "build",
+    "target",
+    "vendor",
+    ".venv",
+    "__pycache__",
 ];
 
 #[derive(Deserialize)]
@@ -125,6 +131,12 @@ pub struct RepoInfo {
     pub default_branch: String,
 }
 
+#[derive(Clone, Copy, Default)]
+pub struct LineRange {
+    pub start: Option<usize>,
+    pub end: Option<usize>,
+}
+
 // ===== Client =====
 
 #[derive(Debug, Clone)]
@@ -163,7 +175,7 @@ impl GithubClient {
         Self { base_url, http }
     }
 
-    fn auth_headers(&self, token: &str) -> reqwest::header::HeaderMap {
+    fn auth_headers(&self, token: &str) -> Result<reqwest::header::HeaderMap, ConnectorError> {
         let mut headers = reqwest::header::HeaderMap::new();
         headers.insert(
             reqwest::header::USER_AGENT,
@@ -179,23 +191,32 @@ impl GithubClient {
         );
         headers.insert(
             reqwest::header::AUTHORIZATION,
-            reqwest::header::HeaderValue::from_str(&format!("Bearer {token}")).unwrap(),
+            reqwest::header::HeaderValue::from_str(&format!("Bearer {token}"))
+                .map_err(|_| ConnectorError::InvalidArguments("jeton GitHub invalide".into()))?,
         );
-        headers
+        Ok(headers)
     }
 
-    async fn get_bounded(&self, url: &str, token: &str, max_bytes: usize) -> Result<Vec<u8>, ConnectorError> {
+    async fn get_bounded(
+        &self,
+        url: &str,
+        token: &str,
+        max_bytes: usize,
+    ) -> Result<Vec<u8>, ConnectorError> {
         let resp = self
             .http
             .get(url)
-            .headers(self.auth_headers(token))
+            .headers(self.auth_headers(token)?)
             .send()
             .await
-            .map_err(|e| ConnectorError::Unknown(format!("erreur réseau: {e}")))?;
+            .map_err(|error| {
+                let kind = classify_reqwest_error(&error);
+                connector_error_from_kind(kind, "requête GitHub impossible".into())
+            })?;
 
         let status = resp.status();
         if !status.is_success() {
-            let kind = classify_reqwest_error(&reqwest::Error::from(resp.error_for_status().unwrap_err()));
+            let kind = classify_reqwest_error(&resp.error_for_status().unwrap_err());
             return Err(connector_error_from_kind(kind, format!("HTTP {}", status)));
         }
 
@@ -213,7 +234,9 @@ impl GithubClient {
         while let Some(chunk) = stream.next().await {
             let chunk = chunk.map_err(|e| ConnectorError::Unknown(format!("lecture flux: {e}")))?;
             if body.len() + chunk.len() > max_bytes {
-                return Err(ConnectorError::TooLarge("réponse tronquée (limite dépassée)".into()));
+                return Err(ConnectorError::TooLarge(
+                    "réponse tronquée (limite dépassée)".into(),
+                ));
             }
             body.extend_from_slice(&chunk);
         }
@@ -223,36 +246,57 @@ impl GithubClient {
     // ---- GET /user (test de validité du token) ----
     pub async fn verify_token(&self, token: &str) -> Result<String, ConnectorError> {
         let url = format!("{}/user", self.base_url);
-        let body = self.get_bounded(&url, token, MAX_JSON_SIZE).await?;
+        let body = tokio::time::timeout(
+            CONFIGURE_TIMEOUT,
+            self.get_bounded(&url, token, MAX_JSON_SIZE),
+        )
+        .await
+        .map_err(|_| ConnectorError::Timeout("validation du jeton expirée".into()))??;
         let user: GitHubUser = serde_json::from_slice(&body)
             .map_err(|e| ConnectorError::InvalidArguments(format!("JSON invalide /user: {e}")))?;
         Ok(user.login)
     }
 
     // ---- GET /user/repos (liste dépôts, tri activité récente) ----
-    pub async fn list_repos(&self, token: &str, page: u32) -> Result<Vec<RepoSummary>, ConnectorError> {
+    pub async fn list_repos(
+        &self,
+        token: &str,
+        page: u32,
+    ) -> Result<Vec<RepoSummary>, ConnectorError> {
         if page == 0 || page > 50 {
-            return Err(ConnectorError::InvalidArguments("page invalide (1-50)".into()));
+            return Err(ConnectorError::InvalidArguments(
+                "page invalide (1-50)".into(),
+            ));
         }
         let url = format!(
             "{}/user/repos?sort=pushed&direction=desc&per_page=50&page={}",
             self.base_url, page
         );
         let body = self.get_bounded(&url, token, MAX_JSON_SIZE).await?;
-        let repos: Vec<RepoSummary> = serde_json::from_slice(&body)
-            .map_err(|e| ConnectorError::InvalidArguments(format!("JSON invalide /user/repos: {e}")))?;
+        let repos: Vec<RepoSummary> = serde_json::from_slice(&body).map_err(|e| {
+            ConnectorError::InvalidArguments(format!("JSON invalide /user/repos: {e}"))
+        })?;
         Ok(repos)
     }
 
     // ---- GET /repos/{owner}/{repo}/branches (max 100) ----
-    pub async fn list_branches(&self, token: &str, owner: &str, name: &str) -> Result<Vec<String>, ConnectorError> {
+    pub async fn list_branches(
+        &self,
+        token: &str,
+        owner: &str,
+        name: &str,
+    ) -> Result<Vec<String>, ConnectorError> {
         validate_owner(owner).map_err(|e| ConnectorError::InvalidArguments(e.to_string()))?;
         validate_name(name).map_err(|e| ConnectorError::InvalidArguments(e.to_string()))?;
 
-        let url = format!("{}/repos/{}/{}/branches?per_page=100", self.base_url, owner, name);
+        let url = format!(
+            "{}/repos/{}/{}/branches?per_page=100",
+            self.base_url, owner, name
+        );
         let body = self.get_bounded(&url, token, MAX_JSON_SIZE).await?;
-        let branches: Vec<BranchShort> = serde_json::from_slice(&body)
-            .map_err(|e| ConnectorError::InvalidArguments(format!("JSON invalide branches: {e}")))?;
+        let branches: Vec<BranchShort> = serde_json::from_slice(&body).map_err(|e| {
+            ConnectorError::InvalidArguments(format!("JSON invalide branches: {e}"))
+        })?;
         Ok(branches.into_iter().map(|b| b.name).take(100).collect())
     }
 
@@ -273,7 +317,11 @@ impl GithubClient {
             validate_path(p).map_err(|e| ConnectorError::InvalidArguments(e.to_string()))?;
         }
 
-        let mut url = format!("{}/repos/{}/{}/git/trees/{}?recursive=1", self.base_url, owner, name, ref_);
+        let encoded_ref = urlencoding::encode(ref_);
+        let mut url = format!(
+            "{}/repos/{}/{}/git/trees/{}?recursive=1",
+            self.base_url, owner, name, encoded_ref
+        );
         if let Some(p) = path_prefix {
             url.push_str(&format!("&path={}", p));
         }
@@ -283,7 +331,9 @@ impl GithubClient {
 
         let mut entries = resp.tree;
         entries.retain(|e| {
-            !FILTERED_DIRS.iter().any(|d| e.path.starts_with(&format!("{}/", d)) || e.path == *d)
+            !FILTERED_DIRS
+                .iter()
+                .any(|d| e.path.starts_with(&format!("{}/", d)) || e.path == *d)
         });
         if let Some(d) = depth {
             entries.retain(|e| e.path.matches('/').count() < d);
@@ -324,29 +374,37 @@ impl GithubClient {
         name: &str,
         path: &str,
         ref_: &str,
-        start_line: Option<usize>,
-        end_line: Option<usize>,
+        range: LineRange,
     ) -> Result<(String, bool), ConnectorError> {
         validate_owner(owner).map_err(|e| ConnectorError::InvalidArguments(e.to_string()))?;
         validate_name(name).map_err(|e| ConnectorError::InvalidArguments(e.to_string()))?;
         validate_path(path).map_err(|e| ConnectorError::InvalidArguments(e.to_string()))?;
         validate_ref(ref_).map_err(|e| ConnectorError::InvalidArguments(e.to_string()))?;
 
-        let url = format!("{}/repos/{}/{}/contents/{}?ref={}", self.base_url, owner, name, path, ref_);
+        let encoded_ref = urlencoding::encode(ref_);
+        let url = format!(
+            "{}/repos/{}/{}/contents/{}?ref={}",
+            self.base_url, owner, name, path, encoded_ref
+        );
         let body = self.get_bounded(&url, token, MAX_FILE_SIZE).await?;
-        let content: ContentResponse = serde_json::from_slice(&body)
-            .map_err(|e| ConnectorError::InvalidArguments(format!("JSON invalide contents: {e}")))?;
+        let content: ContentResponse = serde_json::from_slice(&body).map_err(|e| {
+            ConnectorError::InvalidArguments(format!("JSON invalide contents: {e}"))
+        })?;
 
         if content.encoding.as_deref() != Some("base64") {
-            return Err(ConnectorError::InvalidArguments("encodage non base64".into()));
+            return Err(ConnectorError::InvalidArguments(
+                "encodage non base64".into(),
+            ));
         }
         let raw = content.content.unwrap_or_default();
         let decoded = base64::Engine::decode(&base64::engine::general_purpose::STANDARD, raw)
             .map_err(|e| ConnectorError::InvalidArguments(format!("base64 invalide: {e}")))?;
-        
+
         let check_len = decoded.len().min(8192);
         if decoded[..check_len].contains(&0) {
-            return Err(ConnectorError::Binary("fichier binaire détecté (NUL)".into()));
+            return Err(ConnectorError::Binary(
+                "fichier binaire détecté (NUL)".into(),
+            ));
         }
 
         let text = String::from_utf8(decoded)
@@ -354,11 +412,13 @@ impl GithubClient {
 
         let lines: Vec<&str> = text.lines().collect();
         let total_lines = lines.len();
-        
-        let start = start_line.unwrap_or(1).min(total_lines + 1);
-        let end = end_line.unwrap_or(total_lines).min(total_lines);
+
+        let start = range.start.unwrap_or(1).min(total_lines + 1);
+        let end = range.end.unwrap_or(total_lines).min(total_lines);
         if start > end {
-            return Err(ConnectorError::InvalidArguments("start_line > end_line".into()));
+            return Err(ConnectorError::InvalidArguments(
+                "start_line > end_line".into(),
+            ));
         }
 
         let mut result = String::new();
@@ -367,9 +427,16 @@ impl GithubClient {
         }
         let truncated = total_lines > 400 || result.len() > 24_000;
         if total_lines > 400 {
-            result.push_str(&format!("\n[... total {} lignes, continue avec start_line={} ...]", total_lines, end + 1));
+            result.push_str(&format!(
+                "\n[... total {} lignes, continue avec start_line={} ...]",
+                total_lines,
+                end + 1
+            ));
         } else if result.len() > 24_000 {
-            result.push_str(&format!("\n[... tronqué à 24k car, continue avec start_line={} ...]", end + 1));
+            result.push_str(&format!(
+                "\n[... tronqué à 24k car, continue avec start_line={} ...]",
+                end + 1
+            ));
         }
 
         Ok((result, truncated))
@@ -391,8 +458,11 @@ impl GithubClient {
 
         let full_query = format!("{} repo:{}/{}", query, owner, name);
         let encoded_query = urlencoding::encode(&full_query);
-        let url = format!("{}/search/code?q={}&per_page=20", self.base_url, encoded_query);
-        
+        let url = format!(
+            "{}/search/code?q={}&per_page=20",
+            self.base_url, encoded_query
+        );
+
         let body = self.get_bounded(&url, token, MAX_JSON_SIZE).await?;
         let resp: SearchCodeResponse = serde_json::from_slice(&body)
             .map_err(|e| ConnectorError::InvalidArguments(format!("JSON invalide search: {e}")))?;
@@ -402,11 +472,16 @@ impl GithubClient {
 
         let mut items = resp.items;
         items.truncate(20);
-        
+
         Ok((items, ref_differs, resp.incomplete_results))
     }
 
-    async fn get_default_branch(&self, token: &str, owner: &str, name: &str) -> Result<String, ConnectorError> {
+    async fn get_default_branch(
+        &self,
+        token: &str,
+        owner: &str,
+        name: &str,
+    ) -> Result<String, ConnectorError> {
         let url = format!("{}/repos/{}/{}", self.base_url, owner, name);
         let body = self.get_bounded(&url, token, MAX_JSON_SIZE).await?;
         let info: RepoInfo = serde_json::from_slice(&body)
@@ -418,7 +493,8 @@ impl GithubClient {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use axum::{routing::get, Json, Router};
+    use axum::{Json, Router, routing::get};
+    use base64::Engine;
     use tokio::net::TcpListener;
 
     async fn spawn_fake_github() -> (String, tokio::task::JoinHandle<()>) {
@@ -507,7 +583,10 @@ mod tests {
     async fn test_list_branches() {
         let (base_url, _handle) = spawn_fake_github().await;
         let client = GithubClient::for_test(base_url);
-        let branches = client.list_branches("fake-token", "octocat", "Hello-World").await.unwrap();
+        let branches = client
+            .list_branches("fake-token", "octocat", "Hello-World")
+            .await
+            .unwrap();
         assert_eq!(branches.len(), 2);
         assert!(branches.contains(&"main".to_string()));
     }
@@ -516,7 +595,10 @@ mod tests {
     async fn test_get_tree_filters_git() {
         let (base_url, _handle) = spawn_fake_github().await;
         let client = GithubClient::for_test(base_url);
-        let (entries, truncated) = client.get_tree("fake-token", "octocat", "Hello-World", "main", None, None).await.unwrap();
+        let (entries, truncated) = client
+            .get_tree("fake-token", "octocat", "Hello-World", "main", None, None)
+            .await
+            .unwrap();
         assert!(!truncated);
         assert!(!entries.iter().any(|e| e.path.starts_with(".git/")));
         assert!(entries.iter().any(|e| e.path == "src/main.rs"));
@@ -526,7 +608,17 @@ mod tests {
     async fn test_get_file_content() {
         let (base_url, _handle) = spawn_fake_github().await;
         let client = GithubClient::for_test(base_url);
-        let (content, truncated) = client.get_file_content("fake-token", "octocat", "Hello-World", "src/main.rs", "main", None, None).await.unwrap();
+        let (content, truncated) = client
+            .get_file_content(
+                "fake-token",
+                "octocat",
+                "Hello-World",
+                "src/main.rs",
+                "main",
+                LineRange::default(),
+            )
+            .await
+            .unwrap();
         assert!(!truncated);
         assert!(content.contains("fn main()"));
         assert!(content.contains("1|fn main()"));
@@ -536,7 +628,10 @@ mod tests {
     async fn test_search_code() {
         let (base_url, _handle) = spawn_fake_github().await;
         let client = GithubClient::for_test(base_url);
-        let (items, ref_differs, incomplete) = client.search_code("fake-token", "octocat", "Hello-World", "main", "function").await.unwrap();
+        let (items, ref_differs, incomplete) = client
+            .search_code("fake-token", "octocat", "Hello-World", "main", "function")
+            .await
+            .unwrap();
         assert_eq!(items.len(), 1);
         assert_eq!(items[0].path, "src/main.rs");
         assert!(!ref_differs);
@@ -549,5 +644,17 @@ mod tests {
         let client = GithubClient::for_test(base_url);
         let result = client.list_branches("fake-token", "-invalid", "repo").await;
         assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_offline_network_error_is_classified() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        drop(listener);
+        let client = GithubClient::for_test(format!("http://{address}"));
+
+        let error = client.verify_token("fake-token").await.unwrap_err();
+
+        assert!(matches!(error, ConnectorError::Offline(_)));
     }
 }

@@ -77,6 +77,7 @@ describe("prepareConversationContext", () => {
       contextWindowOverride: null,
       maxOutputTokensOverride: null,
       webEnabled: true,
+      repoBinding: { owner: "DjoAHP", name: "LogAssist", ref: "main" },
     }, {
       loadPromptSettings: vi.fn().mockResolvedValue({ general: "GEN", profile: "PROF" }),
       loadKnowledge: vi.fn().mockResolvedValue([knowledgeRow()]),
@@ -87,7 +88,7 @@ describe("prepareConversationContext", () => {
 
     expect(result).toBe(preparedSession)
     expect(createSession).toHaveBeenCalledWith(expect.objectContaining({
-      baseSystem: expect.stringMatching(/GEN[\s\S]*PROF[\s\S]*contenu Web externe/),
+      baseSystem: expect.stringMatching(/GEN[\s\S]*PROF[\s\S]*contenu Web externe[\s\S]*DjoAHP\/LogAssist@main/),
       documents: [{ id: "k1", name: "HISE", content: "# Gain\nRégler gain", sortOrder: 3 }],
       history: [
         { id: "u1", role: "user", content: "Ancienne question" },

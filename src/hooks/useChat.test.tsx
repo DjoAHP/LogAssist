@@ -17,6 +17,7 @@ import {
 import type { PrepareConversationContextInput } from "@/lib/chat/prepareConversationContext"
 import { ApiError } from "@/lib/ai/errors"
 import { snapshot, genericTool, tinyfishTool } from "@/test/mcpFixtures"
+import { t } from "@/i18n/fr"
 
 type RunAssistantTurnInput = Parameters<
   typeof import("@/lib/chat/turnRunner").runAssistantTurn
@@ -59,6 +60,8 @@ const runAssistantTurnMock = vi.hoisted(() => vi.fn(async (input: RunAssistantTu
 }))
 const mcpCallToolMock = vi.hoisted(() => vi.fn())
 const mcpCancelTurnMock = vi.hoisted(() => vi.fn())
+const connectorCallToolMock = vi.hoisted(() => vi.fn())
+const connectorCancelTurnMock = vi.hoisted(() => vi.fn())
 const resolveWebIntentMock = vi.hoisted(() => vi.fn(() => "auto"))
 const prepareConversationContextMock = vi.hoisted(() => vi.fn())
 const invalidateModelContextProfileMock = vi.hoisted(() => vi.fn())
@@ -74,6 +77,20 @@ const runtimeWithWeb = (): McpRuntimeSnapshot => snapshot({
 
 const runtimeWithAutomaticTool = (): McpRuntimeSnapshot => snapshot({
   activeTools: [genericTool("docs", "search", "docs__search", "auto")],
+})
+
+const githubBinding = { owner: "DjoAHP", name: "LogAssist", ref: "main" }
+const runtimeWithConnector = (): McpRuntimeSnapshot => snapshot({
+  activeTools: [{
+    ...genericTool(
+      "connector_github",
+      "repo_map",
+      "connector_github__repo_map",
+      "auto",
+    ),
+    kind: "connector",
+  }],
+  connectors: { github: { binding: githubBinding, configured: true } },
 })
 
 const assistantResult = (text: string): AssistantTurnResult => ({
@@ -142,6 +159,12 @@ vi.mock("@/lib/token", () => ({
 vi.mock("@/lib/mcp/webIntent", () => ({ resolveWebIntent: resolveWebIntentMock }))
 vi.mock("@/lib/mcp/client", () => ({
   mcp: { callTool: mcpCallToolMock, cancelTurn: mcpCancelTurnMock },
+}))
+vi.mock("@/lib/connectors/client", () => ({
+  connectorGithub: {
+    callTool: connectorCallToolMock,
+    cancelTurn: connectorCancelTurnMock,
+  },
 }))
 vi.mock("@/lib/logger", () => ({
   logger: { debug: loggerDebugMock, error: loggerErrorMock },
@@ -215,6 +238,8 @@ beforeEach(() => {
   runAssistantTurnMock.mockReset()
   mcpCallToolMock.mockReset()
   mcpCancelTurnMock.mockReset()
+  connectorCallToolMock.mockReset()
+  connectorCancelTurnMock.mockReset()
   resolveWebIntentMock.mockReset()
   prepareConversationContextMock.mockReset().mockImplementation(async (input: {
     history: Array<{ role: "user" | "assistant"; content: string }>
@@ -278,6 +303,7 @@ beforeEach(() => {
   })
   tinyfishCancelMock.mockResolvedValue(undefined)
   mcpCancelTurnMock.mockResolvedValue(undefined)
+  connectorCancelTurnMock.mockResolvedValue(undefined)
   // messageMedia mocks (added for multimodal media persistence)
   vi.mocked(messageMediaDb.insertRows).mockReset().mockResolvedValue(undefined)
   vi.mocked(messageMediaDb.listByMessageIds).mockReset().mockResolvedValue([])
@@ -990,6 +1016,24 @@ describe("useChat.send — contract anti-perte", () => {
     })
 
     expect(result.current.webToolsUnsupported).toBe(true)
+  })
+
+  it("signale un dépôt attaché devenu indisponible sans exposer d’outil", async () => {
+    const unavailableRuntime = snapshot({
+      connectors: {
+        github: { binding: githubBinding, configured: false },
+      },
+    })
+    const { result } = renderHook(() => useChat(modelSelection, unavailableRuntime))
+
+    await act(async () => {
+      expect(await result.current.send("conv-1", "Question dépôt")).toBe(true)
+    })
+
+    expect(runAssistantTurnMock.mock.calls[0][0].tools).toBeUndefined()
+    expect(result.current.vm[result.current.vm.length - 1]?.webWarning).toBe(
+      "Le dépôt GitHub attaché est indisponible : configurez de nouveau le connecteur.",
+    )
   })
 
   it("mappe les sources historiques et ignore un JSON malformé", async () => {
@@ -1988,6 +2032,96 @@ describe("useChat — récupération de la dernière réponse", () => {
 })
 
 describe("useChat — outils MCP, approbation et annulation", () => {
+  it("route un outil GitHub avec les limites étendues sur un envoi", async () => {
+    connectorCallToolMock.mockResolvedValueOnce({ text: "src/App.tsx", truncated: false })
+    runAssistantTurnMock.mockImplementationOnce(async (input) => {
+      if (!input.tools) throw new Error("Ce scénario exige les outils connecteur.")
+      expect(input.tools.limits).toEqual({ toolRounds: 6, mcpCalls: 12 })
+      expect(input.tools.unsupportedToolsWarning).toBe(t.chat.githubModelUnsupported)
+      await expect(input.tools.toolClient.call(
+        "connector_github",
+        input.tools.turnId,
+        "call-1",
+        "repo_map",
+        { path: "src" },
+      )).resolves.toMatchObject({ content: "src/App.tsx" })
+      return assistantResult("Dépôt analysé")
+    })
+    const { result } = renderHook(() => useChat(modelSelection, runtimeWithConnector()))
+
+    await act(async () => expect(await result.current.send("conv-1", "Analyse le dépôt")).toBe(true))
+
+    expect(prepareConversationContextMock).toHaveBeenCalledWith(expect.objectContaining({
+      repoBinding: githubBinding,
+    }))
+    expect(connectorCallToolMock).toHaveBeenCalledWith(
+      githubBinding,
+      "repo_map",
+      { path: "src" },
+      expect.any(String),
+    )
+    expect(mcpCallToolMock).not.toHaveBeenCalled()
+  })
+
+  it("réutilise le routage GitHub et le même turnId sur une régénération", async () => {
+    const answeredRow = messageRow({ id: "assistant-github", role: "assistant", content: "Ancienne réponse" })
+    vi.mocked(messagesDb.listByConversation).mockResolvedValue([
+      messageRow({ id: "user-github", role: "user", content: "Question dépôt" }),
+      answeredRow,
+    ])
+    connectorCallToolMock.mockResolvedValueOnce({ text: "README", truncated: false })
+    runAssistantTurnMock.mockImplementationOnce(async (input) => {
+      if (!input.tools) throw new Error("Ce scénario exige les outils connecteur.")
+      expect(input.tools.limits).toEqual({ toolRounds: 6, mcpCalls: 12 })
+      await input.tools.toolClient.call(
+        "connector_github",
+        input.tools.turnId,
+        "call-retry",
+        "read_file",
+        { path: "README.md" },
+      )
+      return assistantResult("Régénérée avec GitHub")
+    })
+    const { result } = renderHook(() => useChat(modelSelection, runtimeWithConnector()))
+    await act(async () => result.current.load("conv-1"))
+
+    await act(async () => {
+      expect(await result.current.regenerateLast("conv-1", answeredRow.id)).toBe(true)
+    })
+
+    expect(connectorCallToolMock).toHaveBeenCalledWith(
+      githubBinding,
+      "read_file",
+      { path: "README.md" },
+      expect.any(String),
+    )
+    expect(prepareConversationContextMock).toHaveBeenCalledWith(expect.objectContaining({
+      repoBinding: githubBinding,
+    }))
+  })
+
+  it("interrompt MCP et GitHub avec le même turnId", async () => {
+    let activeTurnId = ""
+    runAssistantTurnMock.mockImplementationOnce(async (input) => {
+      if (!input.tools) throw new Error("Ce scénario exige les outils connecteur.")
+      activeTurnId = input.tools.turnId
+      await new Promise<void>((_resolve, reject) => {
+        input.signal.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")), { once: true })
+      })
+      return assistantResult("inatteignable")
+    })
+    const { result } = renderHook(() => useChat(modelSelection, runtimeWithConnector()))
+    const sending = actSend(result.current)
+    await waitFor(() => expect(result.current.busy).toBe(true))
+
+    act(() => result.current.interrupt())
+    await sending
+
+    expect(activeTurnId).not.toBe("")
+    expect(mcpCancelTurnMock).toHaveBeenCalledWith(activeTurnId)
+    expect(connectorCancelTurnMock).toHaveBeenCalledWith(activeTurnId)
+  })
+
   it("route un outil actif et expose l'approbation dans la bulle assistant", async () => {
     runAssistantTurnMock.mockImplementation(async (input) => {
       if (!input.tools) throw new Error("Ce scénario exige un catalogue d'outils.")

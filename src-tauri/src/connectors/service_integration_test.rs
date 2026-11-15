@@ -3,7 +3,7 @@
 
 use crate::connectors::github::GithubClient;
 use crate::connectors::service::ConnectorGithubService;
-use axum::{routing::get, Json, Router};
+use axum::{Json, Router, routing::get};
 use base64::Engine;
 use serde_json::json;
 use tokio::net::TcpListener;
@@ -23,7 +23,7 @@ async fn spawn_fake_github() -> (String, tokio::task::JoinHandle<()>) {
                     if idx > 120 { break; } // total 120 repos
                     repos.push(json!({
                         "full_name": format!("octocat/Repo-{}", idx),
-                        "private": idx % 3 == 0,
+                        "private": idx.is_multiple_of(3),
                         "default_branch": "main",
                         "updated_at": "2024-01-01T00:00:00Z"
                     }));
@@ -74,7 +74,7 @@ async fn spawn_fake_github() -> (String, tokio::task::JoinHandle<()>) {
             }))
             // Fichier binaire
             .route("/repos/octocat/Hello-World/contents/binary.dat", get(|| async {
-                let content = base64::engine::general_purpose::STANDARD.encode(&[0u8, 1, 2, 3, 255, 254, 0, 0, 0, 0]);
+                let content = base64::engine::general_purpose::STANDARD.encode([0u8, 1, 2, 3, 255, 254, 0, 0, 0, 0]);
                 Json(json!({
                     "content": content,
                     "encoding": "base64",
@@ -143,7 +143,10 @@ async fn test_service_list_repos_pagination() {
 
     // Page invalide
     let err = service.list_repos(0).await.unwrap_err();
-    assert!(matches!(err, crate::connectors::error::ConnectorError::InvalidArguments(_)));
+    assert!(matches!(
+        err,
+        crate::connectors::error::ConnectorError::InvalidArguments(_)
+    ));
 }
 
 #[tokio::test]
@@ -155,7 +158,10 @@ async fn test_service_list_branches() {
     // Configurer le token d'abord
     service.configure("fake-token".into()).await.unwrap();
 
-    let branches = service.list_branches("octocat".into(), "Hello-World".into()).await.unwrap();
+    let branches = service
+        .list_branches("octocat".into(), "Hello-World".into())
+        .await
+        .unwrap();
     assert_eq!(branches.len(), 3);
     assert!(branches.contains(&"main".to_string()));
     assert!(branches.contains(&"dev".to_string()));

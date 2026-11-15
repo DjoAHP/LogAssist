@@ -62,7 +62,7 @@ export function GithubConnectorDialog({ isOpen, onClose }: Props) {
     try {
       const res = await connectorGithub.status()
       setStatus(res)
-      setShowClassicWarning(res.configured && res.login !== null)
+      setShowClassicWarning(false)
     } catch {
       setStatus({ configured: false, login: null })
     }
@@ -77,19 +77,15 @@ export function GithubConnectorDialog({ isOpen, onClose }: Props) {
       setStatus(res)
       // connectedAs contient des balises <strong>, on veut le texte simple pour aria-live
       setLiveMessage(t.connectors.status.connected.replace("{login}", res.login))
-      setShowClassicWarning(true)
+      setShowClassicWarning(token.startsWith("ghp_"))
     } catch (err: unknown) {
-      let kind = "unknown"
-      let msg = String(err)
-      if (err && typeof err === "object") {
-        const e = err as { kind?: string; message?: string }
-        kind = e.kind ?? "unknown"
-        msg = e.message ?? String(err)
-      } else if (err instanceof Error) {
-        msg = err.message
-      }
-      const i18nKey = `connectors.errors.${kind}` as keyof typeof t.connectors.errors
-      const i18nMsg = t.connectors.errors[i18nKey] ?? msg
+      const kind = err && typeof err === "object" && "kind" in err && typeof err.kind === "string"
+        ? err.kind
+        : "unknown"
+      const i18nKey = kind as keyof typeof t.connectors.errors
+      const i18nMsg = Object.prototype.hasOwnProperty.call(t.connectors.errors, i18nKey)
+        ? t.connectors.errors[i18nKey]
+        : t.connectors.errors.unknown
       setLiveMessage(i18nMsg)
     } finally {
       setBusy(false)
@@ -123,8 +119,10 @@ export function GithubConnectorDialog({ isOpen, onClose }: Props) {
   if (!isOpen) return null
 
   // Texte d'état connecté avec interpolation
-  const connectedStatusText = status.configured && status.login
-    ? t.connectors.status.connected.replace("{login}", status.login)
+  const connectedStatusText = status.configured
+    ? status.login
+      ? t.connectors.status.connected.replace("{login}", status.login)
+      : t.connectors.status.connectedUnknown
     : ""
 
   // Texte avertissement jeton classique (sans éléments inline pour le test)
@@ -171,8 +169,8 @@ export function GithubConnectorDialog({ isOpen, onClose }: Props) {
             </TauriLink>
             {t.connectors.tokenHint.split("</strong>")[1] ?? ""}
           </p>
-          <p className="text-xs text-amber-600 dark:text-amber-400">
-            ⚠ {t.connectors.tokenWarning}
+          <p className="text-xs text-destructive">
+            {t.connectors.tokenWarning}
           </p>
         </div>
 
@@ -198,7 +196,7 @@ export function GithubConnectorDialog({ isOpen, onClose }: Props) {
         {/* Avertissement jeton classique - texte continu pour le test */}
         {showClassicWarning && status.configured && (
           <div
-            className="mb-3 p-2 rounded-md bg-amber-50 dark:bg-amber-900/30 border border-amber-200 dark:border-amber-800 text-amber-800 dark:text-amber-200 text-xs"
+            className="mb-3 rounded-md border border-[var(--brand-to)]/30 bg-[var(--brand-to)]/10 p-2 text-xs text-foreground"
             role="alert"
           >
             <span data-testid="classic-warning">{classicWarningText}</span>

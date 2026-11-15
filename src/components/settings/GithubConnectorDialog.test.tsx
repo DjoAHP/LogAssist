@@ -107,7 +107,7 @@ describe("GithubConnectorDialog", () => {
       login: null,
     })
     // L'erreur doit avoir la structure ConnectorErrorPayload
-    const authError = { kind: "auth", message: t.connectors.errors.auth }
+    const authError = { kind: "auth", message: "raw backend detail" }
     vi.mocked(connectorGithub.configure).mockRejectedValue(authError)
 
     render(<GithubConnectorDialog {...defaultProps} />)
@@ -140,6 +140,19 @@ describe("GithubConnectorDialog", () => {
 
     // Attendre que l'avertissement apparaisse
     await vi.waitFor(() => expect(screen.getByTestId("classic-warning")).toBeInTheDocument())
+  })
+
+  it("n’affiche pas l’avertissement pour un jeton fine-grained", async () => {
+    const { connectorGithub } = await import("@/lib/connectors/client")
+    vi.mocked(connectorGithub.status).mockResolvedValue({ configured: false, login: null })
+    vi.mocked(connectorGithub.configure).mockResolvedValue({ configured: true, login: "octocat" })
+    render(<GithubConnectorDialog {...defaultProps} />)
+
+    await userEvent.type(screen.getByLabelText(t.connectors.tokenLabel), "github_pat_fake_token_123")
+    await userEvent.click(screen.getByRole("button", { name: t.connectors.testAndSave }))
+
+    await vi.waitFor(() => expect(connectorGithub.configure).toHaveBeenCalled())
+    expect(screen.queryByTestId("classic-warning")).toBeNull()
   })
 
   it("confirme avant déconnexion avec dialogConfirm", async () => {

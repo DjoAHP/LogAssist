@@ -18,8 +18,10 @@ import type {
 } from "./types"
 import type { WebIntent } from "./webIntent"
 
-const MAX_TOOL_ROUNDS = 2
-const MAX_MCP_CALLS = 4
+const DEFAULT_TOOL_ROUNDS = 2
+const DEFAULT_MCP_CALLS = 4
+const MAX_TOOL_ROUNDS = 6
+const MAX_TOOL_CALLS = 12
 const MAX_INJECTED_CHARS = 120_000
 const TOOLS_UNSUPPORTED_WARNING =
   "Le modèle actif ne prend pas en charge les outils ; réponse produite sans MCP."
@@ -47,8 +49,15 @@ export interface ToolAgentInput {
   turnId: string
   compatibilityKey: string
   unsupportedTools: Set<string>
+  limits?: ToolAgentLimits
+  unsupportedToolsWarning?: string
   approve(request: McpToolApprovalRequest): Promise<"allow" | "deny">
   onWebStatus?(status: WebStatus | undefined): void
+}
+
+export interface ToolAgentLimits {
+  toolRounds: number
+  mcpCalls: number
 }
 
 /** Média du tour : payload validé augmenté du libellé d'outil (alt/aria). */
@@ -212,6 +221,13 @@ export async function runToolAgent(input: ToolAgentInput): Promise<ToolAgentResu
   let callCount = 0
   let injectedChars = 0
   let warning: string | undefined
+  const toolRoundLimit = Number.isSafeInteger(input.limits?.toolRounds)
+    ? Math.min(MAX_TOOL_ROUNDS, Math.max(1, input.limits!.toolRounds))
+    : DEFAULT_TOOL_ROUNDS
+  const toolCallLimit = Number.isSafeInteger(input.limits?.mcpCalls)
+    ? Math.min(MAX_TOOL_CALLS, Math.max(1, input.limits!.mcpCalls))
+    : DEFAULT_MCP_CALLS
+  const unsupportedToolsWarning = input.unsupportedToolsWarning ?? TOOLS_UNSUPPORTED_WARNING
 
   const throwIfAborted = () => {
     if (input.signal.aborted) throw input.signal.reason ?? new DOMException("Interrompu", "AbortError")
@@ -237,10 +253,10 @@ export async function runToolAgent(input: ToolAgentInput): Promise<ToolAgentResu
   }
 
   if (input.tools.length === 0) return runWithoutTools()
-  if (input.unsupportedTools.has(input.compatibilityKey)) return runWithoutTools(TOOLS_UNSUPPORTED_WARNING)
+  if (input.unsupportedTools.has(input.compatibilityKey)) return runWithoutTools(unsupportedToolsWarning)
 
   try {
-    for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
+    for (let round = 0; round < toolRoundLimit; round++) {
       throwIfAborted()
       const offered = round === 0 ? firstRoundTools(input.tools, input.webIntent) : input.tools
       const choice = round === 0 ? firstRoundChoice(offered, input.webIntent) : "auto"
@@ -272,8 +288,8 @@ export async function runToolAgent(input: ToolAgentInput): Promise<ToolAgentResu
           additionalMessages.push(toolMessage(call.id, "Outil refusé : alias inconnu."))
           continue
         }
-        if (callCount >= MAX_MCP_CALLS) {
-          additionalMessages.push(toolMessage(call.id, "Limite de quatre appels MCP atteinte."))
+        if (callCount >= toolCallLimit) {
+          additionalMessages.push(toolMessage(call.id, `Limite de ${toolCallLimit} appels d’outils atteinte.`))
           continue
         }
         if (tool.approvalMode === "confirm") {
@@ -337,6 +353,6 @@ export async function runToolAgent(input: ToolAgentInput): Promise<ToolAgentResu
   } catch (error) {
     if (!isToolsUnsupported(error)) throw error
     input.unsupportedTools.add(input.compatibilityKey)
-    return runWithoutTools(TOOLS_UNSUPPORTED_WARNING)
+    return runWithoutTools(unsupportedToolsWarning)
   }
 }

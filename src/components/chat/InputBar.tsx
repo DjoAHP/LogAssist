@@ -238,11 +238,11 @@ export function InputBar({
   }, [submit])
 
   // Compute GitHub button className to avoid parser issues with complex template literal in JSX
-  const githubButtonClassName = githubAttached
-    ? "flex h-[38px] items-center gap-1.5 rounded-md border px-3 transition-colors disabled:cursor-not-allowed disabled:opacity-40 border-[var(--brand-to)] bg-[var(--brand-to)]/10 text-[var(--brand-to)]"
-    : githubAvailable
-      ? "flex h-[38px] items-center gap-1.5 rounded-md border px-3 transition-colors disabled:cursor-not-allowed disabled:opacity-40 border-border bg-background hover:bg-foreground/5"
-      : "flex h-[38px] items-center gap-1.5 rounded-md border px-3 transition-colors disabled:cursor-not-allowed disabled:opacity-40 border-border bg-background opacity-50"
+  const githubButtonClassName = !githubAvailable
+    ? "flex h-[38px] items-center gap-1.5 rounded-md border px-3 transition-colors disabled:cursor-not-allowed disabled:opacity-40 border-border bg-background opacity-50"
+    : githubAttached
+      ? "flex h-[38px] items-center gap-1.5 rounded-md border px-3 transition-colors disabled:cursor-not-allowed disabled:opacity-40 border-[var(--brand-to)] bg-[var(--brand-to)]/10 text-[var(--brand-to)]"
+      : "flex h-[38px] items-center gap-1.5 rounded-md border px-3 transition-colors disabled:cursor-not-allowed disabled:opacity-40 border-border bg-background hover:bg-foreground/5"
 
   // Compute Web button className
   const webButtonClassName = forceWeb
@@ -345,12 +345,12 @@ export function InputBar({
           <button
             type="button"
             aria-label={t.connectors.github}
-            title={githubAttached
-              ? t.connectors.repoPicker.title
-              : githubAvailable
-              ? t.connectors.github
-              : t.connectors.errors.not_configured}
-            disabled={disabled || (!githubAvailable && !githubAttached) || busy}
+            title={!githubAvailable
+              ? t.connectors.errors.not_configured
+              : githubAttached
+                ? t.connectors.repoPicker.title
+                : t.connectors.github}
+            disabled={disabled || !githubAvailable || busy}
             onClick={onOpenRepoPicker}
             className={githubButtonClassName}
           >
@@ -363,6 +363,7 @@ export function InputBar({
               ref={githubAttached.ref}
               onDetach={onDetachRepo ?? (() => {})}
               disabled={disabled || busy}
+              available={githubAvailable}
             />
           )}
           <button

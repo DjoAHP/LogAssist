@@ -43,6 +43,18 @@ describe("ConnectorsPanel", () => {
     expect(badge).toHaveClass("text-green-600")
   })
 
+  it("n’affiche pas un @ vide pour une ancienne enveloppe sans login", () => {
+    render(
+      <ConnectorsPanel
+        statuses={{ github: { configured: true, login: null } }}
+        onSelect={vi.fn()}
+      />,
+    )
+
+    const badge = screen.getByTestId("connector-status")
+    expect(badge.textContent).toBe("Connecté")
+  })
+
   it("appelle onSelect au clic", async () => {
     const onSelect = vi.fn()
     render(

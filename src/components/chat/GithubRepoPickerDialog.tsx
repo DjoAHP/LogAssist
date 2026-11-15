@@ -4,12 +4,29 @@ import { useEffect, useRef, useState } from "react"
 import { X, Loader2, ChevronDown, Lock, ChevronRight } from "lucide-react"
 import { t } from "@/i18n/fr"
 import { connectorGithub, type GithubRepoSummary } from "@/lib/connectors/client"
+import { logger } from "@/lib/logger"
 import { TauriLink } from "./TauriLink"
 
 interface GithubRepoPickerDialogProps {
   isOpen: boolean
   onClose: () => void
   onAttach: (binding: { owner: string; name: string; ref: string }) => void
+}
+
+type ConnectorErrorKey = keyof typeof t.connectors.errors
+
+function connectorErrorKind(error: unknown): ConnectorErrorKey {
+  if (typeof error === "object" && error !== null && "kind" in error) {
+    const kind = (error as { kind?: unknown }).kind
+    if (typeof kind === "string" && kind in t.connectors.errors) {
+      return kind as ConnectorErrorKey
+    }
+  }
+  return "unknown"
+}
+
+function connectorErrorMessage(kind: ConnectorErrorKey): string {
+  return t.connectors.errors[kind]
 }
 
 export function GithubRepoPickerDialog({ isOpen, onClose, onAttach }: GithubRepoPickerDialogProps) {
@@ -23,6 +40,7 @@ export function GithubRepoPickerDialog({ isOpen, onClose, onAttach }: GithubRepo
   const [branches, setBranches] = useState<Record<string, string[]>>({})
   const [selectedRepo, setSelectedRepo] = useState<GithubRepoSummary | null>(null)
   const [selectedBranch, setSelectedBranch] = useState<string>("main")
+  const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const previousActiveElement = useRef<HTMLElement | null>(null)
   const searchInputRef = useRef<HTMLInputElement>(null)
 
@@ -37,6 +55,7 @@ export function GithubRepoPickerDialog({ isOpen, onClose, onAttach }: GithubRepo
     setHasMore(true)
     setSelectedRepo(null)
     setSelectedBranch("main")
+    setErrorMessage(null)
     loadRepos()
   }, [isOpen])
 
@@ -65,11 +84,12 @@ export function GithubRepoPickerDialog({ isOpen, onClose, onAttach }: GithubRepo
   // Filtrage client-side
   useEffect(() => {
     const q = searchQuery.toLowerCase()
-    setFilteredRepos(
-      repos.filter((r) => r.fullName.toLowerCase().includes(q))
+    const nextFilteredRepos = repos.filter((repo) =>
+      repo.fullName.toLowerCase().includes(q),
     )
+    setFilteredRepos(nextFilteredRepos)
     // Réinitialiser la sélection si le repo filtré n'est plus visible
-    if (selectedRepo && !filteredRepos.find((r) => r.fullName === selectedRepo.fullName)) {
+    if (selectedRepo && !nextFilteredRepos.some((repo) => repo.fullName === selectedRepo.fullName)) {
       setSelectedRepo(null)
       setSelectedBranch("main")
     }
@@ -77,6 +97,7 @@ export function GithubRepoPickerDialog({ isOpen, onClose, onAttach }: GithubRepo
 
   const loadRepos = async (pageNum = 1) => {
     setLoading(true)
+    setErrorMessage(null)
     try {
       const res = await connectorGithub.listRepos(pageNum)
       if (pageNum === 1) {
@@ -87,7 +108,9 @@ export function GithubRepoPickerDialog({ isOpen, onClose, onAttach }: GithubRepo
       setHasMore(res.hasMore)
       setPage(res.page)
     } catch (err) {
-      console.error("Failed to load repos:", err)
+      const kind = connectorErrorKind(err)
+      setErrorMessage(connectorErrorMessage(kind))
+      logger.error({ context: "github.repo_picker.list", kind })
     } finally {
       setLoading(false)
     }
@@ -103,7 +126,9 @@ export function GithubRepoPickerDialog({ isOpen, onClose, onAttach }: GithubRepo
         setSelectedBranch(repo.defaultBranch ?? "main")
       }
     } catch (err) {
-      console.error("Failed to load branches:", err)
+      const kind = connectorErrorKind(err)
+      setErrorMessage(connectorErrorMessage(kind))
+      logger.error({ context: "github.repo_picker.branches", kind })
     } finally {
       setLoadingBranches(null)
     }
@@ -166,6 +191,12 @@ export function GithubRepoPickerDialog({ isOpen, onClose, onAttach }: GithubRepo
             </div>
           </div>
 
+          {errorMessage && (
+            <p role="alert" className="mx-4 mt-3 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+              {errorMessage}
+            </p>
+          )}
+
           {/* Liste des dépôts */}
           <div className="flex-1 overflow-y-auto p-4 space-y-2">
             {filteredRepos.length === 0 && !loading ? (
@@ -191,7 +222,7 @@ export function GithubRepoPickerDialog({ isOpen, onClose, onAttach }: GithubRepo
                     <div className="flex items-center gap-2 min-w-0 flex-1">
                       <span className="font-medium truncate">{repo.fullName}</span>
                       {repo.isPrivate && (
-                        <Lock className="size-3.5 text-amber-600 dark:text-amber-400" aria-label={t.connectors.repoPicker.private} />
+                        <Lock className="size-3.5 text-muted-foreground" aria-label={t.connectors.repoPicker.private} />
                       )}
                     </div>
                     <ChevronRight className="size-4 text-muted-foreground shrink-0" aria-hidden="true" />
@@ -258,7 +289,7 @@ export function GithubRepoPickerDialog({ isOpen, onClose, onAttach }: GithubRepo
           {/* Liens d'aide */}
           <div className="border-t border-border p-4 text-xs text-muted-foreground space-y-1">
             <p>{t.connectors.tokenHint.split("<strong>")[0]} <TauriLink href="https://github.com/settings/personal-access-tokens/new" className="text-brand-to hover:underline">{t.connectors.tokenHint.split("<strong>")[1]?.split("</strong>")[0] ?? "fine-grained"}</TauriLink> {t.connectors.tokenHint.split("</strong>")[1] ?? ""}</p>
-            <p className="text-amber-600 dark:text-amber-400">⚠ {t.connectors.tokenWarning}</p>
+            <p className="text-destructive">{t.connectors.tokenWarning}</p>
           </div>
         </div>
       </div>

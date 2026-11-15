@@ -1,6 +1,12 @@
 import { describe, expect, it, vi } from "vitest"
 
-import { buildToolDefinitions, firstRoundChoice, firstRoundTools, runToolAgent } from "@/lib/mcp/toolAgent"
+import {
+  buildToolDefinitions,
+  firstRoundChoice,
+  firstRoundTools,
+  runToolAgent,
+  type ToolAgentInput,
+} from "@/lib/mcp/toolAgent"
 import type { McpAgentTool, McpToolResult, WebSource } from "@/lib/mcp/types"
 import type { IProvider } from "@/lib/ai/openai-compat"
 import type {
@@ -279,7 +285,7 @@ function createHarness(options: {
     estimateOutput: vi.fn().mockReturnValue(10),
     dispose: vi.fn(),
   } as unknown as ContextSession
-  const input = {
+  const input: ToolAgentInput & { request: ChatRequest } = {
     provider: { runTurn } as unknown as IProvider,
     toolClient: { call: callTool },
     tools: options.tools,
@@ -538,6 +544,31 @@ describe("runToolAgent", () => {
     expect(harness.context.prepareRound).toHaveBeenCalledTimes(3)
   })
 
+  it("accepte six tours et douze appels pour un connecteur attaché", async () => {
+    const calls = (start: number) => [0, 1, 2].map((offset) =>
+      call(`c${start + offset}`, "tinyfish__search", { query: "Tauri" }),
+    )
+    const harness = createHarness({
+      tools: [tinyfishTool("search")],
+      turns: [
+        turn("", calls(1)),
+        turn("", calls(4)),
+        turn("", calls(7)),
+        turn("", calls(10)),
+        turn("", calls(13)),
+        turn("", calls(16)),
+        turn("Finale"),
+      ],
+    })
+    harness.input.limits = { toolRounds: 6, mcpCalls: 12 }
+    harness.callTool.mockResolvedValue(result("source"))
+
+    await expect(runToolAgent(harness.input)).resolves.toMatchObject({ text: "Finale" })
+    expect(harness.callTool).toHaveBeenCalledTimes(12)
+    expect(harness.runTurn).toHaveBeenCalledTimes(7)
+    expect(harness.runTurn.mock.calls[6][3]).toEqual({ toolChoice: "none" })
+  })
+
   it("mémorise l'incompatibilité et ne relance qu'une fois sans outils", async () => {
     const unsupported = new ApiError("unknown", "Erreur", "tools are not supported")
     const harness = createHarness({
@@ -549,6 +580,23 @@ describe("runToolAgent", () => {
     expect(harness.input.unsupportedTools.has(harness.input.compatibilityKey)).toBe(true)
     expect(harness.runTurn).toHaveBeenCalledTimes(2)
     expect(harness.context.prepareRound).toHaveBeenCalledTimes(2)
+  })
+
+  it("signale explicitement qu’un dépôt attaché est inaccessible sans tools", async () => {
+    const unsupported = new ApiError("unknown", "Erreur", "tools are not supported")
+    const harness = createHarness({
+      tools: [{
+        ...genericTool("connector_github", "repo_map", "connector_github__repo_map", "auto"),
+        kind: "connector",
+      }],
+      turns: [unsupported, turn("Sans dépôt")],
+    })
+    harness.input.unsupportedToolsWarning = "Le dépôt GitHub attaché est inaccessible avec ce modèle."
+
+    await expect(runToolAgent(harness.input)).resolves.toMatchObject({
+      text: "Sans dépôt",
+      warning: "Le dépôt GitHub attaché est inaccessible avec ce modèle.",
+    })
   })
 
   it("propage AbortError sans appeler un outil", async () => {

@@ -1,22 +1,22 @@
 // Service connecteur GitHub — état Tauri, registre d'annulation par turn_id.
 
 use super::error::ConnectorError;
-use super::github::{GithubClient, RepoSummary, TreeEntry, SearchCodeItem};
-use super::validation::{validate_owner, validate_name, validate_ref, validate_path};
-use crate::connectors::validation::validate_query;
+use super::github::{GithubClient, LineRange, RepoSummary};
+use super::validation::{validate_name, validate_owner};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use tokio::sync::oneshot;
 
 const GITHUB_SECRET_REF: &str = "logassist/connectors/github";
-const GITHUB_LOGIN_KEY: &str = "connectors.github.login";
 
 // ---- Enveloppe versionnée du secret ----
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 struct SecretEnvelope {
     version: u32,
     token: String,
+    #[serde(default)]
+    login: Option<String>,
 }
 
 // ---- DTOs commandes ----
@@ -68,8 +68,7 @@ pub struct ConnectorGithubService {
 #[cfg(test)]
 #[derive(Default)]
 struct TestStorage {
-    token: Option<String>,
-    login: Option<String>,
+    credentials: Option<SecretEnvelope>,
 }
 
 impl ConnectorGithubService {
@@ -102,55 +101,64 @@ impl ConnectorGithubService {
         }
     }
 
-    // Lecture du secret (Credential Manager) — appelle keyring directement pour éviter les problèmes d'inférence de type.
-    fn read_token(&self) -> Result<Option<String>, ConnectorError> {
+    // Le login est stocké dans la même enveloppe Credential Manager que le
+    // jeton. SQLite ne contient ainsi ni secret ni état désynchronisé.
+    fn read_credentials(&self) -> Result<Option<SecretEnvelope>, ConnectorError> {
         #[cfg(test)]
         if let Some(storage) = &self.test_storage {
             let storage = storage.lock().unwrap();
-            return Ok(storage.token.clone());
+            return Ok(storage.credentials.clone());
         }
         use keyring::Entry;
         const SERVICE: &str = "LogAssist";
-        let entry = Entry::new(SERVICE, GITHUB_SECRET_REF).map_err(|e| ConnectorError::Unknown(e.to_string()))?;
+        let entry = Entry::new(SERVICE, GITHUB_SECRET_REF)
+            .map_err(|e| ConnectorError::Unknown(e.to_string()))?;
         match entry.get_password() {
             Ok(val) => {
                 let env: SecretEnvelope = serde_json::from_str(&val)
                     .map_err(|e| ConnectorError::Unknown(format!("secret invalide: {e}")))?;
-                Ok(Some(env.token))
+                Ok(Some(env))
             }
             Err(keyring::Error::NoEntry) => Ok(None),
             Err(e) => Err(ConnectorError::Unknown(format!("lecture secret: {e}"))),
         }
     }
 
-    // Écriture du secret (Credential Manager)
-    fn write_token(&self, token: &str) -> Result<(), ConnectorError> {
+    fn write_credentials(&self, token: &str, login: &str) -> Result<(), ConnectorError> {
+        let envelope = SecretEnvelope {
+            version: 1,
+            token: token.to_string(),
+            login: Some(login.to_string()),
+        };
         #[cfg(test)]
         if let Some(storage) = &self.test_storage {
             let mut storage = storage.lock().unwrap();
-            storage.token = Some(token.to_string());
+            storage.credentials = Some(envelope);
             return Ok(());
         }
         use keyring::Entry;
         const SERVICE: &str = "LogAssist";
-        let env = SecretEnvelope { version: 1, token: token.to_string() };
-        let json = serde_json::to_string(&env).unwrap();
-        let entry = Entry::new(SERVICE, GITHUB_SECRET_REF).map_err(|e| ConnectorError::Unknown(e.to_string()))?;
-        entry.set_password(&json).map_err(|e| ConnectorError::Unknown(format!("écriture secret: {e}")))?;
+        let json = serde_json::to_string(&envelope)
+            .map_err(|e| ConnectorError::Unknown(format!("encodage secret: {e}")))?;
+        let entry = Entry::new(SERVICE, GITHUB_SECRET_REF)
+            .map_err(|e| ConnectorError::Unknown(e.to_string()))?;
+        entry
+            .set_password(&json)
+            .map_err(|e| ConnectorError::Unknown(format!("écriture secret: {e}")))?;
         Ok(())
     }
 
-    // Suppression du secret
-    fn delete_token(&self) -> Result<(), ConnectorError> {
+    fn delete_credentials(&self) -> Result<(), ConnectorError> {
         #[cfg(test)]
         if let Some(storage) = &self.test_storage {
             let mut storage = storage.lock().unwrap();
-            storage.token = None;
+            storage.credentials = None;
             return Ok(());
         }
         use keyring::Entry;
         const SERVICE: &str = "LogAssist";
-        let entry = Entry::new(SERVICE, GITHUB_SECRET_REF).map_err(|e| ConnectorError::Unknown(e.to_string()))?;
+        let entry = Entry::new(SERVICE, GITHUB_SECRET_REF)
+            .map_err(|e| ConnectorError::Unknown(e.to_string()))?;
         match entry.delete_credential() {
             Ok(()) => Ok(()),
             Err(keyring::Error::NoEntry) => Ok(()), // idempotent
@@ -158,41 +166,10 @@ impl ConnectorGithubService {
         }
     }
 
-    // Lecture du login stocké (table settings)
-    async fn read_login(&self) -> Result<Option<String>, ConnectorError> {
-        #[cfg(test)]
-        if let Some(storage) = &self.test_storage {
-            let storage = storage.lock().unwrap();
-            return Ok(storage.login.clone());
-        }
-        // Utiliser le pool SQL via tauri_plugin_sql
-        // Pour l'instant, on passe par une commande Rust existante si dispo
-        // TODO: implémenter la lecture directe via le pool SQLite
-        Ok(None)
-    }
-
-    // Écriture du login
-    async fn write_login(&self, login: &str) -> Result<(), ConnectorError> {
-        #[cfg(test)]
-        if let Some(storage) = &self.test_storage {
-            let mut storage = storage.lock().unwrap();
-            storage.login = Some(login.to_string());
-            return Ok(());
-        }
-        // TODO: implémenter via pool SQLite
-        Ok(())
-    }
-
-    // Suppression du login
-    async fn delete_login(&self) -> Result<(), ConnectorError> {
-        #[cfg(test)]
-        if let Some(storage) = &self.test_storage {
-            let mut storage = storage.lock().unwrap();
-            storage.login = None;
-            return Ok(());
-        }
-        // TODO: implémenter via pool SQLite
-        Ok(())
+    fn require_token(&self) -> Result<String, ConnectorError> {
+        self.read_credentials()?
+            .map(|credentials| credentials.token)
+            .ok_or_else(|| ConnectorError::NotConfigured("GitHub non configuré".into()))
     }
 
     // Enregistrement d'un turn pour annulation
@@ -228,43 +205,57 @@ impl ConnectorGithubService {
         if token.len() > 255 {
             return Err(ConnectorError::InvalidArguments("token trop long".into()));
         }
+        if !token.bytes().all(|byte| byte.is_ascii_graphic()) {
+            return Err(ConnectorError::InvalidArguments(
+                "token contient des caractères non autorisés".into(),
+            ));
+        }
         let login = self.github.verify_token(&token).await?;
-        self.write_token(&token)?;
-        self.write_login(&login).await?;
-        Ok(ConfigureResult { configured: true, login })
+        self.write_credentials(&token, &login)?;
+        Ok(ConfigureResult {
+            configured: true,
+            login,
+        })
     }
 
     /// Statut du connecteur (sans jamais retourner le token).
     pub async fn status(&self) -> Result<StatusResult, ConnectorError> {
-        let token = self.read_token()?;
-        let login = self.read_login().await?;
+        let credentials = self.read_credentials()?;
         Ok(StatusResult {
-            configured: token.is_some(),
-            login,
+            configured: credentials.is_some(),
+            login: credentials.and_then(|value| value.login),
         })
     }
 
     /// Supprime le token et le login.
     pub async fn delete(&self) -> Result<(), ConnectorError> {
-        self.delete_token()?;
-        self.delete_login().await?;
-        Ok(())
+        self.delete_credentials()
     }
 
     /// Liste les dépôts (page 1-50).
     pub async fn list_repos(&self, page: u32) -> Result<ListReposResult, ConnectorError> {
-        let token = self.read_token()?.ok_or(ConnectorError::NotConfigured("GitHub non configuré".into()))?;
+        let token = self.require_token()?;
         if page == 0 || page > 50 {
-            return Err(ConnectorError::InvalidArguments("page invalide (1-50)".into()));
+            return Err(ConnectorError::InvalidArguments(
+                "page invalide (1-50)".into(),
+            ));
         }
         let repos = self.github.list_repos(&token, page).await?;
         let has_more = repos.len() == 50;
-        Ok(ListReposResult { repos, page, has_more })
+        Ok(ListReposResult {
+            repos,
+            page,
+            has_more,
+        })
     }
 
     /// Liste les branches d'un dépôt (max 100).
-    pub async fn list_branches(&self, owner: String, name: String) -> Result<Vec<String>, ConnectorError> {
-        let token = self.read_token()?.ok_or(ConnectorError::NotConfigured("GitHub non configuré".into()))?;
+    pub async fn list_branches(
+        &self,
+        owner: String,
+        name: String,
+    ) -> Result<Vec<String>, ConnectorError> {
+        let token = self.require_token()?;
         validate_owner(&owner).map_err(|e| ConnectorError::InvalidArguments(e.to_string()))?;
         validate_name(&name).map_err(|e| ConnectorError::InvalidArguments(e.to_string()))?;
         let branches = self.github.list_branches(&token, &owner, &name).await?;
@@ -273,7 +264,7 @@ impl ConnectorGithubService {
 
     /// Appelle un outil (repo_map, read_file, search_code) avec annulation par turn_id.
     pub async fn call_tool(&self, args: CallToolArgs) -> Result<CallToolResult, ConnectorError> {
-        let token = self.read_token()?.ok_or(ConnectorError::NotConfigured("GitHub non configuré".into()))?;
+        let token = self.require_token()?;
 
         let owner = args.owner;
         let name = args.name;
@@ -304,7 +295,20 @@ impl ConnectorGithubService {
                         let path = tool_args.get("path").and_then(|v| v.as_str()).ok_or(ConnectorError::InvalidArguments("path requis".into()))?;
                         let start_line = tool_args.get("start_line").and_then(|v| v.as_u64()).map(|v| v as usize);
                         let end_line = tool_args.get("end_line").and_then(|v| v.as_u64()).map(|v| v as usize);
-                        let (content, truncated) = self.github.get_file_content(&token, &owner, &name, path, &ref_, start_line, end_line).await?;
+                        let (content, truncated) = self
+                            .github
+                            .get_file_content(
+                                &token,
+                                &owner,
+                                &name,
+                                path,
+                                &ref_,
+                                LineRange {
+                                    start: start_line,
+                                    end: end_line,
+                                },
+                            )
+                            .await?;
                         Ok(CallToolResult { text: content, truncated })
                     }
                     "search_code" => {
@@ -329,10 +333,47 @@ impl ConnectorGithubService {
     }
 }
 
+impl Default for ConnectorGithubService {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::connectors::github::GithubClient;
+
+    #[test]
+    fn secret_envelope_accepts_legacy_values_without_login() {
+        let envelope: SecretEnvelope =
+            serde_json::from_str(r#"{"version":1,"token":"github_pat_test"}"#).unwrap();
+
+        assert_eq!(envelope.token, "github_pat_test");
+        assert_eq!(envelope.login, None);
+    }
+
+    #[test]
+    fn secret_envelope_round_trip_keeps_login_with_token() {
+        let serialized = serde_json::to_string(&SecretEnvelope {
+            version: 1,
+            token: "github_pat_test".to_string(),
+            login: Some("octocat".to_string()),
+        })
+        .unwrap();
+        let envelope: SecretEnvelope = serde_json::from_str(&serialized).unwrap();
+
+        assert_eq!(envelope.token, "github_pat_test");
+        assert_eq!(envelope.login.as_deref(), Some("octocat"));
+    }
+
+    #[tokio::test]
+    async fn configure_rejects_control_characters_before_building_headers() {
+        let service = ConnectorGithubService::for_test_default();
+
+        let result = service.configure("github_pat_test\r\nInjected: value".into()).await;
+
+        assert!(matches!(result, Err(ConnectorError::InvalidArguments(_))));
+    }
 
     #[tokio::test]
     async fn test_service_register_cancel() {

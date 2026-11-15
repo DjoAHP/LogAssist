@@ -28,7 +28,7 @@ export interface CallToolArgs {
   ref_: string | null
   tool: string
   args: Record<string, unknown>
-  turnId: string
+  turn_id: string
 }
 
 export interface CallToolResult {
@@ -40,6 +40,19 @@ export interface ListReposResult {
   repos: GithubRepoSummary[]
   page: number
   hasMore: boolean
+}
+
+interface GithubRepoSummaryWire {
+  full_name: string
+  private: boolean
+  default_branch: string | null
+  updated_at: string | null
+}
+
+interface ListReposResultWire {
+  repos: GithubRepoSummaryWire[]
+  page: number
+  has_more: boolean
 }
 
 export interface ConfigureResult {
@@ -94,7 +107,17 @@ export const connectorGithub = {
   /** Liste les dépôts (page 1-50). */
   async listRepos(page: number): Promise<ListReposResult> {
     try {
-      return await invoke("connector_github_list_repos", { page })
+      const result = await invoke<ListReposResultWire>("connector_github_list_repos", { page })
+      return {
+        repos: result.repos.map((repo) => ({
+          fullName: repo.full_name,
+          isPrivate: repo.private,
+          defaultBranch: repo.default_branch,
+          updatedAt: repo.updated_at,
+        })),
+        page: result.page,
+        hasMore: result.has_more,
+      }
     } catch (err) {
       throw toError(err)
     }
@@ -117,11 +140,16 @@ export const connectorGithub = {
     turnId: string
   ): Promise<CallToolResult> {
     try {
-      return await invoke("connector_github_call_tool", {
-        binding,
+      const callArgs: CallToolArgs = {
+        owner: binding.owner,
+        name: binding.name,
+        ref_: binding.ref,
         tool,
         args,
-        turnId,
+        turn_id: turnId,
+      }
+      return await invoke("connector_github_call_tool", {
+        args: callArgs,
       })
     } catch (err) {
       throw toError(err)

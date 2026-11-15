@@ -18,6 +18,10 @@ vi.mock("./TauriLink", () => ({
   ),
 }))
 
+vi.mock("@/lib/logger", () => ({
+  logger: { error: vi.fn() },
+}))
+
 import { GithubRepoPickerDialog } from "./GithubRepoPickerDialog"
 
 const repos = [
@@ -57,6 +61,19 @@ describe("GithubRepoPickerDialog", () => {
 
     expect(screen.queryByText("acme/public-app")).toBeNull()
     expect(screen.getByText("acme/private-api")).toBeTruthy()
+  })
+
+  it("annule une sélection qui n’est plus visible après filtrage", async () => {
+    render(<GithubRepoPickerDialog isOpen onClose={vi.fn()} onAttach={vi.fn()} />)
+    await waitFor(() => expect(screen.getByText("acme/public-app")).toBeTruthy())
+    fireEvent.click(screen.getByText("acme/public-app"))
+    await waitFor(() => expect(screen.getByRole("button", { name: t.connectors.repoPicker.attach })).toBeTruthy())
+
+    fireEvent.change(screen.getByPlaceholderText(t.connectors.repoPicker.search), {
+      target: { value: "private" },
+    })
+
+    expect(screen.queryByRole("button", { name: t.connectors.repoPicker.attach })).toBeNull()
   })
 
   it("charge et ajoute la page suivante sans perdre la première", async () => {
@@ -106,5 +123,16 @@ describe("GithubRepoPickerDialog", () => {
     rerender(<GithubRepoPickerDialog isOpen={false} onClose={onClose} onAttach={vi.fn()} />)
     expect(document.activeElement).toBe(trigger)
     trigger.remove()
+  })
+
+  it("affiche une erreur sûre si GitHub est hors ligne", async () => {
+    mockConnectorGithub.listRepos.mockRejectedValueOnce({
+      kind: "offline",
+      message: "GitHub injoignable",
+    })
+
+    render(<GithubRepoPickerDialog isOpen onClose={vi.fn()} onAttach={vi.fn()} />)
+
+    await waitFor(() => expect(screen.getByRole("alert").textContent).toBe(t.connectors.errors.offline))
   })
 })

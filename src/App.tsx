@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import { Sun, Moon } from "lucide-react"
 import { BookIcon, McpIcon, ParaGenIcon, ReglageIcon } from "@/icons"
 import logoSrc from "@/assets/logo.png"
@@ -14,6 +14,7 @@ import { useMcpRuntime } from "@/hooks/useMcpRuntime"
 import { useConversationConnectors } from "@/hooks/useConversationConnectors"
 import { useGithubConnectorStatus } from "@/hooks/useGithubConnectorStatus"
 import type { GithubBinding } from "@/lib/connectors/client"
+import type { ConnectorRuntimeContext } from "@/lib/mcp/runtime"
 import { Sidebar } from "@/components/sidebar/Sidebar"
 import { ChatView } from "@/components/chat/ChatView"
 import { InputBar } from "@/components/chat/InputBar"
@@ -46,19 +47,24 @@ function App() {
   // GitHub connector repo picker
   const [isRepoPickerOpen, setIsRepoPickerOpen] = useState(false)
 
-  const { snapshot: mcpRuntime, refresh: refreshMcpRuntime } = useMcpRuntime()
   const { status: githubStatus, refresh: refreshGithubStatus } = useGithubConnectorStatus()
   const githubConnector = useConversationConnectors(activeId)
   const rawGithubBinding = githubConnector.getBinding("github")
 
-  // Convert ConversationConnectorBinding to GithubBinding
-  const githubBinding: GithubBinding | null = rawGithubBinding
+  const githubBinding = useMemo<GithubBinding | null>(() => rawGithubBinding
     ? {
         owner: rawGithubBinding.resourceOwner,
         name: rawGithubBinding.resourceName,
         ref: rawGithubBinding.resourceRef,
       }
-    : null
+    : null, [rawGithubBinding])
+  const connectorRuntime = useMemo<ConnectorRuntimeContext>(() => ({
+    github: {
+      binding: githubBinding,
+      configured: githubStatus.configured,
+    },
+  }), [githubBinding, githubStatus.configured])
+  const { snapshot: mcpRuntime, refresh: refreshMcpRuntime } = useMcpRuntime(connectorRuntime)
 
   // Dark mode (défaut dark) — persisté dans localStorage
   const [isDark, setIsDark] = useState(() => {

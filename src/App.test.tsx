@@ -48,7 +48,7 @@ describe("bouton MCP du header", () => {
 describe("App — runtime MCP et galerie", () => {
   it("l'application transmet le snapshot MCP au chat et au modal", () => {
     const source = readFileSync(new URL("./App.tsx", import.meta.url), "utf8")
-    expect(source).toContain("useMcpRuntime()")
+    expect(source).toContain("useMcpRuntime(connectorRuntime)")
     expect(source).toContain("useChat(modelSelection, mcpRuntime)")
     expect(source).toContain("snapshot={mcpRuntime}")
   })
@@ -65,5 +65,12 @@ describe("App — runtime MCP et galerie", () => {
     expect(source).toContain("useGithubConnectorStatus()")
     expect(source).toContain("githubAvailable={githubStatus.configured}")
     expect(source).toContain("void refreshGithubStatus()")
+  })
+
+  it("alimente le runtime d’outils avec la liaison GitHub courante", () => {
+    const source = readFileSync(new URL("./App.tsx", import.meta.url), "utf8")
+    expect(source).toContain("const connectorRuntime")
+    expect(source).toContain("binding: githubBinding")
+    expect(source).toContain("configured: githubStatus.configured")
   })
 })

@@ -14,6 +14,7 @@ import { logger } from "@/lib/logger"
 import { buildSystemPrompt } from "@/lib/prompts/compose"
 import { loadPromptSettings, type PromptSettings } from "@/lib/prompts/store"
 import { loadEligibleKnowledge } from "./knowledgeSelection"
+import type { GithubBinding } from "@/lib/connectors/client"
 
 export interface PrepareConversationContextInput {
   conversationId: string
@@ -26,6 +27,7 @@ export interface PrepareConversationContextInput {
   contextWindowOverride: number | null
   maxOutputTokensOverride: number | null
   webEnabled: boolean
+  repoBinding?: GithubBinding | null
 }
 
 export interface PrepareConversationContextDeps {
@@ -96,6 +98,7 @@ export async function prepareConversationContext(
         general: promptSettings.general,
         profile: promptSettings.profile,
         webEnabled: input.webEnabled,
+        repoBinding: input.repoBinding,
       }),
       documents: knowledge.map((row) => ({
         id: row.id,

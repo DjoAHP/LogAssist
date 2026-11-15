@@ -13,6 +13,11 @@ import { images as imagesDb } from "@/lib/db/images"
 import { conversations } from "@/lib/db/conversations"
 import { secrets } from "@/lib/secrets/service"
 import { mcp } from "@/lib/mcp/client"
+import {
+  cancelConnectorTurn,
+  connectorToolLimits,
+  createCompositeToolClient,
+} from "@/lib/connectors/toolClient"
 import { resolveWebIntent } from "@/lib/mcp/webIntent"
 import type { McpRuntimeSnapshot } from "@/lib/mcp/runtime"
 import type {
@@ -109,6 +114,18 @@ const EMPTY_MCP_RUNTIME: McpRuntimeSnapshot = {
   activeTools: [],
   authStatuses: {},
   webAccess: { enabled: false, configured: false },
+  connectors: { github: { binding: null, configured: false } },
+}
+
+function withConnectorAvailabilityWarning(
+  result: AssistantTurnResult,
+  runtime: McpRuntimeSnapshot,
+): AssistantTurnResult {
+  if (!runtime.connectors.github.binding || runtime.connectors.github.configured) return result
+  return {
+    ...result,
+    warning: [result.warning, t.chat.githubUnavailable].filter(Boolean).join(" "),
+  }
 }
 
 function safeErrorMessage(error: unknown, exactSecrets: readonly string[] = []): string {
@@ -602,6 +619,7 @@ export function useChat(
             contextWindowOverride: modelSelection.contextWindowOverride,
             maxOutputTokensOverride: modelSelection.maxOutputTokensOverride,
             webEnabled: mcpRuntime.webAccess.enabled && mcpRuntime.webAccess.configured,
+            repoBinding: mcpRuntime.connectors.github.binding,
           })
 
           activeTurnIdRef.current = assistantId
@@ -609,11 +627,18 @@ export function useChat(
 
           const tools = mcpRuntime.activeTools.length > 0
             ? {
-                toolClient: {
-                  call: (serverId: string, turnId: string, callId: string, nativeName: string, arguments_: Record<string, unknown>) =>
-                    mcp.callTool(serverId, turnId, callId, nativeName, arguments_),
-                },
+                toolClient: createCompositeToolClient({
+                  github: mcpRuntime.connectors.github,
+                  mcpClient: {
+                    call: (serverId: string, turnId: string, callId: string, nativeName: string, arguments_: Record<string, unknown>) =>
+                      mcp.callTool(serverId, turnId, callId, nativeName, arguments_),
+                  },
+                }),
                 tools: mcpRuntime.activeTools,
+                limits: connectorToolLimits(mcpRuntime.connectors.github),
+                unsupportedToolsWarning: mcpRuntime.connectors.github.binding
+                  ? t.chat.githubModelUnsupported
+                  : undefined,
                 webIntent: resolveWebIntent(fullContent, options.forceWeb ?? false),
                 turnId: assistantId,
                 compatibilityKey: `${provider.id}/${modelId}`,
@@ -623,7 +648,7 @@ export function useChat(
               }
             : undefined
 
-          const result = await runAssistantTurn(
+          const rawResult = await runAssistantTurn(
             tools
               ? {
                   provider: apiProvider,
@@ -643,6 +668,7 @@ export function useChat(
                   signal: controller.signal,
                 }
           )
+          const result = withConnectorAvailabilityWarning(rawResult, mcpRuntime)
           if (controller.signal.aborted) throw controller.signal.reason
           accRef.current = result.text
           if (tools) {
@@ -759,6 +785,7 @@ export function useChat(
           contextWindowOverride: modelSelection.contextWindowOverride,
           maxOutputTokensOverride: modelSelection.maxOutputTokensOverride,
           webEnabled: mcpRuntime.webAccess.enabled && mcpRuntime.webAccess.configured,
+          repoBinding: mcpRuntime.connectors.github.binding,
         })
         const callbacks = {
           onFirstToken: () => { /* métrique remontée par le runner */ },
@@ -770,11 +797,18 @@ export function useChat(
         activeTurnIdRef.current = requestId
         const recoveryTools = mcpRuntime.activeTools.length > 0
           ? {
-              toolClient: {
-                call: (serverId: string, turnId: string, callId: string, nativeName: string, arguments_: Record<string, unknown>) =>
-                  mcp.callTool(serverId, turnId, callId, nativeName, arguments_),
-              },
+              toolClient: createCompositeToolClient({
+                github: mcpRuntime.connectors.github,
+                mcpClient: {
+                  call: (serverId: string, turnId: string, callId: string, nativeName: string, arguments_: Record<string, unknown>) =>
+                    mcp.callTool(serverId, turnId, callId, nativeName, arguments_),
+                },
+              }),
               tools: mcpRuntime.activeTools,
+              limits: connectorToolLimits(mcpRuntime.connectors.github),
+              unsupportedToolsWarning: mcpRuntime.connectors.github.binding
+                ? t.chat.githubModelUnsupported
+                : undefined,
               webIntent: resolveWebIntent(plan.triggerUserContent, false),
               turnId: requestId,
               compatibilityKey: `${provider.id}/${modelId}`,
@@ -783,7 +817,7 @@ export function useChat(
               onWebStatus: (webStatus: WebStatus | undefined) => upsertTarget({ webStatus }),
             }
           : undefined
-        const result = await runAssistantTurn(
+        const rawResult = await runAssistantTurn(
           recoveryTools
             ? {
                 provider: apiProvider,
@@ -803,6 +837,7 @@ export function useChat(
                 signal: controller.signal,
               }
         )
+        const result = withConnectorAvailabilityWarning(rawResult, mcpRuntime)
         if (controller.signal.aborted) throw controller.signal.reason
         const finalContent = result.text || recoveryAcc
         if (finalContent.trim() === "") throw new Error("Réponse vide du fournisseur")
@@ -916,9 +951,12 @@ export function useChat(
       void mcp.cancelTurn(turnId).catch((error) => {
         logger.error({ kind: "mcp_cancel", message: safeErrorMessage(error) })
       })
+      void cancelConnectorTurn(mcpRuntime.connectors.github, turnId).catch((error) => {
+        logger.error({ kind: "connector_cancel", message: safeErrorMessage(error) })
+      })
     }
     activeTurnIdRef.current = null
-  }, [])
+  }, [mcpRuntime.connectors.github])
   return {
     vm,
     busy,

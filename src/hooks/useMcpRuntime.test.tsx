@@ -7,11 +7,13 @@ const mockLoadMcpRuntime = vi.hoisted(() => vi.fn())
 
 vi.mock("@/lib/mcp/runtime", () => ({
   loadMcpRuntime: mockLoadMcpRuntime,
+  EMPTY_CONNECTOR_RUNTIME: { github: { binding: null, configured: false } },
   EMPTY_MCP_RUNTIME: {
     servers: [],
     activeTools: [],
     authStatuses: {},
     webAccess: { enabled: false, configured: false },
+    connectors: { github: { binding: null, configured: false } },
   },
   McpRuntimeSnapshot: {} as any,
 }))
@@ -30,6 +32,7 @@ beforeEach(() => {
     activeTools: [],
     authStatuses: {},
     webAccess: { enabled: false, configured: false },
+    connectors: { github: { binding: null, configured: false } },
   })
 })
 
@@ -48,6 +51,7 @@ describe("useMcpRuntime", () => {
       activeTools: [],
       authStatuses: {},
       webAccess: { enabled: false, configured: false },
+      connectors: { github: { binding: null, configured: false } },
     })
     expect(result.current.ready).toBe(false)
   })
@@ -58,18 +62,21 @@ describe("useMcpRuntime", () => {
       activeTools: [],
       authStatuses: {},
       webAccess: { enabled: false, configured: false },
+      connectors: { github: { binding: null, configured: false } },
     }
     const firstSnapshot = {
       servers: [{ name: "first" }],
       activeTools: [],
       authStatuses: {},
       webAccess: { enabled: false, configured: false },
+      connectors: { github: { binding: null, configured: false } },
     }
     const secondSnapshot = {
       servers: [{ name: "second" }],
       activeTools: [],
       authStatuses: {},
       webAccess: { enabled: false, configured: false },
+      connectors: { github: { binding: null, configured: false } },
     }
 
     // Le refresh initial se résout immédiatement
@@ -131,6 +138,7 @@ describe("useMcpRuntime", () => {
       activeTools: [],
       authStatuses: {},
       webAccess: { enabled: false, configured: false },
+      connectors: { github: { binding: null, configured: false } },
     })
     expect(result.current.ready).toBe(true)
 
@@ -141,5 +149,82 @@ describe("useMcpRuntime", () => {
         message: "MCP load failed",
       })
     )
+  })
+
+  it("recharge le runtime avec la liaison GitHub fournie", async () => {
+    const connectors = {
+      github: {
+        binding: { owner: "DjoAHP", name: "LogAssist", ref: "main" },
+        configured: true,
+      },
+    }
+    const snapshot = {
+      servers: [],
+      activeTools: [],
+      authStatuses: {},
+      webAccess: { enabled: false, configured: false },
+      connectors,
+    }
+    mockLoadMcpRuntime.mockResolvedValueOnce(snapshot)
+
+    const { result } = renderHook(() => useMcpRuntime(connectors))
+
+    await vi.waitFor(() => expect(result.current.ready).toBe(true))
+    expect(mockLoadMcpRuntime).toHaveBeenCalledWith(connectors)
+    expect(result.current.snapshot).toEqual(snapshot)
+  })
+
+  it("retire immédiatement les outils de l’ancienne liaison pendant un changement", async () => {
+    const connectorTool = {
+      serverId: "connector_github",
+      serverName: "GitHub",
+      nativeName: "repo_map",
+      llmName: "connector_github__repo_map",
+      inputSchema: { type: "object" },
+      approvalMode: "auto" as const,
+      kind: "connector" as const,
+    }
+    const contextA = {
+      github: {
+        binding: { owner: "acme", name: "repo-a", ref: "main" },
+        configured: true,
+      },
+    }
+    const contextB = {
+      github: {
+        binding: { owner: "acme", name: "repo-b", ref: "main" },
+        configured: true,
+      },
+    }
+    mockLoadMcpRuntime.mockResolvedValueOnce({
+      servers: [],
+      activeTools: [connectorTool],
+      authStatuses: {},
+      webAccess: { enabled: false, configured: false },
+      connectors: contextA,
+    })
+    let resolveSecond!: (value: unknown) => void
+    mockLoadMcpRuntime.mockReturnValueOnce(new Promise((resolve) => {
+      resolveSecond = resolve
+    }))
+    const { result, rerender } = renderHook(
+      ({ connectors }) => useMcpRuntime(connectors),
+      { initialProps: { connectors: contextA } },
+    )
+    await vi.waitFor(() => expect(result.current.ready).toBe(true))
+
+    rerender({ connectors: contextB })
+    expect(result.current.ready).toBe(false)
+    expect(result.current.snapshot.activeTools).toEqual([])
+    expect(result.current.snapshot.connectors).toEqual(contextB)
+
+    resolveSecond({
+      servers: [],
+      activeTools: [connectorTool],
+      authStatuses: {},
+      webAccess: { enabled: false, configured: false },
+      connectors: contextB,
+    })
+    await vi.waitFor(() => expect(result.current.ready).toBe(true))
   })
 })

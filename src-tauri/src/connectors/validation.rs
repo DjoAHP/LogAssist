@@ -3,7 +3,6 @@
 
 use once_cell::sync::Lazy;
 use regex::Regex;
-use std::borrow::Cow;
 use url::Url;
 
 #[derive(Debug, thiserror::Error)]
@@ -21,7 +20,8 @@ pub enum ValidationError {
 }
 
 // ---- Owner GitHub : ^[A-Za-z0-9][A-Za-z0-9-]{0,38}$ ----
-static OWNER_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"^[A-Za-z0-9][A-Za-z0-9-]{0,38}$").unwrap());
+static OWNER_RE: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"^[A-Za-z0-9][A-Za-z0-9-]{0,38}$").unwrap());
 
 pub fn validate_owner(owner: &str) -> Result<(), ValidationError> {
     if owner.is_empty() {
@@ -31,13 +31,16 @@ pub fn validate_owner(owner: &str) -> Result<(), ValidationError> {
         return Err(ValidationError::Owner("trop long (max 39)".into()));
     }
     if !OWNER_RE.is_match(owner) {
-        return Err(ValidationError::Owner("caractères non autorisés (alphanum + tiret, sans tiret initial)".into()));
+        return Err(ValidationError::Owner(
+            "caractères non autorisés (alphanum + tiret, sans tiret initial)".into(),
+        ));
     }
     Ok(())
 }
 
 // ---- Nom de dépôt : ^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$ (ne commence pas par . ni -) ----
-static NAME_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$").unwrap());
+static NAME_RE: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$").unwrap());
 
 pub fn validate_name(name: &str) -> Result<(), ValidationError> {
     if name.is_empty() {
@@ -47,7 +50,9 @@ pub fn validate_name(name: &str) -> Result<(), ValidationError> {
         return Err(ValidationError::Name("trop long (max 100)".into()));
     }
     if !NAME_RE.is_match(name) {
-        return Err(ValidationError::Name("caractères non autorisés ou commence par . / - / _".into()));
+        return Err(ValidationError::Name(
+            "caractères non autorisés ou commence par . / - / _".into(),
+        ));
     }
     // Interdire ".." et noms réservés
     if name == "." || name == ".." || name.contains("..") {
@@ -68,10 +73,28 @@ pub fn validate_ref(ref_: &str) -> Result<(), ValidationError> {
         return Err(ValidationError::Ref("contient '..'".into()));
     }
     if ref_.chars().any(|c| c.is_control()) {
-        return Err(ValidationError::Ref("contient des caractères de contrôle".into()));
+        return Err(ValidationError::Ref(
+            "contient des caractères de contrôle".into(),
+        ));
     }
     if ref_.starts_with('/') || ref_.ends_with('/') {
-        return Err(ValidationError::Ref("ne doit pas commencer ou finir par '/'".into()));
+        return Err(ValidationError::Ref(
+            "ne doit pas commencer ou finir par '/'".into(),
+        ));
+    }
+    if ref_.chars().any(|character| " ~^:?*[\\".contains(character)) {
+        return Err(ValidationError::Ref(
+            "contient des caractères interdits par Git".into(),
+        ));
+    }
+    if ref_.contains("//") || ref_.contains("@{") || ref_.ends_with('.') {
+        return Err(ValidationError::Ref("syntaxe de ref interdite".into()));
+    }
+    if ref_
+        .split('/')
+        .any(|segment| segment.starts_with('.') || segment.ends_with(".lock"))
+    {
+        return Err(ValidationError::Ref("segment de ref interdit".into()));
     }
     Ok(())
 }
@@ -88,12 +111,7 @@ const DENIED_EXACT_PATHS: &[&str] = &[
     "id_ecdsa",
 ];
 
-const DENIED_PREFIX_PATHS: &[&str] = &[
-    ".env.",
-    ".npmrc.",
-    ".pypirc.",
-    "credentials.",
-];
+const DENIED_PREFIX_PATHS: &[&str] = &[".env.", ".npmrc.", ".pypirc.", "credentials."];
 
 const DENIED_EXTS: &[&str] = &[".pem", ".key", ".p12", ".pfx"];
 
@@ -118,30 +136,40 @@ pub fn validate_path(path: &str) -> Result<(), ValidationError> {
     }
     // Rejeter espaces non encodés
     if path.contains(' ') {
-        return Err(ValidationError::Path("espace non encodé (utilisez %20)".into()));
+        return Err(ValidationError::Path(
+            "espace non encodé (utilisez %20)".into(),
+        ));
     }
     // Vérifier les segments encodés via Url (construction factice)
     let dummy = format!("https://example.com/{}", path);
     if Url::parse(&dummy).is_err() {
-        return Err(ValidationError::Path("segments non valides (encodage URL requis)".into()));
+        return Err(ValidationError::Path(
+            "segments non valides (encodage URL requis)".into(),
+        ));
     }
     // Fichiers sensibles (basename)
-    let basename = path.split('/').last().unwrap_or("");
+    let basename = path.split('/').next_back().unwrap_or("");
     let lower = basename.to_lowercase();
     // Correspondances exactes interdites
     if DENIED_EXACT_PATHS.iter().any(|d| lower == *d) {
-        return Err(ValidationError::Path("fichier refusé pour raisons de sécurité".into()));
+        return Err(ValidationError::Path(
+            "fichier refusé pour raisons de sécurité".into(),
+        ));
     }
     // Préfixes interdits (.env.local, .env.production, etc.) MAIS on autorise .env.example et .env.sample
     if DENIED_PREFIX_PATHS.iter().any(|d| lower.starts_with(d)) {
         // Exception pour les templates autorisés
         if !(lower == ".env.example" || lower == ".env.sample") {
-            return Err(ValidationError::Path("fichier refusé pour raisons de sécurité".into()));
+            return Err(ValidationError::Path(
+                "fichier refusé pour raisons de sécurité".into(),
+            ));
         }
     }
     // Extensions interdites
     if DENIED_EXTS.iter().any(|e| lower.ends_with(e)) {
-        return Err(ValidationError::Path("fichier refusé pour raisons de sécurité".into()));
+        return Err(ValidationError::Path(
+            "fichier refusé pour raisons de sécurité".into(),
+        ));
     }
     Ok(())
 }
@@ -149,13 +177,34 @@ pub fn validate_path(path: &str) -> Result<(), ValidationError> {
 // ---- Query recherche code : ≤256, au moins un terme hors qualificateur "mot:" ----
 // Qualificateurs GitHub Code Search reconnus (liste non exhaustive)
 const QUALIFIERS: &[&str] = &[
-    "repo", "language", "user", "org", "path", "filename", "extension", "in", "size",
-    "created", "pushed", "archived", "mirror", "fork", "visibility", "license", "topic",
-    "stars", "forks", "followers", "repos", "location",
+    "repo",
+    "language",
+    "user",
+    "org",
+    "path",
+    "filename",
+    "extension",
+    "in",
+    "size",
+    "created",
+    "pushed",
+    "archived",
+    "mirror",
+    "fork",
+    "visibility",
+    "license",
+    "topic",
+    "stars",
+    "forks",
+    "followers",
+    "repos",
+    "location",
 ];
 
 fn is_qualifier(term: &str) -> bool {
-    term.split(':').next().map_or(false, |q| QUALIFIERS.contains(&q))
+    term.split(':')
+        .next()
+        .is_some_and(|q| QUALIFIERS.contains(&q))
 }
 
 pub fn validate_query(query: &str) -> Result<(), ValidationError> {
@@ -166,9 +215,13 @@ pub fn validate_query(query: &str) -> Result<(), ValidationError> {
         return Err(ValidationError::Query("trop long (max 256)".into()));
     }
     // Au moins un terme sans "qualifier:" (terme nu)
-    let has_bare_term = query.split_whitespace().any(|term| !term.contains(':') || !is_qualifier(term));
+    let has_bare_term = query
+        .split_whitespace()
+        .any(|term| !term.contains(':') || !is_qualifier(term));
     if !has_bare_term {
-        return Err(ValidationError::Query("au moins un terme de recherche requis (hors qualificateurs)".into()));
+        return Err(ValidationError::Query(
+            "au moins un terme de recherche requis (hors qualificateurs)".into(),
+        ));
     }
     Ok(())
 }
@@ -230,6 +283,9 @@ mod tests {
         assert!(validate_ref("/lead").is_err());
         assert!(validate_ref("trail/").is_err());
         assert!(validate_ref(&"a".repeat(256)).is_err());
+        assert!(validate_ref("main?recursive=1").is_err());
+        assert!(validate_ref("feature//double").is_err());
+        assert!(validate_ref("feature.lock").is_err());
     }
 
     #[test]

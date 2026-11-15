@@ -37,7 +37,9 @@ function statusBadge(status: ConnectorStatus) {
       data-testid="connector-status"
       className="text-xs text-green-600 dark:text-green-400"
     >
-      {t.connectors.status.connected.replace("{login}", status.login ?? "")}
+      {status.login
+        ? t.connectors.status.connected.replace("{login}", status.login)
+        : t.connectors.status.connectedUnknown}
     </span>
   )
 }

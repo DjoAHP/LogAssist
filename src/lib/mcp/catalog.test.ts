@@ -246,6 +246,15 @@ describe("réconciliation des outils MCP découverts", () => {
 })
 
 describe("plafonds du catalogue MCP actif", () => {
+  it("refuse deux outils actifs partageant le même alias LLM", () => {
+    const first = agentTool(1)
+    const second = { ...agentTool(2), llmName: first.llmName }
+
+    expect(() => buildActiveToolCatalog([first, second])).toThrow(
+      "Alias d'outil actif dupliqué",
+    )
+  })
+
   it("refuse 65 outils actifs", () => {
     const tools = Array.from({ length: 65 }, (_, index) => agentTool(index))
 

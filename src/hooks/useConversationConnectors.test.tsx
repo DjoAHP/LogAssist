@@ -87,4 +87,53 @@ describe("useConversationConnectors", () => {
     expect(mockSet).not.toHaveBeenCalled()
     expect(mockRemove).not.toHaveBeenCalled()
   })
+
+  it("masque immédiatement la liaison précédente au changement de conversation", async () => {
+    let resolveSecond!: (value: (typeof githubBinding)[]) => void
+    mockListAll
+      .mockResolvedValueOnce([githubBinding])
+      .mockReturnValueOnce(new Promise((resolve) => {
+        resolveSecond = resolve
+      }))
+    const { result, rerender } = renderHook(
+      ({ conversationId }) => useConversationConnectors(conversationId),
+      { initialProps: { conversationId: "conv-1" as string | null } },
+    )
+    await waitFor(() => expect(result.current.getBinding("github")).toEqual(githubBinding))
+
+    rerender({ conversationId: "conv-2" })
+    expect(result.current.getBinding("github")).toBeUndefined()
+
+    resolveSecond([])
+    await waitFor(() => expect(result.current.loading).toBe(false))
+  })
+
+  it("ignore une lecture obsolète résolue après la conversation courante", async () => {
+    let resolveFirst!: (value: (typeof githubBinding)[]) => void
+    let resolveSecond!: (value: (typeof githubBinding)[]) => void
+    mockListAll
+      .mockReturnValueOnce(new Promise((resolve) => {
+        resolveFirst = resolve
+      }))
+      .mockReturnValueOnce(new Promise((resolve) => {
+        resolveSecond = resolve
+      }))
+    const bindingB = {
+      ...githubBinding,
+      resourceOwner: "acme",
+      resourceName: "console",
+    }
+    const { result, rerender } = renderHook(
+      ({ conversationId }) => useConversationConnectors(conversationId),
+      { initialProps: { conversationId: "conv-1" as string | null } },
+    )
+
+    rerender({ conversationId: "conv-2" })
+    resolveSecond([bindingB])
+    await waitFor(() => expect(result.current.getBinding("github")).toEqual(bindingB))
+
+    resolveFirst([githubBinding])
+    await Promise.resolve()
+    expect(result.current.getBinding("github")).toEqual(bindingB)
+  })
 })
