@@ -422,7 +422,7 @@ export const SCHEMA_V12_STATEMENTS = [
 - [x] **Étape 1 :** `npm run sync:version` après passage de `package.json` à `3.4.0` ; vérifier Cargo.toml + tauri.conf.json alignés.
 - [x] **Étape 2 :** mettre à jour les 3 docs (sections : notion Connecteur, lecture seule, un dépôt par conversation, jeton Credential Manager, schéma V12, livraison).
 - [x] **Étape 3 :** gates PowerShell : `npm run build`, `cargo test`, `cargo clippy --all-targets -- -D warnings` → verts.
-- [ ] **Étape 4 :** commit `chore: v3.4.0 connecteurs GitHub`, push, **PR vers `feat/m1-socle-chat` sans merger**.
+- [x] **Étape 4 :** commit `chore: v3.4.0 connecteurs GitHub`, push, **PR vers `feat/m1-socle-chat` sans merger**.
 
 **STOP Phase 8** — checklist de test manuel :
 1. Créer un fine-grained token (Contents : lecture seule) et le configurer (badge @login).
