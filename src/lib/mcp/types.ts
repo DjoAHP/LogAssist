@@ -62,7 +62,7 @@ export interface McpAgentTool {
   description?: string
   inputSchema: Record<string, unknown>
   approvalMode: McpApprovalMode
-  kind: "tinyfish_web" | "generic"
+  kind: "tinyfish_web" | "generic" | "connector"
 }
 
 export interface McpRuntimeServer extends McpServerConfig {

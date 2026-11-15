@@ -111,6 +111,7 @@ export const snapshot = (patch: Partial<McpRuntimeSnapshot> = {}): McpRuntimeSna
   activeTools: [],
   authStatuses: {},
   webAccess: { enabled: false, configured: false },
+  connectors: { github: { binding: null, configured: false } },
   ...patch,
 })
 

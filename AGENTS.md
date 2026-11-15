@@ -10,8 +10,8 @@ l'utilisateur (débutant actif, ex no-code) : expliquer le *pourquoi*, pas seule
 
 **LogAssist** est une application desktop de chatbot IA (Tauri v2) pour apprendre des
 logiciels : conversations persistées (SQLite), fournisseurs LLM configurables (OpenAI
-compatible, testé avec NVIDIA NIM), accès Web MCP TinyFish et clés API stockées dans le
-Credential Manager Windows.
+compatible, testé avec NVIDIA NIM), accès Web MCP TinyFish, dépôt GitHub attachable par
+conversation et clés API stockées dans le Credential Manager Windows.
 
 | Couche      | Techno                                     |
 |-------------|--------------------------------------------|
@@ -52,6 +52,11 @@ Credential Manager Windows.
 13. **Diagnostics de contexte sans contenu privé** : uniquement des IDs, compteurs,
     sources du profil et raisons d'omission ; jamais de clé, Base64, Markdown, message
     ou résultat MCP.
+14. **Connecteur GitHub en lecture seule** : un seul dépôt par conversation. Le jeton
+    vit uniquement dans le Credential Manager sous `logassist/connectors/github` ;
+    React ne reçoit ni le jeton ni un hôte configurable, et tout appel réseau passe par Rust.
+15. **Contenu GitHub non fiable** : ne jamais persister un arbre, fichier ou résultat de
+    recherche brut. Les outils autorisés restent `repo_map`, `read_file` et `search_code`.
 
 ---
 
@@ -93,6 +98,7 @@ src/
 │   ├── ai/            # IProvider, openai-compat, sse.ts, errors.ts, factory
 │   ├── chat/          # contexte pur, TurnRunner, récupération et politique de scroll
 │   ├── context/       # budget central, RAG Markdown, historique et diagnostics sûrs
+│   ├── connectors/    # manifeste, pont Tauri, outils GitHub et routage composite
 │   ├── db/            # repos SQL (migrations.ts, providers, messages, conversations…)
 │   ├── secrets/       # pont Credential Manager (invoke Rust)
 │   ├── prompts/       # system prompt composé + defaults
@@ -101,6 +107,8 @@ src/
 │   └── logger.ts      # debug (no-op en prod) / error
 └── *.test.ts(x)       # vitest : lib sans DOM, composants avec @vitest-environment jsdom
 src-tauri/
+├── src/connectors/           # client GitHub fixe, validation, service et annulation
+├── src/commands/connectors.rs # commandes Tauri du connecteur GitHub
 ├── src/commands/secrets.rs   # set/get/delete secret (keyring v4, backend Windows only)
 ├── src/commands/mcp.rs       # config, appel et annulation MCP génériques
 ├── src/mcp/                  # registre, validation, service et transport TinyFish
@@ -119,9 +127,10 @@ src-tauri/
   intacte tant que le remplacement SQLite n'a pas réussi.
 - **Métriques** : elles appartiennent à chaque réponse. Un coût n'est affiché que si
   l'endpoint, le modèle, l'usage et les tokens cachés permettent un calcul fiable.
-- **MCP TinyFish** : `runToolAgent` autorise deux tours d'outils et quatre appels MCP
-  maximum. Le modèle reçoit les résultats dans un bloc externe non fiable. Le repli
-  sans outils ne s'exécute qu'une fois et l'incompatibilité est mémorisée par session.
+- **Orchestrateur d'outils** : `runToolAgent` autorise par défaut deux tours et quatre
+  appels. Un dépôt GitHub attaché porte ces limites à six tours et douze appels. Le
+  modèle reçoit chaque résultat dans un bloc externe non fiable ; le repli sans outils
+  ne s'exécute qu'une fois et l'incompatibilité est mémorisée par session.
 - **Galerie MCP distante** : la migration V9 ajoute `mcp_servers` (endpoint, transport
   `streamable_http`, `auth_type` `none`/`bearer`/`api_key`, `header_name`, timeout,
   `enabled`, `builtin`) et `mcp_tools` (nom natif, alias `llm_name` au format
@@ -134,11 +143,12 @@ src-tauri/
   `messages.sources`.
 - **Sources** : la migration V5 ajoute `messages.sources`. Les URL sont validées côté
   Rust avant le retour vers React puis filtrées à nouveau avant rendu.
-- **Schéma courant** : V11. V6 ajoute les métriques, V7 nettoie les anciennes erreurs
+- **Schéma courant** : V12. V6 ajoute les métriques, V7 nettoie les anciennes erreurs
   potentiellement sensibles, V8 répare les assistants historiques vides, V9 crée le
   registre MCP distant, V10 ajoute les médias MCP validés (`message_media` et leurs
   références dans `messages.media`) et V11 ajoute les overrides de contexte et de
-  sortie par modèle.
+  sortie par modèle. V12 ajoute `conversation_connectors`, avec une liaison unique
+  `(conversation_id, connector_id)` supprimée en cascade avec la conversation.
 - **Captures utilisateur** : leur Base64 n'est jamais persisté. Après rechargement,
   seule la puce de métadonnées reste visible ; ne pas introduire de cache binaire
   durable. Les médias MCP de V10 suivent leur circuit validé séparé.
@@ -170,6 +180,9 @@ src-tauri/
 - Le secret TinyFish suit la convention `logassist/mcp/tinyfish`. Une clé candidate
   est vérifiée en mémoire avant de remplacer la clé existante. Les serveurs MCP
   importés utilisent la même convention `logassist/mcp/<server_id>`.
+- Le jeton GitHub suit `logassist/connectors/github`. Rust fixe l'hôte à
+  `api.github.com`, valide owner/dépôt/ref/chemin/requête et refuse les chemins de
+  secrets probables avant le réseau.
 - Ne jamais logger de secret, ne jamais persist `detail` d'erreur API contenant
   potentiellement un `Bearer` sans l'éduler (redaction) avant `messages.error`.
 - Ne pas ajouter `dangerouslySetInnerHTML`, `eval`, ou de rendu markdown sans échappement.
@@ -254,6 +267,19 @@ Priorisés dans l'ordre du rapport d'audit :
   (64 outils / 256 Kio de schémas) AVANT toute persistance.
 - Gates validées : 905 tests TypeScript, TypeScript OK ; PR #3 mergée vers
   `feat/m1-socle-chat`.
+
+### Livraison v3.4.0
+
+- **Connecteur GitHub natif et lecture seule** : configuration d'un PAT fine-grained,
+  secret stocké avec le login dans le Credential Manager, aucun endpoint fourni par React.
+- **Dépôt par conversation** : migration V12, picker paginé, recherche locale, branche,
+  puce `owner/repo@ref` et retrait sans toucher aux autres conversations.
+- **Trois outils auto-approuvés** : `repo_map`, `read_file`, `search_code`, résultats
+  bornés et injectés comme données externes non fiables sans persistance brute.
+- **Routage composite** : outils MCP et GitHub partagent le catalogue 64 outils / 256 Kio,
+  l'annulation par `turnId` et le budget central de contexte.
+- Gates validées : 984 tests TypeScript, 233 tests Rust unitaires, 4 tests Rust
+  d'intégration, build Vite et Clippy strict.
 
 ---
 

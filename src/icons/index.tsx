@@ -62,3 +62,5 @@ export function ParaGenIcon(props: IconProps) {
     </svg>
   )
 }
+
+export { GithubConnecteurIcon } from "./GithubConnecteurIcon"

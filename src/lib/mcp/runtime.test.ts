@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
+import type { McpAgentTool } from "@/lib/mcp/types"
 
 const mockList = vi.hoisted(() => vi.fn())
 const mockListTools = vi.hoisted(() => vi.fn())
@@ -7,6 +8,10 @@ const mockSetEnabled = vi.hoisted(() => vi.fn())
 const mockValidateConfigs = vi.hoisted(() => vi.fn())
 const mockSyncRegistry = vi.hoisted(() => vi.fn())
 const mockAuthStatus = vi.hoisted(() => vi.fn())
+const mockBuildActiveToolCatalog = vi.hoisted(() => vi.fn((tools) => tools))
+const mockBuildConnectorTools = vi.hoisted(() =>
+  vi.fn<(context: unknown) => McpAgentTool[]>(() => []),
+)
 
 vi.mock("@/lib/db/mcpServers", () => ({
   mcpServers: {
@@ -36,9 +41,13 @@ vi.mock("@/lib/mcp/client", () => ({
 }))
 
 vi.mock("@/lib/mcp/catalog", () => ({
-  buildActiveToolCatalog: vi.fn((tools) => tools),
+  buildActiveToolCatalog: mockBuildActiveToolCatalog,
   MAX_ACTIVE_MCP_TOOLS: 64,
   MAX_ACTIVE_MCP_SCHEMA_BYTES: 256 * 1024,
+}))
+
+vi.mock("@/lib/connectors/tools", () => ({
+  buildConnectorTools: mockBuildConnectorTools,
 }))
 
 import { loadMcpRuntime, EMPTY_MCP_RUNTIME } from "@/lib/mcp/runtime"
@@ -52,6 +61,8 @@ function setupDefaultMocks() {
   mockListTools.mockResolvedValue([])
   mockListAgentTools.mockResolvedValue([])
   mockSetEnabled.mockResolvedValue(undefined)
+  mockBuildConnectorTools.mockReturnValue([])
+  mockBuildActiveToolCatalog.mockImplementation((tools) => tools)
 }
 
 beforeEach(() => {
@@ -146,5 +157,39 @@ describe("loadMcpRuntime", () => {
 
     expect(snapshot.servers).toHaveLength(2)
     expect(snapshot.activeTools).toHaveLength(2)
+  })
+
+  it("fusionne les outils du dépôt attaché dans le catalogue borné", async () => {
+    const github = {
+      binding: { owner: "DjoAHP", name: "LogAssist", ref: "main" },
+      configured: true,
+    }
+    const mcpTool = agentTool("docs", "echo", "docs__echo")
+    const connectorTool = {
+      ...agentTool("connector_github", "repo_map", "connector_github__repo_map"),
+      approvalMode: "auto" as const,
+      kind: "connector" as const,
+    }
+    mockList.mockResolvedValueOnce([
+      tinyfishRow({
+        id: "docs",
+        name: "Docs",
+        endpoint: "https://docs.example/mcp",
+        auth_type: "none",
+        builtin: 0,
+        enabled: 1,
+      }),
+    ])
+    mockListTools.mockResolvedValueOnce([])
+    mockAuthStatus.mockResolvedValueOnce("not_required")
+    mockListAgentTools.mockResolvedValueOnce([mcpTool])
+    mockBuildConnectorTools.mockReturnValueOnce([connectorTool])
+
+    const snapshot = await loadMcpRuntime({ github })
+
+    expect(mockBuildConnectorTools).toHaveBeenCalledWith(github)
+    expect(mockBuildActiveToolCatalog).toHaveBeenCalledWith([mcpTool, connectorTool])
+    expect(snapshot.activeTools).toEqual([mcpTool, connectorTool])
+    expect(snapshot.connectors.github).toEqual(github)
   })
 })

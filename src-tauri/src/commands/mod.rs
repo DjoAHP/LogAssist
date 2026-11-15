@@ -1,9 +1,15 @@
 mod applock;
+mod connectors;
 mod database;
 mod mcp;
 mod secrets;
 
 pub use applock::{applock_configured, remove_applock_secret, set_applock_secret, verify_applock_secret};
+pub use connectors::{
+    connector_github_cancel_turn, connector_github_call_tool, connector_github_configure,
+    connector_github_delete, connector_github_list_branches, connector_github_list_repos,
+    connector_github_status,
+};
 pub use database::execute_transaction;
 pub use mcp::{
     CredentialStore, ProductionMcpService, mcp_auth_status, mcp_call_tool, mcp_cancel_turn,

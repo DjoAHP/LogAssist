@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import { Sun, Moon } from "lucide-react"
 import { BookIcon, McpIcon, ParaGenIcon, ReglageIcon } from "@/icons"
 import logoSrc from "@/assets/logo.png"
@@ -11,6 +11,10 @@ import { providers, type ProviderRow, type ModelRow } from "@/lib/db/providers"
 import { useConversations } from "@/hooks/useConversations"
 import { useChat, type Attachment, type SendOptions } from "@/hooks/useChat"
 import { useMcpRuntime } from "@/hooks/useMcpRuntime"
+import { useConversationConnectors } from "@/hooks/useConversationConnectors"
+import { useGithubConnectorStatus } from "@/hooks/useGithubConnectorStatus"
+import type { GithubBinding } from "@/lib/connectors/client"
+import type { ConnectorRuntimeContext } from "@/lib/mcp/runtime"
 import { Sidebar } from "@/components/sidebar/Sidebar"
 import { ChatView } from "@/components/chat/ChatView"
 import { InputBar } from "@/components/chat/InputBar"
@@ -18,6 +22,7 @@ import { ProvidersDialog } from "@/components/settings/ProvidersDialog"
 import { GeneralSettingsDialog } from "@/components/settings/GeneralSettingsDialog"
 import { LockGate } from "@/components/settings/LockGate"
 import { isLockActive } from "@/lib/applock/service"
+import { logger } from "@/lib/logger"
 import { AssistantDialog } from "@/components/settings/AssistantDialog"
 import { McpDialog } from "@/components/settings/McpDialog"
 
@@ -39,7 +44,27 @@ function App() {
   const [sidebarWidth, setSidebarWidth] = useState(DEFAULT_SIDEBAR_WIDTH)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
 
-  const { snapshot: mcpRuntime, refresh: refreshMcpRuntime } = useMcpRuntime()
+  // GitHub connector repo picker
+  const [isRepoPickerOpen, setIsRepoPickerOpen] = useState(false)
+
+  const { status: githubStatus, refresh: refreshGithubStatus } = useGithubConnectorStatus()
+  const githubConnector = useConversationConnectors(activeId)
+  const rawGithubBinding = githubConnector.getBinding("github")
+
+  const githubBinding = useMemo<GithubBinding | null>(() => rawGithubBinding
+    ? {
+        owner: rawGithubBinding.resourceOwner,
+        name: rawGithubBinding.resourceName,
+        ref: rawGithubBinding.resourceRef,
+      }
+    : null, [rawGithubBinding])
+  const connectorRuntime = useMemo<ConnectorRuntimeContext>(() => ({
+    github: {
+      binding: githubBinding,
+      configured: githubStatus.configured,
+    },
+  }), [githubBinding, githubStatus.configured])
+  const { snapshot: mcpRuntime, refresh: refreshMcpRuntime } = useMcpRuntime(connectorRuntime)
 
   // Dark mode (défaut dark) — persisté dans localStorage
   const [isDark, setIsDark] = useState(() => {
@@ -332,13 +357,34 @@ function App() {
           onInterrupt={interrupt}
           webAvailable={mcpRuntime.webAccess.enabled && mcpRuntime.webAccess.configured && !webToolsUnsupported}
           webUnavailableReason={webToolsUnsupported ? t.chat.webModelUnsupported : t.chat.webUnavailable}
+          githubAvailable={githubStatus.configured}
+          githubAttached={githubBinding ?? null}
+          isRepoPickerOpen={isRepoPickerOpen}
+          onOpenRepoPicker={() => setIsRepoPickerOpen(true)}
+          onCloseRepoPicker={() => setIsRepoPickerOpen(false)}
+          onAttachRepo={(binding) => {
+            void githubConnector.attach("github", {
+              resourceOwner: binding.owner,
+              resourceName: binding.name,
+              resourceRef: binding.ref,
+            }).catch(() => logger.error("Impossible d’attacher le dépôt GitHub à la conversation."))
+          }}
+          onDetachRepo={() => {
+            void githubConnector.detach("github")
+              .catch(() => logger.error("Impossible de détacher le dépôt GitHub de la conversation."))
+          }}
         />
       </section>
       {providersOpen && (
         <ProvidersDialog onClose={() => setProvidersOpen(false)} onChanged={onSettingsChanged} />
       )}
       {generalSettingsOpen && (
-        <GeneralSettingsDialog onClose={() => setGeneralSettingsOpen(false)} />
+        <GeneralSettingsDialog
+          onClose={() => {
+            setGeneralSettingsOpen(false)
+            void refreshGithubStatus()
+          }}
+        />
       )}
       {assistantOpen && <AssistantDialog onClose={() => setAssistantOpen(false)} conversationId={activeId} />}
       {locked && <LockGate onUnlock={() => setLocked(false)} />}

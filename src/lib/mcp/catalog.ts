@@ -81,6 +81,13 @@ export function buildActiveToolCatalog(tools: McpAgentTool[]): McpAgentTool[] {
   if (tools.length > MAX_ACTIVE_MCP_TOOLS) {
     throw new Error("Maximum de 64 outils MCP actifs")
   }
+  const aliases = new Set<string>()
+  for (const tool of tools) {
+    if (aliases.has(tool.llmName)) {
+      throw new Error(`Alias d'outil actif dupliqué : ${tool.llmName}`)
+    }
+    aliases.add(tool.llmName)
+  }
   const bytes = new TextEncoder().encode(
     JSON.stringify(tools.map((tool) => tool.inputSchema)),
   ).byteLength

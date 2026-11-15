@@ -1,5 +1,9 @@
 import { buildActiveToolCatalog } from "./catalog"
 import { mcpServers, serverConfigFromRow } from "@/lib/db/mcpServers"
+import {
+  buildConnectorTools,
+  type GithubConnectorToolContext,
+} from "@/lib/connectors/tools"
 import { mcp } from "./client"
 import type {
   McpAgentTool,
@@ -13,6 +17,15 @@ export interface McpRuntimeSnapshot {
   activeTools: McpAgentTool[]
   authStatuses: Record<string, McpAuthStatus>
   webAccess: WebAccessConfig
+  connectors: ConnectorRuntimeContext
+}
+
+export interface ConnectorRuntimeContext {
+  github: GithubConnectorToolContext
+}
+
+export const EMPTY_CONNECTOR_RUNTIME: ConnectorRuntimeContext = {
+  github: { binding: null, configured: false },
 }
 
 export const EMPTY_MCP_RUNTIME: McpRuntimeSnapshot = {
@@ -20,9 +33,12 @@ export const EMPTY_MCP_RUNTIME: McpRuntimeSnapshot = {
   activeTools: [],
   authStatuses: {},
   webAccess: { enabled: false, configured: false },
+  connectors: EMPTY_CONNECTOR_RUNTIME,
 }
 
-export async function loadMcpRuntime(): Promise<McpRuntimeSnapshot> {
+export async function loadMcpRuntime(
+  connectors: ConnectorRuntimeContext = EMPTY_CONNECTOR_RUNTIME,
+): Promise<McpRuntimeSnapshot> {
   const rows = await mcpServers.list()
   const toolLists = await Promise.all(rows.map((row) => mcpServers.listTools(row.id)))
   const servers: McpRuntimeServer[] = rows.map((row, index) => ({
@@ -42,9 +58,12 @@ export async function loadMcpRuntime(): Promise<McpRuntimeSnapshot> {
       .filter((server) => ["configured", "not_required"].includes(authStatuses[server.id]))
       .map((server) => server.id),
   )
-  const activeTools = buildActiveToolCatalog(
-    (await mcpServers.listAgentTools()).filter((tool) => readyServerIds.has(tool.serverId)),
-  )
+  const mcpTools = (await mcpServers.listAgentTools())
+    .filter((tool) => readyServerIds.has(tool.serverId))
+  const activeTools = buildActiveToolCatalog([
+    ...mcpTools,
+    ...buildConnectorTools(connectors.github),
+  ])
   const tinyfish = servers.find((server) => server.id === "tinyfish")
   const tinyfishReady = authStatuses.tinyfish === "configured" || authStatuses.tinyfish === "not_required"
   const tinyfishHasActiveTool = activeTools.some((tool) => tool.kind === "tinyfish_web")
@@ -52,6 +71,7 @@ export async function loadMcpRuntime(): Promise<McpRuntimeSnapshot> {
     servers,
     activeTools,
     authStatuses,
+    connectors,
     webAccess: {
       enabled: Boolean(tinyfish?.enabled) && tinyfishReady && tinyfishHasActiveTool,
       configured: tinyfishReady,

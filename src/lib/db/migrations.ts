@@ -1,4 +1,4 @@
-export const SCHEMA_VERSION = 11
+export const SCHEMA_VERSION = 12
 
 // Chaque statement est un item distinct : audit-able, et exécution séquentielle
 // garantie (sqlx rejette le multi-statement dans un seul execute).
@@ -244,6 +244,21 @@ export const SCHEMA_V10_STATEMENTS: string[] = [
 export const SCHEMA_V11_STATEMENTS: string[] = [
   "ALTER TABLE models ADD COLUMN context_window_override INTEGER CHECK (context_window_override IS NULL OR context_window_override BETWEEN 512 AND 2000000)",
   "ALTER TABLE models ADD COLUMN max_output_tokens_override INTEGER CHECK (max_output_tokens_override IS NULL OR max_output_tokens_override BETWEEN 1 AND 262144)",
+]
+
+// Migration V12 : liaison connecteur par conversation (GitHub en V1).
+// PK composite (conversation_id, connector_id) + FK cascade vers conversations.
+// Pas de CHECK sur connector_id (le manifeste TS fait foi).
+export const SCHEMA_V12_STATEMENTS: string[] = [
+  `CREATE TABLE IF NOT EXISTS conversation_connectors (
+    conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+    connector_id TEXT NOT NULL,
+    resource_owner TEXT NOT NULL,
+    resource_name TEXT NOT NULL,
+    resource_ref TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (conversation_id, connector_id)
+  )`,
 ]
 
 export const SCHEMA_V1 = SCHEMA_V1_STATEMENTS.join(";\n")
