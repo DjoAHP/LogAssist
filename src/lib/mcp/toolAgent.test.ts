@@ -508,6 +508,47 @@ describe("runToolAgent", () => {
     expect(output.text).toBe("Action non exécutée")
   })
 
+  it("injecte l’erreur sanitizée du connecteur au modèle au lieu de l’avaler", async () => {
+    // Bug diagnostiqué : l'erreur réelle (kind + message sûrs de
+    // ConnectorErrorPayload) était remplacée par un message générique, si bien
+    // que le modèle improvisait une cause (« réseau/timeout ») au lieu de
+    // signaler la vraie (ex. HTTP 403, jeton sans permission Contents).
+    const harness = createHarness({
+      tools: [genericTool("connector_github", "read_file", "connector_github__read_file")],
+      turns: [turn("", [call("c1", "connector_github__read_file", { path: "README.md" })]), turn("Réponse")],
+    })
+    harness.callTool.mockRejectedValueOnce({
+      kind: "forbidden",
+      message: "Accès interdit: HTTP 403 — le jeton n'a probablement pas la permission GitHub requise pour cet endpoint",
+    })
+
+    await runToolAgent(harness.input)
+
+    const toolContents = harness.runTurn.mock.calls[1][0].messages
+      .filter((m: { role: string }) => m.role === "tool")
+      .map((m: { content: string }) => m.content)
+    const joined = toolContents.join("\n")
+    expect(joined).toContain("forbidden")
+    expect(joined).toContain("HTTP 403")
+  })
+
+  it("reste générique pour une erreur qui n’est pas un payload connector", async () => {
+    const harness = createHarness({
+      tools: [genericTool("db", "delete", "db__delete")],
+      turns: [turn("", [call("c1", "db__delete", { id: 1 })]), turn("Réponse")],
+    })
+    harness.callTool.mockRejectedValueOnce(new Error("SECRET_INTERNE"))
+
+    await runToolAgent(harness.input)
+
+    const joined = harness.runTurn.mock.calls[1][0].messages
+      .filter((m: { role: string }) => m.role === "tool")
+      .map((m: { content: string }) => m.content)
+      .join("\n")
+    expect(joined).toContain("Échec de l'outil")
+    expect(joined).not.toContain("SECRET_INTERNE")
+  })
+
   it("force seulement TinyFish au premier tour", async () => {
     const harness = createHarness({
       tools: [tinyfishTool("search"), genericTool("db", "delete", "db__delete")],

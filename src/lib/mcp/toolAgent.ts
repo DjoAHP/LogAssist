@@ -7,6 +7,7 @@ import type {
   TurnResult,
 } from "@/lib/ai/types"
 import { ApiError } from "@/lib/ai/errors"
+import { isConnectorError } from "@/lib/connectors/errors"
 import type { ContextAdditionalMessage, ContextSession } from "@/lib/context"
 import type {
   McpAgentTool,
@@ -332,7 +333,15 @@ export async function runToolAgent(input: ToolAgentInput): Promise<ToolAgentResu
         } catch (error) {
           throwIfAborted()
           warning = "Un outil MCP n'a pas pu être exécuté."
-          additionalMessages.push(toolMessage(call.id, "Échec de l'outil MCP ; poursuis sans ce résultat."))
+          // Un ConnectorErrorPayload est sanitizé par construction (aucun corps
+          // HTTP, URL, header ni jeton) : on peut le montrer au modèle pour
+          // qu'il rapporte la vraie cause au lieu d'improviser.
+          const detail = isConnectorError(error)
+            ? `${error.kind} — ${error.message}`
+            : null
+          additionalMessages.push(toolMessage(call.id, detail
+            ? `Échec de l'outil MCP (${detail}) ; poursuis sans ce résultat.`
+            : "Échec de l'outil MCP ; poursuis sans ce résultat."))
         } finally {
           if (tool.kind === "tinyfish_web") input.onWebStatus?.(undefined)
         }

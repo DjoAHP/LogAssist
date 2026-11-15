@@ -17,6 +17,9 @@ const CONFIGURE_TIMEOUT: Duration = Duration::from_secs(15);
 const MAX_TREE_SIZE: usize = 8 * 1024 * 1024; // 8 MiB (GitHub max 7 MiB récursif)
 const MAX_FILE_SIZE: usize = 512 * 1024; // 512 KiB
 const MAX_JSON_SIZE: usize = 256 * 1024; // 256 KiB pour réponses JSON simples
+// Une page /user/repos (50 dépôts complets : description, topics, license…)
+// dépasse 256 KiB — borne dédiée, sinon le picker échoue en too_large.
+const MAX_REPOS_JSON_SIZE: usize = 1024 * 1024; // 1 MiB
 
 fn connector_error_from_kind(kind: ConnectorErrorKind, msg: String) -> ConnectorError {
     use ConnectorErrorKind::*;
@@ -217,7 +220,15 @@ impl GithubClient {
         let status = resp.status();
         if !status.is_success() {
             let kind = classify_reqwest_error(&resp.error_for_status().unwrap_err());
-            return Err(connector_error_from_kind(kind, format!("HTTP {}", status)));
+            let mut message = format!("HTTP {}", status);
+            // 403 GitHub = presque toujours un jeton fine-grained sans la
+            // permission requise pour cet endpoint (ex. Contents : lecture).
+            if status.as_u16() == 403 {
+                message.push_str(
+                    " — le jeton n'a probablement pas la permission GitHub requise pour cet endpoint (ex. Contents : lecture)",
+                );
+            }
+            return Err(connector_error_from_kind(kind, message));
         }
 
         let content_len = resp.content_length().unwrap_or(0) as usize;
@@ -272,7 +283,7 @@ impl GithubClient {
             "{}/user/repos?sort=pushed&direction=desc&per_page=50&page={}",
             self.base_url, page
         );
-        let body = self.get_bounded(&url, token, MAX_JSON_SIZE).await?;
+        let body = self.get_bounded(&url, token, MAX_REPOS_JSON_SIZE).await?;
         let repos: Vec<RepoSummary> = serde_json::from_slice(&body).map_err(|e| {
             ConnectorError::InvalidArguments(format!("JSON invalide /user/repos: {e}"))
         })?;
@@ -656,5 +667,75 @@ mod tests {
         let error = client.verify_token("fake-token").await.unwrap_err();
 
         assert!(matches!(error, ConnectorError::Offline(_)));
+    }
+
+    #[tokio::test]
+    async fn test_forbidden_error_carries_permission_hint() {
+        // 403 sur un endpoint GitHub = presque toujours un jeton fine-grained
+        // sans la permission requise (ex. Contents : lecture). Le message doit
+        // guider l'utilisateur au lieu d'un « HTTP 403 » nu.
+        let app = Router::new().route(
+            "/user",
+            get(|| async { axum::http::StatusCode::FORBIDDEN }),
+        );
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let handle = tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+
+        let client = GithubClient::for_test(format!("http://{}", addr));
+        let error = client.verify_token("fake-token").await.unwrap_err();
+
+        match error {
+            ConnectorError::Forbidden(message) => {
+                assert!(message.contains("permission"), "message reçu : {message}");
+            }
+            other => panic!("Forbidden attendu, reçu : {other:?}"),
+        }
+        handle.abort();
+    }
+
+    #[tokio::test]
+    async fn test_list_repos_accepts_large_real_pages() {
+        // Une vraie page /user/repos (50 dépôts complets avec description,
+        // topics, license…) dépasse largement 256 KiB : la limite JSON dédiée
+        // à la liste des dépôts doit la laisser passer au lieu de renvoyer
+        // too_large (bug constaté : le picker GitHub échouait au clic).
+        let big_description = "x".repeat(6_000);
+        let topics: Vec<String> = (0..40).map(|i| format!("topic-{}", i)).collect();
+        let repos: Vec<serde_json::Value> = (0..50)
+            .map(|i| {
+                serde_json::json!({
+                    "full_name": format!("octocat/repo-{}", i),
+                    "private": false,
+                    "default_branch": "main",
+                    "updated_at": "2024-01-01T00:00:00Z",
+                    "description": format!("{} #{}", big_description, i),
+                    "topics": topics,
+                })
+            })
+            .collect();
+        let serialized = serde_json::to_vec(&repos).unwrap();
+        assert!(serialized.len() > 256 * 1024, "la page de test doit dépasser l'ancienne borne de 256 KiB");
+
+        let app = Router::new().route(
+            "/user/repos",
+            get(|| async move { Json(repos) }),
+        );
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let handle = tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+
+        let client = GithubClient::for_test(format!("http://{}", addr));
+        let result = client.list_repos("fake-token", 1).await.unwrap();
+
+        assert_eq!(result.len(), 50);
+        assert_eq!(result[0].full_name, "octocat/repo-0");
+        handle.abort();
     }
 }
