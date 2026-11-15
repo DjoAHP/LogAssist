@@ -30,6 +30,16 @@ const ALLOWED_TYPES = ["image/png", "image/jpeg", "image/webp", "image/gif"]
 const MAX_TEXT_SIZE = 512 * 1024
 const TEXT_EXTENSIONS = [".md", ".txt"]
 
+// Un seul gabarit pour les quatre outils adjacents au champ de saisie.
+// Seules les couleurs d'état actif changent (Web forcé ou dépôt GitHub lié).
+const INPUT_TOOL_BUTTON_BASE_CLASS = "flex h-[38px] items-center gap-1.5 rounded-md border px-3 text-sm transition-colors cursor-pointer disabled:cursor-not-allowed disabled:opacity-40"
+
+function inputToolButtonClassName(active: boolean): string {
+  return active
+    ? `${INPUT_TOOL_BUTTON_BASE_CLASS} border-[var(--brand-to)] bg-[var(--brand-to)]/10 text-[var(--brand-to)]`
+    : `${INPUT_TOOL_BUTTON_BASE_CLASS} border-border bg-background hover:bg-foreground/5`
+}
+
 function isTextFile(file: File): boolean {
   return file.type === "text/markdown" || file.type === "text/plain" || (file.type === "" && TEXT_EXTENSIONS.some((ext) => file.name.toLowerCase().endsWith(ext)))
 }
@@ -237,17 +247,8 @@ export function InputBar({
     }
   }, [submit])
 
-  // Compute GitHub button className to avoid parser issues with complex template literal in JSX
-  const githubButtonClassName = !githubAvailable
-    ? "flex size-[38px] shrink-0 items-center justify-center rounded-md border border-[var(--brand-to)]/20 bg-[var(--brand-to)]/5 transition-colors disabled:cursor-not-allowed disabled:opacity-75"
-    : githubAttached
-      ? "flex size-[38px] shrink-0 items-center justify-center rounded-md border border-[var(--brand-to)] bg-[var(--brand-to)]/15 transition-colors hover:bg-[var(--brand-to)]/25 disabled:cursor-not-allowed disabled:opacity-40"
-      : "flex size-[38px] shrink-0 items-center justify-center rounded-md border border-[var(--brand-to)]/40 bg-[var(--brand-to)]/5 transition-colors hover:bg-[var(--brand-to)]/15 disabled:cursor-not-allowed disabled:opacity-40"
-
-  // Compute Web button className
-  const webButtonClassName = forceWeb
-    ? "flex h-[38px] items-center rounded-md border px-3 transition-colors disabled:cursor-not-allowed disabled:opacity-40 border-[var(--brand-to)] bg-[var(--brand-to)]/10 text-[var(--brand-to)]"
-    : "flex h-[38px] items-center rounded-md border px-3 transition-colors disabled:cursor-not-allowed disabled:opacity-40 border-border bg-background hover:bg-foreground/5"
+  const githubButtonClassName = inputToolButtonClassName(githubAvailable && Boolean(githubAttached))
+  const webButtonClassName = inputToolButtonClassName(forceWeb)
 
   return (
     <div>
@@ -322,7 +323,7 @@ export function InputBar({
           >
             <GithubConnecteurIcon
               data-testid="github-connecteur-icon"
-              className="size-7 text-[var(--brand-to)]"
+              className="size-4"
             />
           </button>
           <textarea
@@ -350,7 +351,7 @@ export function InputBar({
           />
           <label
             htmlFor="image-upload"
-            className="flex h-[38px] items-center gap-1.5 rounded-md border border-border bg-background px-3 text-sm hover:bg-foreground/5 cursor-pointer"
+            className={inputToolButtonClassName(false)}
             title={t.chat.addImage}
           >
             <Image className="size-4" />
@@ -366,7 +367,7 @@ export function InputBar({
           />
           <label
             htmlFor="text-file-upload"
-            className="flex h-[38px] items-center gap-1.5 rounded-md border border-border bg-background px-3 text-sm hover:bg-foreground/5 cursor-pointer"
+            className={inputToolButtonClassName(false)}
             title={t.chat.addFile}
             aria-label={t.chat.addFile}
           >

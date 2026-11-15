@@ -56,15 +56,21 @@ function renderBar(props: Partial<Parameters<typeof InputBar>[0]> = {}) {
 }
 
 describe("InputBar — dépôt GitHub", () => {
-  it("utilise l’icône connecteur locale et ouvre le sélecteur quand GitHub est prêt", () => {
+  it("reprend exactement le gabarit Image, Fichier et Web à gauche du champ", () => {
     const onOpenRepoPicker = vi.fn()
-    renderBar({ githubAvailable: true, onOpenRepoPicker })
+    renderBar({ githubAvailable: true, webAvailable: true, onOpenRepoPicker })
 
     const button = screen.getByRole("button", { name: t.connectors.github })
+    const imageButton = screen.getByTitle(t.chat.addImage)
+    const fileButton = screen.getByTitle(t.chat.addFile)
+    const webButton = screen.getByRole("button", { name: t.chat.forceWeb })
     const icon = button.querySelector('[data-testid="github-connecteur-icon"]')
+
     expect(icon).not.toBeNull()
-    expect(icon?.classList.contains("size-7")).toBe(true)
-    expect(icon?.classList.contains("text-[var(--brand-to)]")).toBe(true)
+    expect(icon).toHaveClass("size-4")
+    expect(button.className).toBe(imageButton.className)
+    expect(button.className).toBe(fileButton.className)
+    expect(button.className).toBe(webButton.className)
 
     const textarea = screen.getByPlaceholderText(t.chat.placeholder)
     expect(button.compareDocumentPosition(textarea) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0)
@@ -79,7 +85,9 @@ describe("InputBar — dépôt GitHub", () => {
     const button = screen.getByRole("button", { name: t.connectors.github }) as HTMLButtonElement
     expect(button.disabled).toBe(true)
     expect(button.title).toBe("Configurez GitHub dans Paramètres généraux › Connecteurs")
-    expect(button.querySelector("svg")).toHaveClass("text-[var(--brand-to)]")
+    expect(button).toHaveClass("border-border")
+    expect(button).toHaveClass("bg-background")
+    expect(button).toHaveClass("disabled:opacity-40")
   })
 
   it("affiche la puce attachée et détache sans rouvrir le sélecteur", () => {

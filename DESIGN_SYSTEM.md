@@ -54,15 +54,17 @@ grille responsive de tuiles carrées `2 → 3 → 4` colonnes :
 - focus : `focus-visible:ring-2 focus-visible:ring-brand-to`.
 
 GitHub utilise `GithubConnecteurIcon`, générée depuis
-`src/icons/svg/github_connecteur.svg`. Les coordonnées Illustrator sont ramenées
-dans le `viewBox="0 0 24 24"` par `transform="scale(0.1)"`. Un trait hérité de
-`currentColor` épaissit les points après réduction afin que le dessin reste lisible
-dans les contrôles compacts.
+`src/icons/svg/github_connecteur.svg`. Le composant inline conserve le `viewBox`
+512 × 512, la transformation et les 30 chemins du fichier source. Seul le
+remplissage devient `currentColor` afin de suivre automatiquement le thème ; aucun
+trait d'épaississement n'est ajouté.
 
 La configuration GitHub et le sélecteur de dépôt sont des sous-modales. Le bouton
-GitHub de l'InputBar mesure `38px`, utilise l'accent cyan et se place immédiatement
-à gauche du textarea. Une liaison active affiche une puce `owner/repo@ref` séparée
-du bouton afin d'éviter tout bouton HTML imbriqué.
+GitHub de l'InputBar se place immédiatement à gauche du textarea. Il partage
+strictement le gabarit Image/Fichier/Web : hauteur `38px`, bordure et fond standards,
+padding horizontal `px-3`, icône `size-4`, survol et états désactivés identiques.
+Une liaison active affiche une puce `owner/repo@ref` séparée du bouton afin d'éviter
+tout bouton HTML imbriqué.
 Si le jeton manque, la puce affiche **Dépôt indisponible** et reste détachable.
 
 ## Galerie des fournisseurs
