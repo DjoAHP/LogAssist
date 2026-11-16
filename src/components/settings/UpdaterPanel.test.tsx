@@ -21,6 +21,19 @@ describe("UpdaterPanel", () => {
     expect(screen.getByText("LogAssist est à jour.")).toBeInTheDocument()
   })
 
+  it("désactive et anime le bouton pendant une vérification manuelle", () => {
+    render(<UpdaterPanel state={{ phase: "checking" }} onCheck={noop} onInstall={noop} />)
+
+    const button = screen.getByRole("button", { name: "Vérification…" })
+    expect(button).toBeDisabled()
+    const icon = button.querySelector("svg")
+    expect(icon).toHaveClass("animate-spin")
+    expect(icon).toHaveClass("motion-reduce:animate-none")
+    const status = screen.getByRole("status")
+    expect(status).toHaveTextContent("Vérification…")
+    expect(status).toHaveClass("sr-only")
+  })
+
   it("affiche l'erreur de vérification", () => {
     render(<UpdaterPanel state={{ phase: "error", operation: "check" }} onCheck={noop} onInstall={noop} />)
     expect(screen.getByText("Vérification impossible. Réessayez plus tard.")).toBeInTheDocument()
