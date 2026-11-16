@@ -390,6 +390,11 @@ function App() {
             setGeneralSettingsOpen(false)
             void refreshGithubStatus()
           }}
+          updater={{
+            state: updater.state,
+            onCheck: () => void updater.checkNow(),
+            onInstall: () => void updater.install(),
+          }}
         />
       )}
       {assistantOpen && <AssistantDialog onClose={() => setAssistantOpen(false)} conversationId={activeId} />}

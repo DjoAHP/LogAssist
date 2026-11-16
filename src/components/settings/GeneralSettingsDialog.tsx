@@ -4,7 +4,7 @@
 // la catégorie active, à la place du chat. Pas de zone de saisie. Taille
 // standard HEADER_TOOL_DIALOG_SIZE_CLASS.
 import { useState } from "react"
-import { KeyRound, Plug, X, type LucideIcon } from "lucide-react"
+import { KeyRound, Plug, RefreshCw, X, type LucideIcon } from "lucide-react"
 import { ParaGenIcon } from "@/icons"
 import { t } from "@/i18n/fr"
 import { HEADER_TOOL_DIALOG_SIZE_CLASS } from "./headerToolDialog"
@@ -12,8 +12,10 @@ import { LockPanel } from "./LockPanel"
 import { ConnectorsPanel } from "./ConnectorsPanel"
 import { GithubConnectorDialog } from "./GithubConnectorDialog"
 import { useGithubConnectorStatus } from "@/hooks/useGithubConnectorStatus"
+import { UpdaterPanel } from "./UpdaterPanel"
+import type { UpdaterState } from "@/hooks/useUpdater"
 
-type Category = "lock" | "connectors"
+type Category = "lock" | "connectors" | "updates"
 
 // La liste est déclarée au niveau module : ajouter une catégorie = ajouter
 // un objet ici (icône lucide cohérente avec le thème) + un bloc dans le
@@ -21,13 +23,21 @@ type Category = "lock" | "connectors"
 const CATEGORIES: { id: Category; label: string; icon: LucideIcon }[] = [
   { id: "lock", label: t.generalSettings.categories.lock, icon: KeyRound },
   { id: "connectors", label: t.generalSettings.categories.connectors, icon: Plug },
+  { id: "updates", label: t.generalSettings.categories.updates, icon: RefreshCw },
 ]
+
+const noop = () => undefined
 
 interface Props {
   onClose: () => void
+  updater?: {
+    state: UpdaterState
+    onCheck: () => void
+    onInstall: () => void
+  }
 }
 
-export function GeneralSettingsDialog({ onClose }: Props) {
+export function GeneralSettingsDialog({ onClose, updater }: Props) {
   const [tab, setTab] = useState<Category>("lock")
   const [githubDialogOpen, setGithubDialogOpen] = useState(false)
   const { status: githubStatus, refresh: refreshGithubStatus } = useGithubConnectorStatus()
@@ -91,6 +101,13 @@ export function GeneralSettingsDialog({ onClose }: Props) {
                   onSelect={(connectorId) => {
                     if (connectorId === "github") setGithubDialogOpen(true)
                   }}
+                />
+              )}
+              {tab === "updates" && (
+                <UpdaterPanel
+                  state={updater?.state ?? { phase: "idle" }}
+                  onCheck={updater?.onCheck ?? noop}
+                  onInstall={updater?.onInstall ?? noop}
                 />
               )}
             </div>

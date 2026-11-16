@@ -24,7 +24,7 @@
     "paths": { "@/*": ["./src/*"] },
 
     /* Types explicites : vite/client pour import.meta.env, node pour les tests s'appuyant sur node:fs */
-    "types": ["vite/client", "node"]
+    "types": ["vite/client", "node", "@testing-library/jest-dom/vitest"]
   },
   "include": ["src"],
   "references": [{ "path": "./tsconfig.node.json" }]
