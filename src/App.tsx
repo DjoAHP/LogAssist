@@ -13,6 +13,7 @@ import { useChat, type Attachment, type SendOptions } from "@/hooks/useChat"
 import { useMcpRuntime } from "@/hooks/useMcpRuntime"
 import { useConversationConnectors } from "@/hooks/useConversationConnectors"
 import { useGithubConnectorStatus } from "@/hooks/useGithubConnectorStatus"
+import { useUpdater } from "@/hooks/useUpdater"
 import type { GithubBinding } from "@/lib/connectors/client"
 import type { ConnectorRuntimeContext } from "@/lib/mcp/runtime"
 import { Sidebar } from "@/components/sidebar/Sidebar"
@@ -25,6 +26,7 @@ import { isLockActive } from "@/lib/applock/service"
 import { logger } from "@/lib/logger"
 import { AssistantDialog } from "@/components/settings/AssistantDialog"
 import { McpDialog } from "@/components/settings/McpDialog"
+import { UpdateBanner } from "@/components/settings/UpdateBanner"
 
 const DEFAULT_SIDEBAR_WIDTH = 280
 
@@ -48,6 +50,7 @@ function App() {
   const [isRepoPickerOpen, setIsRepoPickerOpen] = useState(false)
 
   const { status: githubStatus, refresh: refreshGithubStatus } = useGithubConnectorStatus()
+  const updater = useUpdater()
   const githubConnector = useConversationConnectors(activeId)
   const rawGithubBinding = githubConnector.getBinding("github")
 
@@ -278,14 +281,17 @@ function App() {
         style={{ backgroundImage: `url(${isDark ? bgDark : bgLight})` }}
       >
         <header className="flex items-center justify-between border-b border-border px-4 py-3">
-          <div className="flex items-center gap-2.5">
-            <span className="brand-mark" aria-hidden="true">
-              <img src={logoSrc} alt="" className="size-full object-contain" />
-            </span>
-            <div>
-              <h1 className="text-base font-semibold">{t.app.title}</h1>
-              <p className="text-xs text-muted-foreground">{t.app.subtitle}</p>
+          <div className="flex items-center gap-4">
+            <div className="flex items-center gap-2.5">
+              <span className="brand-mark" aria-hidden="true">
+                <img src={logoSrc} alt="" className="size-full object-contain" />
+              </span>
+              <div>
+                <h1 className="text-base font-semibold">{t.app.title}</h1>
+                <p className="text-xs text-muted-foreground">{t.app.subtitle}</p>
+              </div>
             </div>
+            <UpdateBanner state={updater.state} onInstall={() => void updater.install()} />
           </div>
         <div className="flex items-center gap-1">
           {/* Dark mode toggle */}
@@ -383,6 +389,11 @@ function App() {
           onClose={() => {
             setGeneralSettingsOpen(false)
             void refreshGithubStatus()
+          }}
+          updater={{
+            state: updater.state,
+            onCheck: () => void updater.checkNow(),
+            onInstall: () => void updater.install(),
           }}
         />
       )}

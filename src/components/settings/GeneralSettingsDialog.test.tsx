@@ -66,6 +66,24 @@ describe("GeneralSettingsDialog — squelette miniature", () => {
     expect(screen.getByText("@octocat")).not.toBeNull()
   })
 
+  it("expose la catégorie Mises à jour et déclenche la vérification", () => {
+    const onCheck = vi.fn()
+    render(
+      <GeneralSettingsDialog
+        onClose={() => {}}
+        updater={{
+          state: { phase: "idle" },
+          onCheck,
+          onInstall: () => {},
+        }}
+      />,
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: t.generalSettings.categories.updates }))
+    fireEvent.click(screen.getByRole("button", { name: t.updater.checkNow }))
+    expect(onCheck).toHaveBeenCalledTimes(1)
+  })
+
   it("ouvre le dialogue GitHub puis rafraîchit son statut à la fermeture", () => {
     render(<GeneralSettingsDialog onClose={() => {}} />)
     fireEvent.click(screen.getByRole("button", { name: t.generalSettings.categories.connectors }))

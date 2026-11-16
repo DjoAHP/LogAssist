@@ -1,0 +1,53 @@
+# Publication d'une release LogAssist : build Windows, signature updater,
+# latest.json et Release GitHub. Déclencheur : tag v* (git tag vX.Y.Z + push).
+# La clé privée minisign vit exclusivement dans les Secrets GitHub.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  publish:
+    name: Build + signature + publication
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - name: Installation des dépendances (npm ci)
+        run: npm ci
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - name: Vérifie l'alignement tag / version de l'app
+        shell: pwsh
+        run: |
+          $tag = "${{ github.ref_name }}".TrimStart('v')
+          $conf = Get-Content src-tauri/tauri.conf.json | ConvertFrom-Json
+          if ($tag -ne $conf.version) {
+            throw "Tag v$tag différent de la version de l'app $($conf.version) — lancez npm run sync:version avant de taguer."
+          }
+      - name: Build, signature et publication de la Release
+        uses: tauri-apps/tauri-action@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: "LogAssist v__VERSION__"
+          releaseBody: "Mise à jour automatique de LogAssist. Consultez l'historique des changements pour le détail."
+          releaseDraft: false
+          prerelease: false

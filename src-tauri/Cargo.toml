@@ -36,6 +36,8 @@ sqlx = { version = "0.8.6", default-features = false, features = ["sqlite", "run
 tauri-plugin-http = "2"
 tauri-plugin-dialog = "2"
 tauri-plugin-fs = "2"
+tauri-plugin-updater = "2"
+tauri-plugin-process = "2"
 # keyring v4 : les features natives activent chaque backend séparément
 # (windows-native-keyring-store / apple-native / zbus). V1 Windows-only →
 # on ne sélectionne que le backend Windows ; default-features = false possible
