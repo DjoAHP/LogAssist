@@ -41,7 +41,7 @@ export function UpdaterPanel({ state, onCheck, onInstall }: Props) {
         {t.updater.currentVersion.replace("{version}", __APP_VERSION__)}
       </p>
       {status !== null && (
-        <p role="status" className="text-sm">
+        <p role="status" className={checking ? "sr-only" : "text-sm"}>
           {status}
         </p>
       )}
@@ -53,7 +53,7 @@ export function UpdaterPanel({ state, onCheck, onInstall }: Props) {
           className="flex items-center gap-1.5 rounded-md border border-border px-3 py-1.5 text-sm transition-colors hover:bg-foreground/5 disabled:cursor-not-allowed disabled:opacity-50"
         >
           <RefreshCw
-            className={checking ? "size-3.5 animate-spin" : "size-3.5"}
+            className={checking ? "size-3.5 animate-spin motion-reduce:animate-none" : "size-3.5"}
             aria-hidden="true"
           />
           {checking ? t.updater.checking : t.updater.checkNow}

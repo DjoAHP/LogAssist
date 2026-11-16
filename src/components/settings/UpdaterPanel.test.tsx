@@ -26,8 +26,12 @@ describe("UpdaterPanel", () => {
 
     const button = screen.getByRole("button", { name: "Vérification…" })
     expect(button).toBeDisabled()
-    expect(button.querySelector("svg")).toHaveClass("animate-spin")
-    expect(screen.getByRole("status")).toHaveTextContent("Vérification…")
+    const icon = button.querySelector("svg")
+    expect(icon).toHaveClass("animate-spin")
+    expect(icon).toHaveClass("motion-reduce:animate-none")
+    const status = screen.getByRole("status")
+    expect(status).toHaveTextContent("Vérification…")
+    expect(status).toHaveClass("sr-only")
   })
 
   it("affiche l'erreur de vérification", () => {
