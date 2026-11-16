@@ -12,6 +12,7 @@ import { relaunch } from "@tauri-apps/plugin-process"
 
 export type UpdaterState =
   | { phase: "idle" }
+  | { phase: "checking" }
   | { phase: "available"; version: string }
   | { phase: "downloading"; version: string; received: number; total: number | null }
   | { phase: "ready"; version: string }
@@ -33,6 +34,7 @@ export function useUpdater(options?: { graceDelayMs?: number }) {
     async (silent: boolean): Promise<void> => {
       if (!enabled || busyRef.current) return
       busyRef.current = true
+      if (!silent && mountedRef.current) setState({ phase: "checking" })
       try {
         const update = await check()
         updateRef.current = update

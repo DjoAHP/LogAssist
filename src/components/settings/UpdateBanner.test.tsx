@@ -10,6 +10,7 @@ describe("UpdateBanner", () => {
   it("n'affiche rien quand il n'y a rien à signaler", () => {
     const states = [
       { phase: "idle" },
+      { phase: "checking" },
       { phase: "upToDate" },
     ] as const
     for (const state of states) {

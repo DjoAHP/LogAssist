@@ -77,6 +77,51 @@ describe("useUpdater", () => {
     expect(result.current.state).toEqual({ phase: "upToDate" })
   })
 
+  it("expose checking pendant une vérification manuelle", async () => {
+    let resolveCheck!: (value: null) => void
+    mockCheck.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveCheck = resolve
+        }),
+    )
+    const { result } = renderHook(() => useUpdater({ graceDelayMs: 60_000 }))
+    let checkPromise!: Promise<void>
+
+    act(() => {
+      checkPromise = result.current.checkNow()
+    })
+    expect(result.current.state).toEqual({ phase: "checking" })
+
+    await act(async () => {
+      resolveCheck(null)
+      await checkPromise
+    })
+    expect(result.current.state).toEqual({ phase: "upToDate" })
+  })
+
+  it("garde le check silencieux invisible pendant la requête", async () => {
+    let resolveCheck!: (value: null) => void
+    mockCheck.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveCheck = resolve
+        }),
+    )
+    const { result } = renderHook(() => useUpdater({ graceDelayMs: 0 }))
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0)
+    })
+    expect(result.current.state).toEqual({ phase: "idle" })
+
+    await act(async () => {
+      resolveCheck(null)
+      await Promise.resolve()
+    })
+    expect(result.current.state).toEqual({ phase: "idle" })
+  })
+
   it("checkNow en échec expose l'erreur", async () => {
     mockCheck.mockRejectedValue(new Error("offline"))
     const { result } = renderHook(() => useUpdater({ graceDelayMs: 60_000 }))

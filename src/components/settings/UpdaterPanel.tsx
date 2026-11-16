@@ -12,6 +12,8 @@ interface Props {
 
 function statusLine(state: UpdaterState): string | null {
   switch (state.phase) {
+    case "checking":
+      return t.updater.checking
     case "upToDate":
       return t.updater.upToDate
     case "available":
@@ -29,6 +31,8 @@ function statusLine(state: UpdaterState): string | null {
 
 export function UpdaterPanel({ state, onCheck, onInstall }: Props) {
   const status = statusLine(state)
+  const checking = state.phase === "checking"
+  const busy = checking || state.phase === "downloading"
 
   return (
     <section aria-label={t.generalSettings.categories.updates} className="space-y-3">
@@ -44,11 +48,15 @@ export function UpdaterPanel({ state, onCheck, onInstall }: Props) {
       <div className="flex items-center gap-2">
         <button
           onClick={onCheck}
-          disabled={state.phase === "downloading"}
+          disabled={busy}
+          aria-busy={checking}
           className="flex items-center gap-1.5 rounded-md border border-border px-3 py-1.5 text-sm transition-colors hover:bg-foreground/5 disabled:cursor-not-allowed disabled:opacity-50"
         >
-          <RefreshCw className="size-3.5" aria-hidden="true" />
-          {t.updater.checkNow}
+          <RefreshCw
+            className={checking ? "size-3.5 animate-spin" : "size-3.5"}
+            aria-hidden="true"
+          />
+          {checking ? t.updater.checking : t.updater.checkNow}
         </button>
         {state.phase === "available" && (
           <button
