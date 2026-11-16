@@ -84,7 +84,7 @@ describe("useUpdater", () => {
     await act(async () => {
       await result.current.checkNow()
     })
-    expect(result.current.state).toEqual({ phase: "error" })
+    expect(result.current.state).toEqual({ phase: "error", operation: "check" })
   })
 
   it("install télécharge avec progression puis passe en ready et relance", async () => {
@@ -123,7 +123,7 @@ describe("useUpdater", () => {
       await result.current.install()
     })
     expect(mockRelaunch).not.toHaveBeenCalled()
-    expect(result.current.state).toEqual({ phase: "error" })
+    expect(result.current.state).toEqual({ phase: "error", operation: "install" })
   })
 
   it("en développement, aucun appel au plugin", async () => {

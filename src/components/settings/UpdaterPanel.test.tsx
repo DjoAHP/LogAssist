@@ -22,8 +22,13 @@ describe("UpdaterPanel", () => {
   })
 
   it("affiche l'erreur de vérification", () => {
-    render(<UpdaterPanel state={{ phase: "error" }} onCheck={noop} onInstall={noop} />)
+    render(<UpdaterPanel state={{ phase: "error", operation: "check" }} onCheck={noop} onInstall={noop} />)
     expect(screen.getByText("Vérification impossible. Réessayez plus tard.")).toBeInTheDocument()
+  })
+
+  it("distingue une erreur d'installation d'une erreur de vérification", () => {
+    render(<UpdaterPanel state={{ phase: "error", operation: "install" }} onCheck={noop} onInstall={noop} />)
+    expect(screen.getByText("L'installation a échoué. Réessayez plus tard.")).toBeInTheDocument()
   })
 
   it("annonce la mise à jour disponible et permet d'installer", async () => {

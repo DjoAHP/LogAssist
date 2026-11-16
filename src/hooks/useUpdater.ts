@@ -16,7 +16,7 @@ export type UpdaterState =
   | { phase: "downloading"; version: string; received: number; total: number | null }
   | { phase: "ready"; version: string }
   | { phase: "upToDate" }
-  | { phase: "error" }
+  | { phase: "error"; operation: "check" | "install" }
 
 const GRACE_DELAY_MS = 15_000
 
@@ -43,7 +43,9 @@ export function useUpdater(options?: { graceDelayMs?: number }) {
           setState({ phase: "upToDate" })
         }
       } catch {
-        if (mountedRef.current) setState(silent ? { phase: "idle" } : { phase: "error" })
+        if (mountedRef.current) {
+          setState(silent ? { phase: "idle" } : { phase: "error", operation: "check" })
+        }
       } finally {
         busyRef.current = false
       }
@@ -80,7 +82,7 @@ export function useUpdater(options?: { graceDelayMs?: number }) {
       setState({ phase: "ready", version: update.version })
       await relaunch()
     } catch {
-      if (mountedRef.current) setState({ phase: "error" })
+      if (mountedRef.current) setState({ phase: "error", operation: "install" })
     } finally {
       busyRef.current = false
     }

@@ -11,7 +11,6 @@ describe("UpdateBanner", () => {
     const states = [
       { phase: "idle" },
       { phase: "upToDate" },
-      { phase: "error" },
     ] as const
     for (const state of states) {
       const { unmount } = render(<UpdateBanner state={state} onInstall={vi.fn()} />)
@@ -36,8 +35,17 @@ describe("UpdateBanner", () => {
         onInstall={vi.fn()}
       />,
     )
-    expect(screen.getByTestId("update-banner")).toHaveTextContent("Téléchargement de la mise à jour…")
+    expect(screen.getByTestId("update-banner")).toHaveTextContent("Téléchargement de la mise à jour… 50 %")
     expect(screen.queryByRole("button", { name: "Installer" })).not.toBeInTheDocument()
+  })
+
+  it.each([
+    [{ phase: "error", operation: "check" } as const, "Vérification impossible. Réessayez plus tard."],
+    [{ phase: "error", operation: "install" } as const, "L'installation a échoué. Réessayez plus tard."],
+  ])("affiche l'erreur correspondant à l'opération", (state, message) => {
+    render(<UpdateBanner state={state} onInstall={vi.fn()} />)
+
+    expect(screen.getByRole("status")).toHaveTextContent(message)
   })
 
   it("peut être masquée", async () => {

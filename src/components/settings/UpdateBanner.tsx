@@ -16,9 +16,12 @@ function describe(state: UpdaterState): string {
     case "available":
       return t.updater.available.replace("{version}", state.version)
     case "downloading":
-      return t.updater.downloading
+      if (state.total === null || state.total <= 0) return t.updater.downloading
+      return `${t.updater.downloading} ${Math.min(100, Math.round((state.received / state.total) * 100))} %`
     case "ready":
       return t.updater.readyToInstall
+    case "error":
+      return state.operation === "install" ? t.updater.installFailed : t.updater.checkFailed
     default:
       return ""
   }
@@ -34,6 +37,8 @@ export function UpdateBanner({ state, onInstall }: Props) {
   return (
     <div
       data-testid="update-banner"
+      role="status"
+      aria-live="polite"
       className="flex items-center gap-2 rounded-md border border-border bg-foreground/5 px-2.5 py-1.5"
     >
       <span className="text-xs text-muted-foreground">{label}</span>

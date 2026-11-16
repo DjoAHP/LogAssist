@@ -21,7 +21,7 @@ function statusLine(state: UpdaterState): string | null {
     case "ready":
       return t.updater.readyToInstall
     case "error":
-      return t.updater.checkFailed
+      return state.operation === "install" ? t.updater.installFailed : t.updater.checkFailed
     default:
       return null
   }
