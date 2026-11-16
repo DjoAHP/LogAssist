@@ -847,8 +847,10 @@ jobs:
           if ($tag -ne $conf.version) {
             throw "Tag v$tag différent de la version de l'app $($conf.version) — lancez npm run sync:version avant de taguer."
           }
-      - uses: tauri-apps/tauri-action@v0
+      - name: Build, signature et publication de la Release
+        uses: tauri-apps/tauri-action@v1
         env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:

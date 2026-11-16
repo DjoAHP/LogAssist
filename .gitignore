@@ -45,3 +45,7 @@ note.text
 
 # Dossiers divers
 # assets
+
+# Signature updater — la clé privée ne doit JAMAIS être commitée
+secrets/
+*.key
