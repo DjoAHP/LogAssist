@@ -201,6 +201,26 @@ src-tauri/
   branche directement sur le dépôt GitHub (`git checkout -b feat/ma-fonctionnalité`) et
   pousser vers l'origine. Le travail s'effectue dans la branche courante du dépôt principal.
 
+### Workflow de release
+
+1. Créer `chore/release-vX.Y.Z` depuis `feat/m1-socle-chat`, mettre à jour la
+   version et exécuter `npm run sync:version`.
+2. L'agent analyse les changements depuis le dernier tag et rédige
+   `.github/release-notes/vX.Y.Z.md` : titre principal, introduction courte,
+   deux ou trois sections `## <emoji> <titre>`, listes factuelles et phrase de
+   conclusion. Le titre GitHub de la Release reste exactement `vX.Y.Z`.
+3. Faire approuver le texte par l'utilisateur avant le tag, puis merger la PR
+   seulement après les gates TypeScript et Rust.
+4. Créer un tag annoté sur le merge commit et pousser uniquement ce tag :
+   `git tag -a vX.Y.Z -m "LogAssist vX.Y.Z — <résumé>"`, puis
+   `git push origin vX.Y.Z`. Ne jamais utiliser `git push --tags`.
+5. Surveiller le workflow Release et vérifier la présence de `.exe`, `.msi`,
+   `.sig` et `latest.json`. Une release sans notes versionnées doit échouer.
+
+La clé privée minisign reste hors dépôt, sauvegardée dans `C:\dev\secrets\`
+et dans les Secrets GitHub. Sa perte empêche les installations existantes
+d'accepter les futures mises à jour.
+
 ---
 
 ## 6. Chantiers connus (issus de l'audit d'oct. 2026 — à ne pas re-découvrir)
