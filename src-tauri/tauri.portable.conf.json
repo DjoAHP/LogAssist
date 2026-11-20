@@ -1,0 +1,16 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "LogAssist Portable",
+  "mainBinaryName": "LogAssistPortable",
+  "identifier": "fr.djodev.logassist.portable",
+  "build": {
+    "beforeBuildCommand": "npm run sync:version && npm run build:portable"
+  },
+  "app": {
+    "appDirectoriesOverride": "./app-data"
+  },
+  "bundle": {
+    "active": false,
+    "createUpdaterArtifacts": false
+  }
+}
