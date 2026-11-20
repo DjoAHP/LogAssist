@@ -28,7 +28,9 @@ export function useUpdater(options?: { graceDelayMs?: number }) {
   const mountedRef = useRef(true)
 
   // Lu par rendu (pas au niveau module) pour rester testable via vi.stubEnv.
-  const enabled = import.meta.env.PROD
+  // L'édition portable est livrée sans mise à jour : aucun appel réseau, même
+  // si le panneau et la bannière sont déjà masqués côté UI.
+  const enabled = import.meta.env.PROD && import.meta.env.VITE_EDITION !== "portable"
 
   const runCheck = useCallback(
     async (silent: boolean): Promise<void> => {
