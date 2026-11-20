@@ -53,6 +53,12 @@ urlencoding = "2.1"
 
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration
+# Édition portable : l'exécutable et ses secrets vivent hors du Credential
+# Manager de l'édition bureau (services distincts, aucune entrée partagée).
+[features]
+default = []
+portable = []
+
 [dev-dependencies]
 # Serveur Streamable HTTP factice pour les tests d'intégration du transport MCP.
 axum = "0.8"
