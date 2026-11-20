@@ -14,17 +14,25 @@ import { GithubConnectorDialog } from "./GithubConnectorDialog"
 import { useGithubConnectorStatus } from "@/hooks/useGithubConnectorStatus"
 import { UpdaterPanel } from "./UpdaterPanel"
 import type { UpdaterState } from "@/hooks/useUpdater"
+import { isPortableEdition } from "@/lib/edition"
 
 type Category = "lock" | "connectors" | "updates"
 
 // La liste est déclarée au niveau module : ajouter une catégorie = ajouter
 // un objet ici (icône lucide cohérente avec le thème) + un bloc dans le
 // panneau ci-dessous.
-const CATEGORIES: { id: Category; label: string; icon: LucideIcon }[] = [
-  { id: "lock", label: t.generalSettings.categories.lock, icon: KeyRound },
-  { id: "connectors", label: t.generalSettings.categories.connectors, icon: Plug },
-  { id: "updates", label: t.generalSettings.categories.updates, icon: RefreshCw },
-]
+// La liste est construite au rendu (et non au chargement du module) pour que
+// le drapeau d'édition soit toujours lu à jour. Édition portable : pas de mise
+// à jour automatique, la catégorie disparaît.
+function buildCategories(): { id: Category; label: string; icon: LucideIcon }[] {
+  return [
+    { id: "lock", label: t.generalSettings.categories.lock, icon: KeyRound },
+    { id: "connectors", label: t.generalSettings.categories.connectors, icon: Plug },
+    ...(isPortableEdition
+      ? []
+      : [{ id: "updates" as const, label: t.generalSettings.categories.updates, icon: RefreshCw }]),
+  ]
+}
 
 const noop = () => undefined
 
@@ -46,6 +54,8 @@ export function GeneralSettingsDialog({ onClose, updater }: Props) {
     setGithubDialogOpen(false)
     void refreshGithubStatus()
   }
+
+  const categories = buildCategories()
 
   return (
     <>
@@ -77,7 +87,7 @@ export function GeneralSettingsDialog({ onClose, updater }: Props) {
 
           <div className="flex min-h-0 flex-1">
             <nav aria-label={t.generalSettings.title} className="w-52 shrink-0 border-r border-border p-2">
-              {CATEGORIES.map((category) => (
+              {categories.map((category) => (
                 <button
                   key={category.id}
                   onClick={() => setTab(category.id)}

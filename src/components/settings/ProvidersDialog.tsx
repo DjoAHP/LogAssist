@@ -3,6 +3,7 @@ import { Plus, Search, X } from "lucide-react"
 import { ReglageIcon } from "@/icons"
 import { confirm as dialogConfirm } from "@tauri-apps/plugin-dialog"
 import { t } from "@/i18n/fr"
+import { isPortableEdition } from "@/lib/edition"
 import { logger } from "@/lib/logger"
 import { createProvider } from "@/lib/ai/factory"
 import { KIND_TO_KEY, redactSensitiveDetail } from "@/lib/ai/errors"
@@ -351,10 +352,12 @@ export function ProvidersDialog({ onClose, onChanged }: Props) {
 
 // Deux onglets « Fournisseurs » / « Modèles local » — même style que les
 // listes de cartes (border-border, hint muted) pour rester cohérent.
+// Édition portable : fournisseurs API uniquement, l'onglet des modèles locaux
+// n'est pas proposé (le panneau reste dans le bundle, inatteignable).
 function TabBar({ tab, setTab }: { tab: "providers" | "local"; setTab: (t: "providers" | "local") => void }) {
   const tabs = [
     { id: "providers" as const, label: t.providers.tabProviders },
-    { id: "local" as const, label: t.providers.tabLocal },
+    ...(isPortableEdition ? [] : [{ id: "local" as const, label: t.providers.tabLocal }]),
   ]
   return (
     <div className="mb-3 flex gap-1 rounded-md border border-border p-1">
