@@ -11,7 +11,8 @@ describe("bouton MCP du header", () => {
     expect(markup).toContain('viewBox="0 0 24 24"')
 
     const source = readFileSync(new URL("./App.tsx", import.meta.url), "utf8")
-    const mcpButton = source.indexOf("aria-label={t.mcp.open}")
+    // Le libellé dépend de l'édition : on repère le bouton par son action.
+    const mcpButton = source.indexOf("onClick={() => setMcpOpen(true)}")
     const assistantButton = source.indexOf("aria-label={t.assistant.title}")
     expect(mcpButton).toBeGreaterThan(-1)
     expect(assistantButton).toBeGreaterThan(mcpButton)
@@ -25,8 +26,15 @@ describe("bouton MCP du header", () => {
     expect(t.providers.modelsSettings).toBe("Fournisseurs")
     expect(t.providers.title).toBe("Fournisseur")
 
+    // Édition portable : le même bouton ouvre la « Recherche Web », et son
+    // infobulle porte le titre de la modale réellement montée.
+    expect(t.portableWeb.open).toBe("Recherche Web")
+    expect(t.portableWeb.title).toBe("Recherche Web")
+    expect(t.portableWeb.title).toBe(t.portableWeb.open)
+
     const source = readFileSync(new URL("./App.tsx", import.meta.url), "utf8")
-    expect(source).toContain("title={t.mcp.title}")
+    expect(source).toContain("title={isPortableEdition ? t.portableWeb.title : t.mcp.title}")
+    expect(source).toContain("aria-label={isPortableEdition ? t.portableWeb.open : t.mcp.open}")
     expect(source).toContain("title={t.assistant.title}")
     expect(source).toContain("aria-label={t.providers.modelsSettings}")
     expect(source).toContain("title={t.providers.modelsSettings}")
@@ -65,6 +73,15 @@ describe("App — runtime MCP et galerie", () => {
     expect(source).toContain("useGithubConnectorStatus()")
     expect(source).toContain("githubAvailable={githubStatus.configured}")
     expect(source).toContain("void refreshGithubStatus()")
+  })
+
+  it("choisit le panneau selon l'édition sans retirer la galerie bureau", () => {
+    const source = readFileSync(new URL("./App.tsx", import.meta.url), "utf8")
+    expect(source).toContain("import { McpDialog }")
+    expect(source).toContain("import { TinyfishDialog }")
+    expect(source).toContain("<McpDialog")
+    expect(source).toContain("<TinyfishDialog")
+    expect(source).toContain("isPortableEdition ? (")
   })
 
   it("alimente le runtime d’outils avec la liaison GitHub courante", () => {
