@@ -1,6 +1,6 @@
 // Synchronise la version de package.json (source de vérité) vers les fichiers
-// que Tauri utilise pour le build natif Windows : src-tauri/tauri.conf.json
-// (version du bundle .exe) et src-tauri/Cargo.toml (version du crate Rust).
+// que Tauri utilise pour le build natif Windows : configurations bureau et
+// portable (version/titres) et Cargo.toml (version du crate Rust).
 // Lancé dans beforeBuildCommand (tauri.conf.json) avant chaque `tauri build`.
 // Idempotent : ne réécrit un fichier que si sa version change. Cargo.toml est
 // modifié par remplacement d'une seule ligne → ses fins de ligne CRLF sont
@@ -38,6 +38,23 @@ if (needsWrite) {
   console.log(`sync-version: tauri.conf.json -> ${version} / titre « ${desiredTitle} »`);
 } else {
   console.log(`sync-version: tauri.conf.json déjà à ${version} / titre « ${desiredTitle} »`);
+}
+
+// tauri.portable.conf.json hérite de la version native de la configuration
+// principale, mais remplace la fenêtre complète : son titre doit donc être
+// synchronisé séparément pour ne jamais afficher la version précédente.
+const portableConfPath = path.join(root, "src-tauri", "tauri.portable.conf.json");
+const portableConfRaw = fs.readFileSync(portableConfPath, "utf-8");
+const portableConf = JSON.parse(portableConfRaw.replace(/^\uFEFF/, ""));
+const desiredPortableTitle = `${portableConf.productName} v${version}`;
+if (portableConf.app.windows.some((window) => window.title !== desiredPortableTitle)) {
+  for (const window of portableConf.app.windows) window.title = desiredPortableTitle;
+  const eol = lineEnding(portableConfRaw);
+  const rewritten = JSON.stringify(portableConf, null, 2).replace(/\n/g, eol) + eol;
+  fs.writeFileSync(portableConfPath, rewritten);
+  console.log(`sync-version: tauri.portable.conf.json -> titre « ${desiredPortableTitle} »`);
+} else {
+  console.log(`sync-version: titre portable déjà à « ${desiredPortableTitle} »`);
 }
 
 // Cargo.toml — remplacement de la première ligne `version = "…"` du [package]

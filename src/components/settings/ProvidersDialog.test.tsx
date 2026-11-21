@@ -7,6 +7,14 @@ function hasClass(element: HTMLElement | SVGElement | null, className: string): 
   return element?.classList.contains(className) ?? false
 }
 
+// Édition compilée : le drapeau est lu au rendu, les tests pilotent sa valeur.
+const edition = vi.hoisted(() => ({ portable: false }))
+vi.mock("@/lib/edition", () => ({
+  get isPortableEdition() {
+    return edition.portable
+  },
+}))
+
 const mockExecute = vi.hoisted(() => vi.fn())
 const mockSelect = vi.hoisted(() => vi.fn())
 const mockSecretsGet = vi.hoisted(() => vi.fn())
@@ -399,5 +407,20 @@ describe("ProvidersDialog — suppression fournisseur", () => {
       const deleteCalls = mockExecute.mock.calls.filter(([sql]) => String(sql).includes("DELETE FROM providers"))
       expect(deleteCalls.length).toBe(1)
     })
+  })
+})
+
+describe("ProvidersDialog — édition portable", () => {
+  it("masque l'onglet Modèles local", () => {
+    edition.portable = true
+    renderDialog()
+    expect(screen.queryByRole("button", { name: t.providers.tabLocal })).toBeNull()
+    expect(screen.getByRole("button", { name: t.providers.tabProviders })).not.toBeNull()
+    edition.portable = false
+  })
+
+  it("conserve l'onglet Modèles local en édition bureau", () => {
+    renderDialog()
+    expect(screen.getByRole("button", { name: t.providers.tabLocal })).not.toBeNull()
   })
 })

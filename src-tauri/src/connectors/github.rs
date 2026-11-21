@@ -691,7 +691,7 @@ mod tests {
         // ligne (~60 caractères par ligne). base64 0.22 STANDARD rejette \n :
         // tout fichier réel > ~45 octets échouait en "base64 invalide" alors
         // que le faux serveur de test (fichier court) ne le révélait jamais.
-        let body = vec![
+        let body = [
             "Ceci est un vrai README avec plus de soixante octets pour forcer l'enroulement base64 de GitHub.",
             "Deuxième ligne du README pour vérifier la numérotation après décodage.",
             "Troisième ligne du README pour vérifier la numérotation après décodage.",

@@ -10,7 +10,8 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "build:portable": "tsc && vitest run && vite build --mode portable"
   },
   "dependencies": {
     "@dqbd/tiktoken": "^1.0.22",

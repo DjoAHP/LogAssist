@@ -26,6 +26,8 @@ import { isLockActive } from "@/lib/applock/service"
 import { logger } from "@/lib/logger"
 import { AssistantDialog } from "@/components/settings/AssistantDialog"
 import { McpDialog } from "@/components/settings/McpDialog"
+import { TinyfishDialog } from "@/components/settings/TinyfishDialog"
+import { isPortableEdition } from "@/lib/edition"
 import { UpdateBanner } from "@/components/settings/UpdateBanner"
 
 const DEFAULT_SIDEBAR_WIDTH = 280
@@ -291,7 +293,10 @@ function App() {
                 <p className="text-xs text-muted-foreground">{t.app.subtitle}</p>
               </div>
             </div>
-            <UpdateBanner state={updater.state} onInstall={() => void updater.install()} />
+            {/* Édition portable : aucune mise à jour automatique. */}
+            {!isPortableEdition && (
+              <UpdateBanner state={updater.state} onInstall={() => void updater.install()} />
+            )}
           </div>
         <div className="flex items-center gap-1">
           {/* Dark mode toggle */}
@@ -306,8 +311,8 @@ function App() {
           {/* Séparateur discret */}
            <div className="w-px h-5 bg-border mx-1" aria-hidden="true" />
            <button
-            aria-label={t.mcp.open}
-             title={t.mcp.title}
+            aria-label={isPortableEdition ? t.portableWeb.open : t.mcp.open}
+             title={isPortableEdition ? t.portableWeb.title : t.mcp.title}
              onClick={() => setMcpOpen(true)}
              className="rounded-md p-1.5 hover:bg-foreground/5"
            >
@@ -400,14 +405,24 @@ function App() {
       {assistantOpen && <AssistantDialog onClose={() => setAssistantOpen(false)} conversationId={activeId} />}
       {locked && <LockGate onUnlock={() => setLocked(false)} />}
       {mcpOpen && (
-        <McpDialog
-          snapshot={mcpRuntime}
-          onClose={() => setMcpOpen(false)}
-          onChanged={async () => {
-            await refreshMcpRuntime()
-            // Note: refetchWebAccess is no longer needed as webAccess comes from mcpRuntime
-          }}
-        />
+        isPortableEdition ? (
+          <TinyfishDialog
+            snapshot={mcpRuntime}
+            onClose={() => setMcpOpen(false)}
+            onChanged={async () => {
+              await refreshMcpRuntime()
+            }}
+          />
+        ) : (
+          <McpDialog
+            snapshot={mcpRuntime}
+            onClose={() => setMcpOpen(false)}
+            onChanged={async () => {
+              await refreshMcpRuntime()
+              // Note: refetchWebAccess is no longer needed as webAccess comes from mcpRuntime
+            }}
+          />
+        )
       )}
     </main>
   )

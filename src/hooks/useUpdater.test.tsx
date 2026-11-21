@@ -180,4 +180,15 @@ describe("useUpdater", () => {
     })
     expect(mockCheck).not.toHaveBeenCalled()
   })
+
+  it("édition portable : ne vérifie jamais les mises à jour", async () => {
+    vi.stubEnv("VITE_EDITION", "portable")
+    mockCheck.mockResolvedValue(null)
+    renderHook(() => useUpdater({ graceDelayMs: 0 }))
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0)
+    })
+    expect(mockCheck).not.toHaveBeenCalled()
+  })
 })

@@ -1,5 +1,6 @@
-# Publication d'une release LogAssist : build Windows, signature updater,
-# latest.json et Release GitHub. Déclencheur : tag v* (git tag vX.Y.Z + push).
+# Publication d'une release LogAssist : édition bureau signée pour l'updater
+# et exécutable portable avec empreinte SHA-256 sur la même Release GitHub.
+# Déclencheur : tag v* (git tag vX.Y.Z + push).
 # La clé privée minisign vit exclusivement dans les Secrets GitHub.
 name: Release
 
@@ -44,6 +45,20 @@ jobs:
         env:
           LOGASSIST_RELEASE_TAG: ${{ github.ref_name }}
         run: node scripts/load-release-notes.mjs
+      - name: Build de l'édition portable
+        run: npm run tauri build -- --features portable --config src-tauri/tauri.portable.conf.json
+      - name: Prépare l'artefact portable et son empreinte SHA-256
+        shell: pwsh
+        run: |
+          $source = "src-tauri/target/release/LogAssistPortable.exe"
+          $directory = "release-artifacts/portable"
+          if (-not (Test-Path $source)) {
+            throw "Exécutable portable introuvable : $source"
+          }
+          New-Item -ItemType Directory -Path $directory -Force | Out-Null
+          Copy-Item $source "$directory/LogAssistPortable.exe" -Force
+          $hash = (Get-FileHash "$directory/LogAssistPortable.exe" -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  LogAssistPortable.exe" | Set-Content "$directory/LogAssistPortable.exe.sha256" -Encoding ascii
       - name: Build, signature et publication de la Release
         uses: tauri-apps/tauri-action@v1
         env:
@@ -56,3 +71,12 @@ jobs:
           releaseBody: ${{ steps.release_notes.outputs.body }}
           releaseDraft: false
           prerelease: false
+      - name: Ajoute l'édition portable à la Release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release upload "${{ github.ref_name }}" `
+            "release-artifacts/portable/LogAssistPortable.exe" `
+            "release-artifacts/portable/LogAssistPortable.exe.sha256" `
+            --clobber

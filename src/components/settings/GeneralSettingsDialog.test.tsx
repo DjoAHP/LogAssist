@@ -17,6 +17,14 @@ vi.mock("./ConnectorsPanel", () => ({
   ),
 }))
 
+// Édition compilée : le drapeau est lu au rendu, les tests pilotent sa valeur.
+const edition = vi.hoisted(() => ({ portable: false }))
+vi.mock("@/lib/edition", () => ({
+  get isPortableEdition() {
+    return edition.portable
+  },
+}))
+
 const mockRefreshGithubStatus = vi.hoisted(() => vi.fn().mockResolvedValue(undefined))
 vi.mock("@/hooks/useGithubConnectorStatus", () => ({
   useGithubConnectorStatus: () => ({
@@ -101,5 +109,15 @@ describe("GeneralSettingsDialog — squelette miniature", () => {
     render(<GeneralSettingsDialog onClose={onClose} />)
     fireEvent.click(screen.getByRole("button", { name: t.generalSettings.close }))
     expect(onClose).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe("GeneralSettingsDialog — édition portable", () => {
+  it("masque la catégorie Mises à jour", () => {
+    edition.portable = true
+    render(<GeneralSettingsDialog onClose={() => {}} />)
+    expect(screen.queryByRole("button", { name: t.generalSettings.categories.updates })).toBeNull()
+    expect(screen.getByRole("button", { name: t.generalSettings.categories.lock })).not.toBeNull()
+    edition.portable = false
   })
 })

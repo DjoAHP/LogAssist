@@ -1,6 +1,12 @@
 use keyring::Entry;
 use tauri::command;
 
+// Le service fait partie de la clé d'une entrée du Credential Manager : deux
+// éditions qui partageraient le même service se voleraient leurs secrets.
+// L'édition portable utilise donc un espace strictement distinct.
+#[cfg(feature = "portable")]
+const SERVICE: &str = "LogAssistPortable";
+#[cfg(not(feature = "portable"))]
 const SERVICE: &str = "LogAssist";
 
 fn entry(secret_ref: &str) -> Result<Entry, String> {
@@ -43,4 +49,21 @@ pub fn get_secret(secret_ref: String) -> Result<Option<String>, String> {
 #[command]
 pub fn delete_secret(secret_ref: String) -> Result<(), String> {
     remove_secret(&secret_ref)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[cfg(feature = "portable")]
+    #[test]
+    fn le_service_portable_ne_partage_rien_avec_le_bureau() {
+        assert_eq!(SERVICE, "LogAssistPortable");
+    }
+
+    #[cfg(not(feature = "portable"))]
+    #[test]
+    fn le_service_bureau_reste_inchange() {
+        assert_eq!(SERVICE, "LogAssist");
+    }
 }

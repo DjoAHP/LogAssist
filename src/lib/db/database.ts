@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core"
 import Database from "@tauri-apps/plugin-sql"
+import { appConfigDir } from "@tauri-apps/api/path"
 import {
   SCHEMA_VERSION,
   SCHEMA_V1_STATEMENTS,
@@ -15,6 +16,7 @@ import {
   SCHEMA_V11_STATEMENTS,
   SCHEMA_V12_STATEMENTS,
 } from "./migrations"
+import { isPortableEdition } from "../edition"
 
 let dbPromise: Promise<Database> | null = null
 
@@ -57,7 +59,14 @@ export const executeTransaction = createTransactionExecutor(
 )
 
 async function init(): Promise<Database> {
-  const db = await Database.load("sqlite:logassist.db")
+  // En édition portable, tauri-plugin-sql ne respecte pas appDirectoriesOverride
+  // pour app_config_dir → on résout le chemin absolu via l'API Tauri et on
+  // l'injecte dans la connexion. En bureau, le comportement standard suffit.
+  const connectionString = isPortableEdition
+    ? `sqlite:${(await appConfigDir())}/logassist.db`
+    : "sqlite:logassist.db"
+
+  const db = await Database.load(connectionString)
   // FK cascade garantie explicitement, indépendamment des défauts du driver ;
   // activée AVANT la migration pour que les CREATE TABLE en profitent.
   await db.execute("PRAGMA foreign_keys = ON")
