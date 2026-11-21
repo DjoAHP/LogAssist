@@ -38,6 +38,17 @@ beforeEach(() => {
     ) + "\n",
   )
   writeFileSync(
+    path.join(root, "src-tauri", "tauri.portable.conf.json"),
+    JSON.stringify(
+      {
+        productName: "LogAssist Portable",
+        app: { windows: [{ title: "LogAssist Portable v2.3.0", width: 1200 }] },
+      },
+      null,
+      2,
+    ) + "\n",
+  )
+  writeFileSync(
     path.join(root, "src-tauri", "Cargo.toml"),
     '[package]\nname = "logassist"\nversion = "2.3.0"\n',
   )
@@ -63,5 +74,13 @@ describe("scripts/sync-version.mjs", () => {
       readFileSync(path.join(root, "src-tauri", "tauri.conf.json"), "utf-8"),
     )
     expect(conf.app.windows[0].title).toBe("LogAssist v9.9.9")
+  })
+
+  it("synchronise aussi le titre de l'édition portable", () => {
+    runSync()
+    const conf = JSON.parse(
+      readFileSync(path.join(root, "src-tauri", "tauri.portable.conf.json"), "utf-8"),
+    )
+    expect(conf.app.windows[0].title).toBe("LogAssist Portable v9.9.9")
   })
 })

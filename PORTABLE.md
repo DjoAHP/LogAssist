@@ -20,11 +20,10 @@ modifiée : le drapeau d'édition est figé à la compilation, donc le binaire
 - `VITE_EDITION=portable` (fichier `.env.portable`, chargé par `--mode portable`)
   alimente `src/lib/edition.ts`. Un seul booléen décide de l'UI : composants
   bureau intacts, panneau `TinyfishDialog` à la place de `McpDialog`.
-- `appDirectoriesOverride: "./app-data"` est le mécanisme Tauri 2 prévu pour les
-  applications portables : `app_config_dir`, `app_data_dir` et
-  `app_local_data_dir` pointent dans `<dossier de l'exe>\app-data`, donc la base
-  SQLite (`tauri-plugin-sql` résout `sqlite:logassist.db` via `app_config_dir`)
-  et les données WebView2 suivent la clé USB.
+- `appDirectoriesOverride: "./app-data"` place les répertoires Tauri et les
+  données WebView2 à côté de l'exécutable. Pour SQLite, `database.ts` résout
+  explicitement `appConfigDir()` puis charge son chemin absolu : cette couture
+  contourne le fait que `tauri-plugin-sql` 2.6 n'applique pas seul l'override.
 - `bundle.active: false` : aucun installeur n'est produit, donc l'installation
   existante ne peut pas être écrasée par erreur.
 - `mainBinaryName: "LogAssistPortable"` : le binaire portable porte un nom
@@ -53,8 +52,6 @@ modifiée : le drapeau d'édition est figé à la compilation, donc le binaire
   (~180 Mo) est le lot C.
 - **SQLite sur USB** : réglages de robustesse (mode journal, `synchronous`)
   prévus au lot C.
-- **Titre de fenêtre** : il reste « LogAssist vX.Y.Z » (défini dans la config
-  commune). Cosmétique ; à traiter au lot C si nécessaire.
 - **`dist/`** : `build:portable` reconstruit le dossier `dist/` avec le drapeau
   portable. Rebuilder le bureau (`npm run build`) avant tout build bureau.
 - `app-data` doit être dans un dossier inscriptible : clé USB ou
