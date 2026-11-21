@@ -1,5 +1,6 @@
 //! Pont transactionnel SQLite : un lot IPC s'exécute sur une seule transaction SQLx.
 
+use std::collections::HashMap;
 use std::fmt;
 
 use serde::Deserialize;
@@ -133,6 +134,26 @@ async fn execute_on_pool(
         .map_err(|_| TransactionError::Database)
 }
 
+/// Le plugin indexe les pools par la chaîne passée à `Database.load`.
+/// L'édition bureau utilise la clé relative historique, tandis que l'édition
+/// portable doit fournir un chemin absolu afin d'écrire à côté du binaire.
+/// On conserve la priorité bureau et n'accepte le repli que s'il est univoque.
+fn transaction_pool(instances: &HashMap<String, DbPool>) -> Result<SqlitePool, TransactionError> {
+    if let Some(DbPool::Sqlite(pool)) = instances.get(DATABASE_URL) {
+        return Ok(pool.clone());
+    }
+
+    let mut pools = instances.values().map(|database| {
+        let DbPool::Sqlite(pool) = database;
+        pool
+    });
+    let pool = pools.next().ok_or(TransactionError::Database)?;
+    if pools.next().is_some() {
+        return Err(TransactionError::Database);
+    }
+    Ok(pool.clone())
+}
+
 #[tauri::command]
 pub async fn execute_transaction(
     db_instances: State<'_, DbInstances>,
@@ -141,11 +162,7 @@ pub async fn execute_transaction(
     // Le clone libère le read-lock du registre avant l'ouverture de la transaction.
     let pool = {
         let instances = db_instances.0.read().await;
-        let db = instances
-            .get(DATABASE_URL)
-            .ok_or_else(|| TransactionError::Database.to_string())?;
-        let DbPool::Sqlite(pool) = db;
-        pool.clone()
+        transaction_pool(&instances).map_err(|error| error.to_string())?
     };
 
     execute_on_pool(&pool, statements)
@@ -155,10 +172,13 @@ pub async fn execute_transaction(
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
+
     use serde_json::{Value, json};
     use sqlx::{SqlitePool, query, query_scalar, sqlite::SqlitePoolOptions};
+    use tauri_plugin_sql::DbPool;
 
-    use super::{TransactionError, TransactionStatement, execute_on_pool};
+    use super::{TransactionError, TransactionStatement, execute_on_pool, transaction_pool};
 
     async fn test_pool() -> SqlitePool {
         let pool = SqlitePoolOptions::new()
@@ -193,6 +213,27 @@ mod tests {
             .fetch_one(pool)
             .await
             .expect("le nombre de lignes doit être lisible")
+    }
+
+    #[tokio::test]
+    async fn selects_the_only_portable_absolute_sqlite_pool() {
+        let pool = test_pool().await;
+        let mut instances = HashMap::new();
+        instances.insert(
+            "sqlite:C:/portable/app-data/logassist.db".to_owned(),
+            DbPool::Sqlite(pool.clone()),
+        );
+
+        let selected = transaction_pool(&instances)
+            .expect("le pool SQLite portable unique doit être sélectionné");
+        query(
+            "INSERT INTO transaction_items (id, name, enabled, score) VALUES (1, 'portable', 1, 1.0)",
+        )
+        .execute(&selected)
+        .await
+        .expect("le pool sélectionné doit être utilisable");
+
+        assert_eq!(row_count(&pool).await, 1);
     }
 
     #[tokio::test]
